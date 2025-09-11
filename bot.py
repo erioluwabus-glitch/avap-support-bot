@@ -1,130 +1,208 @@
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import logging
-import json
 import os
+import io
+import json
+import logging
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
+import gspread
+from google.oauth2.service_account import Credentials
+from telegram.error import BadRequest
+from dotenv import load_dotenv
+load_dotenv()
 
-# Bot token and admin ID
-TOKEN = "8263692248:AAFn778zSbSu3Ct4zDY8qNMabHfIZd46NhY"  # Replace with token from @BotFather
-ADMIN_ID = "5794442152"  # Replace with your Telegram ID
+# Set up logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Logging
-logging.basicConfig(level=logging.INFO)
+# Environment variables
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '8263692248:AAFn778zSbSu3Ct4zDY8qNMabHfIZd46NhY')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+ADMIN_ID = int(os.getenv('ADMIN_ID', '5794442152'))  # Replace with actual admin ID, e.g., 123456789
 
 # Google Sheets setup
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-# Get the path of the credentials file from the environment variable
-google_credentials_path = os.getenv("GOOGLE_CREDENTIALS")
-
-# Check if the environment variable is set
-if google_credentials_path is None:
-    raise ValueError("GOOGLE_CREDENTIALS environment variable is not set or is empty.")
-
-try:
-    # Open the credentials file and load the JSON data
-    with open(google_credentials_path, "r") as f:
-        creds_dict = json.load(f)
-except json.JSONDecodeError as e:  # Proper syntax for Python 3.13
-    raise ValueError("Invalid JSON in GOOGLE_CREDENTIALS file.") from e
-creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-client = gspread.authorize(creds)
-assignment_sheet = client.open("AVAPSupport").worksheet("Assignments")
-wins_sheet = client.open("AVAPSupport").worksheet("Wins")
-logging.info("Credentials loaded successfully")
+def get_sheet():
+    try:
+        if GOOGLE_CREDENTIALS:
+            creds_dict = json.loads(GOOGLE_CREDENTIALS)
+        else:
+            # Fallback for local: Read from credentials.json
+            with open('credentials.json', 'r') as f:
+                creds_dict = json.load(f)
+        
+        creds = Credentials.from_service_account_info(creds_dict)
+        client = gspread.authorize(creds)
+        sheet = client.open("AVAPSupport")
+        return sheet.worksheet("Assignments"), sheet.worksheet("Wins")
+    except Exception as e:
+        logger.error(f"Error accessing Google Sheet: {e}")
+        return None, None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Welcome to AVAP Support! DM me for assignments/small wins: /submit [Module] or /sharewin. Post Major Wins/Testimonials in the group with 'Major Win' or 'Testimonial'. Use /status for progress."
-    )
+    """Send a welcome message with instructions."""
+    welcome_text = """
+Welcome to AVAP Support Bot! 📚
+
+Private DM Commands:
+/submit [Module 1-12] [your content] - Submit assignment (text or video).
+/sharewin [your small win] - Share a small win (text or video).
+/status - Check your progress.
+
+In the group: Post "Major Win: [details]" or "Testimonial: [details]" to log it.
+
+Admins: /grade [Username] [Module] [Feedback]
+    """
+    if update.message.chat.type == 'private':
+        await update.message.reply_text(welcome_text)
+    else:
+        # Pin welcome in group if bot is admin
+        try:
+            await update.message.reply_text(welcome_text, disable_notification=True)
+            # Note: Actual pinning requires bot to unpin first, etc. Handle manually or extend.
+        except BadRequest:
+            pass
 
 async def submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /submit in private chats only."""
     if update.message.chat.type != 'private':
-        await update.message.reply_text("Please DM me privately for assignments.")
+        await update.message.reply_text("Use /submit in private DMs only.")
         return
-    args = context.args
-    if not args or not args[0].isdigit() or int(args[0]) not in range(1, 13):
-        await update.message.reply_text("Use /submit [Module Number] (1-12), e.g., /submit 4")
+
+    if not context.args:
+        await update.message.reply_text("Usage: /submit [Module 1-12] [content]")
         return
-    module = args[0]
-    user = update.message.from_user.username or str(update.message.from_user.id)
-    context.user_data['module'] = module
-    context.user_data['mode'] = 'assignment'
-    await update.message.reply_text(f"Received @{user}'s Module {module} assignment. Post it now (text/video/etc.).")
+
+    try:
+        module = context.args[0]
+        if not module.isdigit() or not 1 <= int(module) <= 12:
+            await update.message.reply_text("Module must be a number between 1-12.")
+            return
+
+        content = ' '.join(context.args[1:]) if len(context.args) > 1 else None
+        if not content and not update.message.video and not update.message.text:
+            await update.message.reply_text("Please provide content (text after command or attach video).")
+            return
+
+        # Handle video or text
+        media_url = None
+        if update.message.video:
+            file = await context.bot.get_file(update.message.video.file_id)
+            media_url = file.file_path  # Or download to temp; for Render, store URL
+        elif content:
+            media_url = content  # Text as string
+
+        timestamp = datetime.now().isoformat()
+        row = [update.effective_user.username or update.effective_user.first_name, module, 'Submitted', media_url or content, '', timestamp]
+        assignments_ws.append_row(row)
+        await update.message.reply_text(f"Assignment for Module {module} submitted! ✅")
+    except Exception as e:
+        logger.error(f"Submit error: {e}")
+        await update.message.reply_text("Error submitting. Check logs.")
 
 async def sharewin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /sharewin in private chats only."""
     if update.message.chat.type != 'private':
-        await update.message.reply_text("DM me for small wins. Post Major Wins in the group!")
+        await update.message.reply_text("Use /sharewin in private DMs only.")
         return
-    user = update.message.from_user.username or str(update.message.from_user.id)
-    context.user_data['mode'] = 'small_win'
-    await update.message.reply_text(f"Thanks @{user}! Post your small win now (text/video/etc.).")
 
-async def handle_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user.username or str(update.message.from_user.id)
-    content_type = "Text" if update.message.text else "Video" if update.message.video else "Photo" if update.message.photo else "Link"
-    content = update.message.text or "Media/Link"
-    
-    if update.message.chat.type == 'private':
-        mode = context.user_data.get('mode', '')
-        if mode == 'assignment':
-            module = context.user_data.get('module', 'Unknown')
-            status = "Submitted"
-            grade = "Auto-Graded: 8/10 - Complete" if content_type == "Video" else "Auto-Graded: 6/10 - Submit a video for full marks"
-            assignment_sheet.append_row([user, module, status, content_type, content, grade, update.message.date.isoformat()])
-            logging.info("Sheet updated for command: %s", update.message.text)
-            await update.message.reply_text(f"Stored @{user}'s Module {module} assignment: {content_type}. {grade}. Share a Major Win in the group!")
-            del context.user_data['mode']
-            del context.user_data['module']
-        elif mode == 'small_win':
-            wins_sheet.append_row([user, "Small " + content_type, content, update.message.date.isoformat()])
-            logging.info("Sheet updated for command: %s", update.message.text)
-            await update.message.reply_text(f"Stored @{user}'s small win: {content_type}. Post Major Wins in the group!")
-            del context.user_data['mode']
-    elif update.message.chat.type in ['group', 'supergroup']:
-        if update.message.text and ("major win" in update.message.text.lower() or "testimonial" in update.message.text.lower()):
-            wins_sheet.append_row([user, "Major " + content_type, content, update.message.date.isoformat()])
-            logging.info("Sheet updated for command: %s", update.message.text)
-            await update.message.reply_text(f"Congrats @{user} on the Major Win/Testimonial! Stored for admin review. Everyone, cheer with 👍!")
+    content = ' '.join(context.args) if context.args else None
+    if not content and not update.message.video and not update.message.text:
+        await update.message.reply_text("Usage: /sharewin [your small win] (text or attach video).")
+        return
+
+    media_url = None
+    if update.message.video:
+        file = await context.bot.get_file(update.message.video.file_id)
+        media_url = file.file_path
+    elif content:
+        media_url = content
+
+    timestamp = datetime.now().isoformat()
+    row = [update.effective_user.username or update.effective_user.first_name, 'Small Win', media_url or content, timestamp]
+    wins_ws.append_row(row)
+    await update.message.reply_text("Small win shared! 🎉")
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle group messages for Major Win or Testimonial."""
+    if update.message.chat.type != 'supergroup' and update.message.chat.type != 'group':
+        return
+
+    text = update.message.text or update.message.caption or ''
+    username = update.effective_user.username or update.effective_user.first_name
+    timestamp = datetime.now().isoformat()
+
+    if 'Major Win' in text.upper():
+        row = [username, 'Major Win', text, timestamp]
+        wins_ws.append_row(row)
+        await update.message.reply_text("Major win logged! 🚀")
+    elif 'Testimonial' in text.upper():
+        row = [username, 'Testimonial', text, timestamp]
+        wins_ws.append_row(row)
+        await update.message.reply_text("Testimonial logged! 💬")
 
 async def grade(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.from_user.id != 5794442152:
-        await update.message.reply_text("Admin-only command.")
+    """Admin-only /grade command."""
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
+        await update.message.reply_text("Admin only.")
         return
-    args = context.args
-    if len(args) < 3:
-        await update.message.reply_text("Usage: /grade [Username] [Module] [Score/Feedback]")
+
+    if len(context.args) < 3:
+        await update.message.reply_text("Usage: /grade [Username] [Module] [Feedback]")
         return
-    user, module, feedback = args[0], args[1], " ".join(args[2:])
-    assignment_sheet.append_row([user, module, "Graded", "", feedback, update.message.date.isoformat()])
-    logging.info("Sheet updated for command: /grade")
-    await update.message.reply_text(f"Graded @{user}'s Module {module}: {feedback}. Recorded for certification.")
+
+    username = context.args[0]
+    module = context.args[1]
+    feedback = ' '.join(context.args[2:])
+
+    # Find row in Assignments and update
+    records = assignments_ws.get_all_records()
+    for row_idx, record in enumerate(records, start=2):  # Skip header
+        if record.get('Username') == username and record.get('Module') == module:
+            assignments_ws.update_cell(row_idx, 5, feedback)  # Grade/Feedback column
+            assignments_ws.update_cell(row_idx, 3, 'Graded')  # Status
+            await update.message.reply_text(f"Graded {username} Module {module}: {feedback}")
+            return
+    await update.message.reply_text(f"No submission found for {username} Module {module}.")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.message.from_user.username or str(update.message.from_user.id)
-    assignments = assignment_sheet.get_all_records()
-    user_assignments = [row for row in assignments if row.get("Username") == user]
-    wins = wins_sheet.get_all_records()
-    user_wins = [row for row in wins if row.get("Username") == user]
-    response = f"@{user}'s Status:\nAssignments: {len(user_assignments)} submitted\nSmall Wins: {sum(1 for w in user_wins if 'Small' in w['Type'])} shared\nMajor Wins/Testimonials: {sum(1 for w in user_wins if 'Major' in w['Type'])} shared\nCheck certification progress in admin records."
-    await update.message.reply_text(response)
+    """Show user progress."""
+    username = update.effective_user.username or update.effective_user.first_name
+    records = assignments_ws.get_all_records()
+    wins_records = wins_ws.get_all_records()
 
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"Error: {context.error}")
-    if update:
-        await update.message.reply_text("Error occurred. Try again or contact admin.")
+    completed_modules = [r['Module'] for r in records if r['Username'] == username and r['Status'] == 'Graded']
+    wins_count = len([w for w in wins_records if w['Username'] == username])
+
+    text = f"Your Progress, {username}:\nCompleted Modules: {', '.join(completed_modules) or 'None'}\nWins: {wins_count}"
+    await update.message.reply_text(text)
 
 def main():
-    application = Application.builder().token(TOKEN).build()
+    """Start the bot."""
+    if TELEGRAM_TOKEN == '8263692248:AAFn778zSbSu3Ct4zDY8qNMabHfIZd46NhY':
+        logger.error("Set TELEGRAM_TOKEN env var.")
+        return
+
+    global assignments_ws, wins_ws
+    assignments_ws, wins_ws = get_sheet()
+    if not assignments_ws or not wins_ws:
+        logger.error("Failed to access sheets.")
+        return
+
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("submit", submit))
     application.add_handler(CommandHandler("sharewin", sharewin))
     application.add_handler(CommandHandler("grade", grade))
     application.add_handler(CommandHandler("status", status))
-    application.add_handler(MessageHandler(filters.TEXT | filters.VIDEO | filters.PHOTO | filters.Document.ALL, handle_submission))
-    application.add_error_handler(error_handler)
-    application.run_polling()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.GROUPS, handle_group_message))
+    application.add_handler(MessageHandler(filters.VIDEO, handle_group_message))  # For video in group; extend for DM if needed
 
-if __name__ == "__main__":
+    # For media in commands, it's handled inline; add if separate handler needed
+
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
     main()
