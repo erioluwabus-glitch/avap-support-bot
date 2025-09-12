@@ -105,10 +105,14 @@ ask_confirm = ["Question launched! Our genius squad is brewing the perfect respo
 answer_sent = ["Wisdom dispatched and archived! Fueling future quests with your insight! 📌", "Answer shared—community leveled up! You're building a powerhouse of knowledge! 🌱"]
 
 # Keyboard for commands - fixed buttons after /start
-main_keyboard = ReplyKeyboardMarkup([
-    [KeyboardButton("/submit"), KeyboardButton("/sharewin")],
-    [KeyboardButton("/status"), KeyboardButton("/ask")]
-], resize_keyboard=True, one_time_keyboard=False)
+main_keyboard = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("/submit"), KeyboardButton("/sharewin")],
+        [KeyboardButton("/status"), KeyboardButton("/ask")],
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=False,
+)
 
 # /start command
 async def start_command(update: Update, context: CallbackContext) -> None:
@@ -512,43 +516,43 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))  # Support group wins
     application.add_handler(MessageHandler(filters.ALL, questions_group_handler))  # Questions group replies
 
-   # FastAPI setup (fixes 404)
-fastapi_app = FastAPI()
+    # FastAPI setup (fixes 404)
+    fastapi_app = FastAPI()
 
-@fastapi_app.get("/")
-async def root():
-    return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot."}
+    @fastapi_app.get("/")
+    async def root():
+        return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot."}
 
-@fastapi_app.get("/health")
-async def health():
-    return "OK"  # For pinger to prevent sleeping
+    @fastapi_app.get("/health")
+    async def health():
+        return "OK"  # For pinger to prevent sleeping
 
-WEBHOOK_PATH = "/webhook"
-@fastapi_app.post(WEBHOOK_PATH)
-async def telegram_webhook(request: Request):
-    update_json = await request.json()
-    if update_json:
-        update = Update.de_json(update_json, application.bot)
-        await application.process_update(update)
-    return Response(status_code=200)
+    WEBHOOK_PATH = "/webhook"
+    @fastapi_app.post(WEBHOOK_PATH)
+    async def telegram_webhook(request: Request):
+        update_json = await request.json()
+        if update_json:
+            update = Update.de_json(update_json, application.bot)
+            await application.process_update(update)
+        return Response(status_code=200)
 
-# Run logic: Polling locally, webhook on Render
-is_render = os.getenv('RENDER') == 'true'
-port = int(os.environ.get('PORT', 10000))
-base_url = os.getenv('WEBHOOK_BASE_URL', f'http://localhost:{port}')
-webhook_url = f"{base_url}{WEBHOOK_PATH}"
+    # Run logic: Polling locally, webhook on Render
+    is_render = os.getenv('RENDER') == 'true'
+    port = int(os.environ.get('PORT', 10000))
+    base_url = os.getenv('WEBHOOK_BASE_URL', f'http://localhost:{port}')
+    webhook_url = f"{base_url}{WEBHOOK_PATH}"
 
-if is_render:
-    logger.info("Running in webhook mode on Render.")
-    import asyncio
-    async def set_webhook():
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
-    asyncio.run(set_webhook())
-    uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
-else:
-    logger.info("Running in polling mode locally.")
-    application.run_polling()
+    if is_render:
+        logger.info("Running in webhook mode on Render.")
+        import asyncio
+        async def set_webhook():
+            await application.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+        asyncio.run(set_webhook())
+        uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
+    else:
+        logger.info("Running in polling mode locally.")
+        application.run_polling()
 
 if __name__ == '__main__':
     main()
