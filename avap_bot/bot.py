@@ -4,26 +4,14 @@ import logging
 import datetime
 import pytz
 import random
-import pkg_resources
-from http.server import BaseHTTPRequestHandler, HTTPServer
-from telegram import Bot
-from threading import Thread
-from health_check import run_health_check_server  # Import the health check function
-
-
-# Get installed packages
-installed_packages = pkg_resources.working_set
-installed_packages_list = sorted([f"{pkg.key}=={pkg.version}" for pkg in installed_packages])
-
-# Print the list of installed packages
-print(installed_packages_list)
-
+import difflib  # Added for FAQ similarity matching
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
-
 import gspread
 from google.oauth2 import service_account
+from fastapi import FastAPI, Request, Response  # Added for multi-route handling (404 fix)
+import uvicorn  # Added for running FastAPI server
 
 # States for conversations
 MODULE, MEDIA_TYPE, MEDIA_UPLOAD = range(3)
@@ -106,23 +94,6 @@ async def forward_to_group(bot, group_id: int, text: str, photo=None, video=None
     except Exception as e:
         logger.error(f"Error forwarding to group {group_id}: {e}")
 
-def main():
-    """Start the bot."""
-    application = Application.builder().token(bot_token).build()
-
-    # Start the health check server in a separate thread (non-blocking)
-    health_thread = Thread(target=run_health_check_server)
-    health_thread.daemon = True  # Daemon thread will automatically exit when the main program ends
-    health_thread.start()
-
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-
-    # Run the bot
-    application.run_polling()
-
-
 # Response variants - more captivating, energetic, motivational
 start_messages = ["Buckle up, AVAP champion! 🚀 Dive into your epic journey with these game-changing tools:", 
                   "Ignite your AVAP potential! 🌟 Unleash your power with these exciting features to dominate your goals:"]
@@ -142,6 +113,22 @@ main_keyboard = ReplyKeyboardMarkup([
 # /start command
 async def start_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(random.choice(start_messages), reply_markup=main_keyboard)
+
+# Added simple help_command (was referenced but missing; customize as needed)
+async def help_command(update: Update, context: CallbackContext) -> None:
+    help_text = """
+AVAP Bot Commands:
+- /start: Welcome and menu
+- /submit: Submit assignment (Module 1-12, media)
+- /sharewin: Share small win (text/video/image)
+- /status: View progress
+- /ask or #question: Ask a question (DM or support group)
+- /grade (admin): Grade submission
+- /get_submission (admin): Retrieve submission
+
+Group: Post "Major Win" or "Testimonial" to log.
+    """
+    await update.message.reply_text(help_text, reply_markup=main_keyboard)
 
 # /submit conversation - sequence flow, auto-forward, record, engaging prompts
 async def submit_start(update: Update, context: CallbackContext) -> int:
@@ -456,10 +443,11 @@ async def questions_group_handler(update: Update, context: CallbackContext) -> N
         logger.error(f"Error replying to question: {e}")
 
 def main() -> None:
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    application = Application.builder().token(TELEGRAM_TOKEN).build()  # Fixed: TELEGRAM_TOKEN
 
     # /start
     application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("help", help_command))  # Added handler for referenced command
 
     # /submit conversation
     submit_conv = ConversationHandler(
@@ -524,17 +512,46 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))  # Support group wins
     application.add_handler(MessageHandler(filters.ALL, questions_group_handler))  # Questions group replies
 
-    # Webhook or polling
-    port = int(os.environ.get('PORT', 0))
-    if port:
-        # Render: Use webhook
-        webhook_url = os.getenv('RENDER_EXTERNAL_URL') + '/' + TELEGRAM_TOKEN  # Set RENDER_EXTERNAL_URL in Render env if needed
-        application.run_webhook(listen='0.0.0.0', port=port, url_path=TELEGRAM_TOKEN, webhook_url=webhook_url)
+    # FastAPI setup for routes (fixes 404; handles /, /health, /webhook)
+    fastapi_app = FastAPI()
+
+    @fastapi_app.get("/")
+    async def root():
+        return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot. Check /health for status."}
+
+    @fastapi_app.get("/health")
+    async def health():
+        return "OK"  # For UptimeRobot pinger to prevent sleeping
+
+    WEBHOOK_PATH = "/webhook"
+    @fastapi_app.post(WEBHOOK_PATH)
+    async def telegram_webhook(request: Request):
+        update_json = await request.json()
+        if update_json:
+            update = Update.de_json(update_json, application.bot)
+            await application.process_update(update)
+        return Response(status_code=200)
+
+    # Set webhook URL
+    port = int(os.environ.get('PORT', 10000))
+    base_url = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{port}')
+    webhook_url = f"{base_url}{WEBHOOK_PATH}"
+
+    # Set webhook on startup
+    import asyncio
+    async def set_webhook():
+        await application.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+
+    asyncio.run(set_webhook())
+
+    # Run: Webhook on Render (via FastAPI), polling locally
+    if port and port != 10000:  # Render sets PORT; local uses default
         logger.info("Running in webhook mode on Render.")
+        uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
     else:
-        # Local: Polling
-        application.run_polling()
         logger.info("Running in polling mode locally.")
+        application.run_polling()
 
 if __name__ == '__main__':
     main()
