@@ -3,3 +3,4 @@ gspread==6.1.0  # Updated to latest stable
 google-auth==2.35.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
+python-dotenv==0.21.1
