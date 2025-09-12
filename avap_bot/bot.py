@@ -4,10 +4,15 @@ import logging
 import datetime
 import pytz
 import random
-import difflib
-import pip
-installed_packages = pip.get_installed_distributions()
-print("Installed packages:", installed_packages)
+import pkg_resources
+
+# Get installed packages
+installed_packages = pkg_resources.working_set
+installed_packages_list = sorted([f"{pkg.key}=={pkg.version}" for pkg in installed_packages])
+
+# Print the list of installed packages
+print(installed_packages_list)
+
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
