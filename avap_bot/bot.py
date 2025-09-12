@@ -519,9 +519,9 @@ def main() -> None:
     async def root():
         return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot."}
 
-    @fastapi_app.get("/health")
+    @fastapi_app.get("/health", methods=["GET", "HEAD"])
     async def health():
-        return "OK"  # For pinger to prevent sleeping
+        return "OK"
 
     WEBHOOK_PATH = "/webhook"
     @fastapi_app.post(WEBHOOK_PATH)
