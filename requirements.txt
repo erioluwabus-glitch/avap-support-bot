@@ -6,3 +6,5 @@ google-auth-httplib2==0.2.0
 python-dotenv==0.21.1
 pytz
 setuptools
+fastapi==0.115.0
+uvicorn==0.30.6
