@@ -5,6 +5,9 @@ import datetime
 import pytz
 import random
 import difflib
+import pip
+installed_packages = pip.get_installed_distributions()
+print("Installed packages:", installed_packages)
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
