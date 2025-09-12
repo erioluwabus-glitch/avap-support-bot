@@ -443,11 +443,11 @@ async def questions_group_handler(update: Update, context: CallbackContext) -> N
         logger.error(f"Error replying to question: {e}")
 
 def main() -> None:
-    application = Application.builder().token(TELEGRAM_TOKEN).build()  # Fixed: TELEGRAM_TOKEN
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # /start
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))  # Added handler for referenced command
+    application.add_handler(CommandHandler("help", help_command))
 
     # /submit conversation
     submit_conv = ConversationHandler(
@@ -512,16 +512,16 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))  # Support group wins
     application.add_handler(MessageHandler(filters.ALL, questions_group_handler))  # Questions group replies
 
-    # FastAPI setup for routes (fixes 404; handles /, /health, /webhook)
+    # FastAPI setup (fixes 404)
     fastapi_app = FastAPI()
 
     @fastapi_app.get("/")
     async def root():
-        return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot. Check /health for status."}
+        return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot."}
 
     @fastapi_app.get("/health")
     async def health():
-        return "OK"  # For UptimeRobot pinger to prevent sleeping
+        return "OK"  # For pinger to prevent sleeping
 
     WEBHOOK_PATH = "/webhook"
     @fastapi_app.post(WEBHOOK_PATH)
@@ -532,22 +532,19 @@ def main() -> None:
             await application.process_update(update)
         return Response(status_code=200)
 
-    # Set webhook URL
+    # Run logic: Polling locally, webhook on Render
+    is_render = os.getenv('RENDER') == 'true'
     port = int(os.environ.get('PORT', 10000))
-    base_url = os.getenv('RENDER_EXTERNAL_URL', f'http://localhost:{port}')
+    base_url = os.getenv('WEBHOOK_BASE_URL', f'http://localhost:{port}')
     webhook_url = f"{base_url}{WEBHOOK_PATH}"
 
-    # Set webhook on startup
-    import asyncio
-    async def set_webhook():
-        await application.bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
-
-    asyncio.run(set_webhook())
-
-    # Run: Webhook on Render (via FastAPI), polling locally
-    if port and port != 10000:  # Render sets PORT; local uses default
+    if is_render:
         logger.info("Running in webhook mode on Render.")
+        import asyncio
+        async def set_webhook():
+            await application.bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+        asyncio.run(set_webhook())
         uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
     else:
         logger.info("Running in polling mode locally.")
