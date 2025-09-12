@@ -20,7 +20,7 @@ USERNAME_GET, MODULE_GET = range(2)
 QUESTION = range(1)
 
 # Setup logging first
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicBaseConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables after logging
@@ -105,14 +105,10 @@ ask_confirm = ["Question launched! Our genius squad is brewing the perfect respo
 answer_sent = ["Wisdom dispatched and archived! Fueling future quests with your insight! 📌", "Answer shared—community leveled up! You're building a powerhouse of knowledge! 🌱"]
 
 # Keyboard for commands - fixed buttons after /start
-main_keyboard = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("/submit"), KeyboardButton("/sharewin")],
-        [KeyboardButton("/status"), KeyboardButton("/ask")],
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=False,
-)
+main_keyboard = ReplyKeyboardMarkup([
+    [KeyboardButton("/submit"), KeyboardButton("/sharewin")],
+    [KeyboardButton("/status"), KeyboardButton("/ask")]
+], resize_keyboard=True, one_time_keyboard=False)
 
 # /start command
 async def start_command(update: Update, context: CallbackContext) -> None:
@@ -546,6 +542,7 @@ def main() -> None:
         logger.info("Running in webhook mode on Render.")
         import asyncio
         async def set_webhook():
+            await application.initialize()
             await application.bot.set_webhook(url=webhook_url)
             logger.info(f"Webhook set to {webhook_url}")
         asyncio.run(set_webhook())
