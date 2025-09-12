@@ -119,23 +119,6 @@ main_keyboard = ReplyKeyboardMarkup([
     [KeyboardButton("/status"), KeyboardButton("/ask")]
 ], resize_keyboard=True, one_time_keyboard=False)
 
-# Health Check Handler
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            # Respond with 200 OK and a simple JSON
-            self.send_response(200)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"status": "ok"}')  # Simple health check response
-
-# Run the HTTP server
-def run_health_check_server(port=80):
-    server_address = ('', port)  # Listen on port 80 for the health check
-    httpd = HTTPServer(server_address, HealthCheckHandler)
-    print(f"Health check server running on port {port}...")
-    httpd.serve_forever()
-
 # /start command
 async def start_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(random.choice(start_messages), reply_markup=main_keyboard)
