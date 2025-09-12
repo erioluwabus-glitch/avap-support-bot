@@ -45,7 +45,7 @@ else:
     logger.warning("ASSIGNMENTS_GROUP_ID not set - forwarding to assignments group disabled.")
     ASSIGNMENTS_GROUP_ID = None
 
-QUESTIONS_GROUP_ID = os.getenv('QUESTIONS_GROUP_ID') or '-4981671196'
+QUESTIONS_GROUP_ID = os.getenv('QUESTIONS_GROUP_ID') or '-1002910055936'
 if QUESTIONS_GROUP_ID:
     try:
         QUESTIONS_GROUP_ID = int(QUESTIONS_GROUP_ID)
