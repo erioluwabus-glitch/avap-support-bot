@@ -516,11 +516,11 @@ def main() -> None:
     fastapi_app = FastAPI()
     
     @fastapi_app.get("/")
-    async def root():
+async def root():
     return {"message": "AVAP Support Bot is active! 🚀 Interact via Telegram @avaps_bot."}
 
     @fastapi_app.get("/health")
-    async def health():
+async def health():
     return "OK"  # For pinger to prevent sleeping
 
     WEBHOOK_PATH = "/webhook"
