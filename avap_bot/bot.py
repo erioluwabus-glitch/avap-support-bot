@@ -7,6 +7,9 @@ import random
 import pkg_resources
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from telegram import Bot
+from threading import Thread
+from health_check import run_health_check_server  # Import the health check function
+
 
 # Get installed packages
 installed_packages = pkg_resources.working_set
@@ -102,6 +105,23 @@ async def forward_to_group(bot, group_id: int, text: str, photo=None, video=None
         logger.info(f"Forwarded to group {group_id} successfully.")
     except Exception as e:
         logger.error(f"Error forwarding to group {group_id}: {e}")
+
+def main():
+    """Start the bot."""
+    application = Application.builder().token(bot_token).build()
+
+    # Start the health check server in a separate thread (non-blocking)
+    health_thread = Thread(target=run_health_check_server)
+    health_thread.daemon = True  # Daemon thread will automatically exit when the main program ends
+    health_thread.start()
+
+    # Command handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+
+    # Run the bot
+    application.run_polling()
+
 
 # Response variants - more captivating, energetic, motivational
 start_messages = ["Buckle up, AVAP champion! 🚀 Dive into your epic journey with these game-changing tools:", 
