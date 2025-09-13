@@ -15,7 +15,19 @@ from google.oauth2 import service_account
 from fastapi import FastAPI, Request, Response
 import uvicorn
 import requests
-from flask import Flask, request
+from threading import Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+def run_health_check_server():
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'OK')
+
+    server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
+    server.serve_forever()
 
 # States for conversations
 MODULE, MEDIA_TYPE, MEDIA_UPLOAD = range(3)
@@ -54,6 +66,7 @@ else:
     logger.warning("QUESTIONS_GROUP_ID not set - questions forwarding disabled.")
     QUESTIONS_GROUP_ID = None
 
+VERIFICATION_GROUP_ID = os.getenv('VERIFICATION_GROUP_ID') or '-100...your_verification_group_id'  # Add your admin verification group ID
 SUPPORT_GROUP_TITLE = "AVAP Support Community"  # For major wins/testimonials
 
 GOOGLE_CREDENTIALS_STR = os.getenv('GOOGLE_CREDENTIALS')
@@ -120,12 +133,12 @@ async def add_to_systeme(name, email, phone):
         "email": email,
         "name": name,
         "phone": phone,
-        "tags": ["verified_student"]
+        "tags": ["verified_student"]  # Triggers your course automation
     }
     try:
         response = requests.post(url, headers=headers, json=data)
         if response.status_code in [200, 201]:
-            logger.info("Added to Systeme.io.")
+            logger.info("Added to Systeme.io with tag.")
         else:
             logger.error(f"Systeme.io error: {response.text}")
     except Exception as e:
@@ -158,7 +171,7 @@ inline_start_keyboard = InlineKeyboardMarkup([
 async def start_command(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(random.choice(start_messages), reply_markup=inline_start_keyboard)
 
-# Added simple help_command (was referenced but missing; customize as needed)
+# /help command
 async def help_command(update: Update, context: CallbackContext) -> None:
     help_text = """
 AVAP Bot Commands:
@@ -239,267 +252,4 @@ async def cancel(update: Update, context: CallbackContext) -> int:
 
 # /sharewin conversation - sequence, media options, engaging
 async def sharewin_start(update: Update, context: CallbackContext) -> int:
-    keyboard = ReplyKeyboardMarkup([[KeyboardButton("Text"), KeyboardButton("Video"), KeyboardButton("Image")]], resize_keyboard=True)
-    await update.message.reply_text("Time to brag! How are you sharing your epic win—Text, Video, or Image?", reply_markup=keyboard)
-    return MEDIA_TYPE
-
-async def sharewin_media_type(update: Update, context: CallbackContext) -> int:
-    media_type = update.message.text.lower()
-    if media_type not in ['text', 'video', 'image']:
-        await update.message.reply_text("Select your victory format: Text, Video, or Image?")
-        return MEDIA_TYPE
-    context.user_data['media_type'] = media_type
-    if media_type == 'text':
-        await update.message.reply_text("Spill the thrilling details of your win:", reply_markup=ReplyKeyboardRemove())
-    else:
-        await update.message.reply_text(f"Show us the glory! Drop your {media_type.upper()} here:", reply_markup=ReplyKeyboardRemove())
-    return MEDIA_UPLOAD
-
-async def sharewin_media_upload(update: Update, context: CallbackContext) -> int:
-    username = get_username(update.message.from_user)
-    media_type = context.user_data['media_type']
-    content = ""
-    if media_type == 'text':
-        content = update.message.text
-    elif media_type == 'image' and update.message.photo:
-        file_id = update.message.photo[-1].file_id
-        content = f"(Photo file_id: {file_id})"
-    elif media_type == 'video' and update.message.video:
-        file_id = update.message.video.file_id
-        content = f"(Video file_id: {file_id})"
-    else:
-        await update.message.reply_text(f"Awaiting your {media_type.upper()} win proof!")
-        return MEDIA_UPLOAD
-
-    if not content:
-        await update.message.reply_text("Can't celebrate an empty win—add some flair!")
-        return MEDIA_UPLOAD
-
-    timestamp = get_timestamp()
-    try:
-        wins_sheet.append_row([username, "Small Win", content, timestamp])
-        await update.message.reply_text(random.choice(win_confirm), reply_markup=main_keyboard)
-    except Exception as e:
-        logger.error(f"Error in sharewin: {e}")
-        await update.message.reply_text("Win share hiccup—retry the glory!")
-    return ConversationHandler.END
-
-# /status - engaging progress report
-async def status(update: Update, context: CallbackContext) -> None:
-    username = get_username(update.message.from_user)
-    try:
-        assignments = assignments_sheet.get_all_values()
-        completed = [row[1] for row in assignments[1:] if row[0] == username and row[2] == "Graded"]
-        wins = wins_sheet.get_all_values()
-        total_wins = len([row for row in wins[1:] if row[0] == username])
-        message = "Behold Your Conquest Map 📈:\n"
-        message += f"Modules Vanquished: {', '.join(completed) or 'Gear up for battle!'}\n"
-        message += f"Win Streak: {total_wins} 🏅 - You're forging a legacy!"
-        await update.message.reply_text(message, reply_markup=main_keyboard)
-    except Exception as e:
-        logger.error(f"Error in status: {e}")
-        await update.message.reply_text("Progress scan jammed—reload soon!")
-
-# /grade conversation - sequence, admin only, captivating
-async def grade_start(update: Update, context: CallbackContext) -> int:
-    if update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("This power is for AVAP masters only!")
-        return ConversationHandler.END
-    await update.message.reply_text("Whose creation are you elevating? (Enter username)", reply_markup=ReplyKeyboardRemove())
-    return USERNAME
-
-async def grade_username(update: Update, context: CallbackContext) -> int:
-    context.user_data['username'] = update.message.text
-    await update.message.reply_text("Which module realm? (1-12)")
-    return MODULE_GRADE
-
-async def grade_module(update: Update, context: CallbackContext) -> int:
-    try:
-        module = int(update.message.text)
-        if not 1 <= module <= 12:
-            raise ValueError
-        context.user_data['module'] = module
-        await update.message.reply_text("Unleash your wisdom— what's the electrifying feedback?")
-        return FEEDBACK
-    except ValueError:
-        await update.message.reply_text("Realm must be 1-12—choose wisely!")
-        return MODULE_GRADE
-
-async def grade_feedback(update: Update, context: CallbackContext) -> int:
-    feedback = update.message.text
-    username = context.user_data['username']
-    module = context.user_data['module']
-    try:
-        assignments = assignments_sheet.get_all_values()
-        found = False
-        for i, row in enumerate(assignments[1:], start=2):
-            if row[0] == username and int(row[1]) == module and row[2] == "Submitted":
-                assignments_sheet.update_cell(i, 3, "Graded")
-                assignments_sheet.update_cell(i, 5, feedback)
-                found = True
-                break
-        if found:
-            await update.message.reply_text(random.choice(grade_confirm), reply_markup=main_keyboard)
-        else:
-            await update.message.reply_text("No realm to elevate—verify the quest!")
-    except Exception as e:
-        logger.error(f"Error grading: {e}")
-        await update.message.reply_text("Elevation error—retry the magic.")
-    return ConversationHandler.END
-
-# /get_submission conversation - sequence, admin only
-async def get_submission_start(update: Update, context: CallbackContext) -> int:
-    if update.message.from_user.id != ADMIN_ID:
-        await update.message.reply_text("Secret archives for admins only!")
-        return ConversationHandler.END
-    await update.message.reply_text("Whose masterpiece are you summoning? (Username)", reply_markup=ReplyKeyboardRemove())
-    return USERNAME_GET
-
-async def get_submission_username(update: Update, context: CallbackContext) -> int:
-    context.user_data['username'] = update.message.text
-    await update.message.reply_text("From which module quest?")
-    return MODULE_GET
-
-async def get_submission_module(update: Update, context: CallbackContext) -> int:
-    try:
-        module = int(update.message.text)
-        username = context.user_data['username']
-        assignments = assignments_sheet.get_all_values()
-        for row in assignments[1:]:
-            if row[0] == username and int(row[1]) == module:
-                content = row[3]
-                await update.message.reply_text(f"Summoning {username}'s Module {module} triumph: {content}", reply_markup=main_keyboard)
-                if '(Video file_id:' in content:
-                    file_id = content.split('file_id: ')[1].rstrip(')')
-                    await context.bot.send_video(update.message.chat.id, file_id)
-                elif '(Photo file_id:' in content:
-                    file_id = content.split('file_id: ')[1].rstrip(')')
-                    await context.bot.send_photo(update.message.chat.id, file_id)
-                return ConversationHandler.END
-        await update.message.reply_text("No triumph found—search deeper!", reply_markup=main_keyboard)
-    except Exception as e:
-        logger.error(f"Error getting submission: {e}")
-        await update.message.reply_text("Summoning failed—try again.")
-    return ConversationHandler.END
-
-# Group handler for major wins/testimonials - engaging replies
-async def group_handler(update: Update, context: CallbackContext) -> None:
-    if update.message.chat.title != SUPPORT_GROUP_TITLE:
-        return
-
-    text = update.message.text.lower() if update.message.text else ""
-    content = update.message.text or ""
-    type_ = None
-    photo = update.message.photo[-1].file_id if update.message.photo else None
-    video = update.message.video.file_id if update.message.video else None
-
-    major_keywords = ["major win", "big win", "huge achievement", "major success", "congrats to me", "i did it", "achievement unlocked", "proud moment", "celebration time"]
-    testimonial_keywords = ["testimonial", "review", "feedback", "course review"]
-
-    if any(kw in text for kw in major_keywords):
-        type_ = "Major Win"
-    elif any(kw in text for kw in testimonial_keywords):
-        type_ = "Testimonial"
-
-    if not type_:
-        return
-
-    if photo:
-        content += f" (Photo file_id: {photo})"
-    elif video:
-        content += f" (Video file_id: {video})"
-
-    username = get_username(update.message.from_user)
-    timestamp = get_timestamp()
-
-    try:
-        wins_sheet.append_row([username, type_, content, timestamp])
-        await update.message.reply_text(random.choice(logged_confirm))
-    except Exception as e:
-        logger.error(f"Error logging group: {e}")
-
-# /ask or #question - works in DM and support group, forwards properly
-async def ask_start(update: Update, context: CallbackContext) -> int:
-    if update.message.chat.type == 'group' and update.message.chat.title != SUPPORT_GROUP_TITLE:
-        return ConversationHandler.END
-    await update.message.reply_text("Fire away with your quest for knowledge! What's the question?", reply_markup=ReplyKeyboardRemove())
-    return QUESTION
-
-async def ask_question(update: Update, context: CallbackContext) -> int:
-    question = update.message.text
-    username = get_username(update.message.from_user)
-    user_id = update.message.from_user.id
-    try:
-        faqs = faq_sheet.get_all_values()
-        for row in faqs[1:]:
-            similarity = difflib.SequenceMatcher(None, question.lower(), row[0].lower()).ratio()
-            if similarity > 0.8:
-                answer = row[1]
-                await update.message.reply_text(f"Unveiling from the archives: {answer}")
-                if row[2] == 'video':
-                    await context.bot.send_video(update.message.chat.id, row[3])
-                elif row[2] == 'voice':
-                    await context.bot.send_voice(update.message.chat.id, row[3])
-                return ConversationHandler.END
-
-        # Forward to questions group if set
-        forward_text = f"New quest from {username} (ID: {user_id}): {question}"
-        await forward_to_group(context.bot, QUESTIONS_GROUP_ID, forward_text)
-        await update.message.reply_text(random.choice(ask_confirm), reply_markup=main_keyboard)
-    except Exception as e:
-        logger.error(f"Error in ask: {e}")
-        await update.message.reply_text("Question quest hit a snag—retry!")
-    return ConversationHandler.END
-
-# Questions group handler for admin replies - supports media
-async def questions_group_handler(update: Update, context: CallbackContext) -> None:
-    if update.message.chat.id != QUESTIONS_GROUP_ID or update.message.from_user.id != ADMIN_ID:
-        return
-    if not update.message.reply_to_message:
-        return
-
-    reply_text = update.message.reply_to_message.text
-    if "New quest from" not in reply_text:
-        return
-
-    user_id_str = reply_text.split("(ID: ")[1].split("):")[0]
-    user_id = int(user_id_str)
-    question = reply_text.split(": ")[1]
-
-    answer = update.message.text if update.message.text else ""
-    video = update.message.video.file_id if update.message.video else None
-    voice = update.message.voice.file_id if update.message.voice else None
-    answer_type = 'video' if video else 'voice' if voice else 'text'
-    file_id = video or voice
-
-    try:
-        await context.bot.send_message(user_id, f"Behold the answer to your quest: {answer}")
-        if file_id:
-            if answer_type == 'video':
-                await context.bot.send_video(user_id, file_id)
-            elif answer_type == 'voice':
-                await context.bot.send_voice(user_id, file_id)
-
-        timestamp = get_timestamp()
-        faq_sheet.append_row([question, answer, answer_type, file_id or '', "", timestamp])
-        await update.message.reply_text(random.choice(answer_sent))
-    except Exception as e:
-        logger.error(f"Error replying to question: {e}")
-
-def main() -> None:
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Start the health check server in a separate thread (non-blocking)
-    health_thread = Thread(target=run_health_check_server)
-    health_thread.daemon = True  # Daemon thread will automatically exit when the main program ends
-    health_thread.start()
-
-    # Command handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-
-    # Run the bot
-    application.run_polling()
-
-if __name__ == '__main__':
-    main()
+    keyboard
