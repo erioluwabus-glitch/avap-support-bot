@@ -497,6 +497,16 @@ async def questions_group_handler(update: Update, context: CallbackContext) -> N
     answer_type = 'video' if video else 'voice' if voice else 'text'
     file_id = video or voice
 
+    @flask_app.route('/whatsapp_webhook', methods=['POST'])
+def whatsapp_webhook():
+    data = request.json
+    details_hash = data.get('hash')
+    if details_hash:
+        cursor.execute("INSERT OR IGNORE INTO verifications (hash) VALUES (?)", (details_hash,))
+        conn.commit()
+        logger.info("Student data added from WhatsApp.")
+    return 'OK', 200
+    
     try:
         await context.bot.send_message(chat_id, f"Behold the answer to your quest: {answer}")
         if file_id:
