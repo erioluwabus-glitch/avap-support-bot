@@ -4,20 +4,24 @@ import logging
 import datetime
 import pytz
 import random
-import difflib  # Added for FAQ similarity matching
+import difflib
+import hashlib
+import sqlite3
 from dotenv import load_dotenv
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
 import gspread
 from google.oauth2 import service_account
-from fastapi import FastAPI, Request, Response  # Added for multi-route handling (404 fix)
-import uvicorn  # Added for running FastAPI server
+from fastapi import FastAPI, Request, Response
+import uvicorn
+import requests
 
 # States for conversations
 MODULE, MEDIA_TYPE, MEDIA_UPLOAD = range(3)
 USERNAME, MODULE_GRADE, FEEDBACK = range(3)
 USERNAME_GET, MODULE_GET = range(2)
 QUESTION = range(1)
+VERIFY_NAME, VERIFY_PHONE, VERIFY_EMAIL = range(3)
 
 # Setup logging first
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -52,6 +56,8 @@ else:
 SUPPORT_GROUP_TITLE = "AVAP Support Community"  # For major wins/testimonials
 
 GOOGLE_CREDENTIALS_STR = os.getenv('GOOGLE_CREDENTIALS')
+SYSTEME_API_KEY = os.getenv('SYSTEME_API_KEY')
+LANDING_PAGE_LINK = os.getenv('LANDING_PAGE_LINK', 'https://your-landing.com/walkthrough')
 
 # Load Google credentials
 try:
@@ -69,6 +75,14 @@ try:
 except Exception as e:
     logger.error(f"Error connecting to Google Sheets: {e}")
     raise
+
+# Database setup for verification
+DB_PATH = os.getenv('DB_PATH', 'student_data.db')
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute('''CREATE TABLE IF NOT EXISTS verifications
+                  (hash TEXT PRIMARY KEY, telegram_id INTEGER, claimed BOOLEAN DEFAULT FALSE)''')
+conn.commit()
 
 # Helper functions
 def get_username(user):
@@ -94,6 +108,28 @@ async def forward_to_group(bot, group_id: int, text: str, photo=None, video=None
     except Exception as e:
         logger.error(f"Error forwarding to group {group_id}: {e}")
 
+async def add_to_systeme(name, email, phone):
+    api_key = SYSTEME_API_KEY
+    if not api_key:
+        logger.error("Systeme.io API key missing.")
+        return
+    url = "https://api.systeme.io/v1/contacts"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    data = {
+        "email": email,
+        "name": name,
+        "phone": phone,
+        "tags": ["verified_student"]
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code in [200, 201]:
+            logger.info("Added to Systeme.io.")
+        else:
+            logger.error(f"Systeme.io error: {response.text}")
+    except Exception as e:
+        logger.error(f"Systeme.io request error: {e}")
+
 # Response variants - more captivating, energetic, motivational
 start_messages = ["Buckle up, AVAP champion! 🚀 Dive into your epic journey with these game-changing tools:", 
                   "Ignite your AVAP potential! 🌟 Unleash your power with these exciting features to dominate your goals:"]
@@ -104,15 +140,25 @@ logged_confirm = ["Moment of triumph captured! You're radiating inspiration—ke
 ask_confirm = ["Question launched! Our genius squad is brewing the perfect response—excitement incoming! 😊", "Bold question spotted! Diving deep for answers that'll blow your mind! 🔍"]
 answer_sent = ["Wisdom dispatched and archived! Fueling future quests with your insight! 📌", "Answer shared—community leveled up! You're building a powerhouse of knowledge! 🌱"]
 
-# Keyboard for commands - fixed buttons after /start
+# Keyboard for commands - fixed buttons after /start (DM only)
 main_keyboard = ReplyKeyboardMarkup([
     [KeyboardButton("/submit"), KeyboardButton("/sharewin")],
     [KeyboardButton("/status"), KeyboardButton("/ask")]
 ], resize_keyboard=True, one_time_keyboard=False)
 
+inline_start_keyboard = InlineKeyboardMarkup([
+    [InlineKeyboardButton("📚 Submit Assignment", callback_data="submit")],
+    [InlineKeyboardButton("🎉 Share Win", callback_data="sharewin")],
+    [InlineKeyboardButton("📊 My Status", callback_data="status")],
+    [InlineKeyboardButton("❓ Ask Question", callback_data="ask")]
+])
+
 # /start command
 async def start_command(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(random.choice(start_messages), reply_markup=main_keyboard)
+    if update.message.chat.type == 'private':
+        await update.message.reply_text(random.choice(start_messages), reply_markup=main_keyboard)
+    else:
+        await update.message.reply_text(random.choice(start_messages))
 
 # Added simple help_command (was referenced but missing; customize as needed)
 async def help_command(update: Update, context: CallbackContext) -> None:
@@ -128,10 +174,16 @@ AVAP Bot Commands:
 
 Group: Post "Major Win" or "Testimonial" to log.
     """
-    await update.message.reply_text(help_text, reply_markup=main_keyboard)
+    if update.message.chat.type == 'private':
+        await update.message.reply_text(help_text, reply_markup=main_keyboard)
+    else:
+        await update.message.reply_text(help_text)
 
-# /submit conversation - sequence flow, auto-forward, record, engaging prompts
+# /submit conversation - sequence flow, auto-forward, record, engaging prompts (DM only)
 async def submit_start(update: Update, context: CallbackContext) -> int:
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("Use /submit in private DMs only. 🚀")
+        return ConversationHandler.END
     await update.message.reply_text("Let's crush this submission! Which module are you conquering? (Enter 1-12)", reply_markup=ReplyKeyboardRemove())
     return MODULE
 
@@ -190,11 +242,14 @@ async def submit_media_upload(update: Update, context: CallbackContext) -> int:
     return ConversationHandler.END
 
 async def cancel(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("No worries—action paused. Dive back in anytime!", reply_markup=main_keyboard)
+    await update.message.reply_text("No worries—action paused. Dive back in anytime!", reply_markup=main_keyboard if update.message.chat.type == 'private' else ReplyKeyboardRemove())
     return ConversationHandler.END
 
-# /sharewin conversation - sequence, media options, engaging
+# /sharewin conversation - sequence, media options, engaging (DM only)
 async def sharewin_start(update: Update, context: CallbackContext) -> int:
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("Use /sharewin in private DMs only. 🎉")
+        return ConversationHandler.END
     keyboard = ReplyKeyboardMarkup([[KeyboardButton("Text"), KeyboardButton("Video"), KeyboardButton("Image")]], resize_keyboard=True)
     await update.message.reply_text("Time to brag! How are you sharing your epic win—Text, Video, or Image?", reply_markup=keyboard)
     return MEDIA_TYPE
@@ -240,24 +295,28 @@ async def sharewin_media_upload(update: Update, context: CallbackContext) -> int
         await update.message.reply_text("Win share hiccup—retry the glory!")
     return ConversationHandler.END
 
-# /status - engaging progress report
+# /status - engaging progress report (updated to count all assignments)
 async def status(update: Update, context: CallbackContext) -> None:
     username = get_username(update.message.from_user)
     try:
         assignments = assignments_sheet.get_all_values()
-        completed = [row[1] for row in assignments[1:] if row[0] == username and row[2] == "Graded"]
+        attempted = len([row for row in assignments[1:] if row[0] == username])  # All submitted
+        completed = len([row for row in assignments[1:] if row[0] == username and row[2] == "Graded"])
         wins = wins_sheet.get_all_values()
         total_wins = len([row for row in wins[1:] if row[0] == username])
         message = "Behold Your Conquest Map 📈:\n"
-        message += f"Modules Vanquished: {', '.join(completed) or 'Gear up for battle!'}\n"
+        message += f"Assignments Attempted: {attempted} | Completed: {completed}\n"
         message += f"Win Streak: {total_wins} 🏅 - You're forging a legacy!"
-        await update.message.reply_text(message, reply_markup=main_keyboard)
+        await update.message.reply_text(message, reply_markup=main_keyboard if update.message.chat.type == 'private' else ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Error in status: {e}")
         await update.message.reply_text("Progress scan jammed—reload soon!")
 
-# /grade conversation - sequence, admin only, captivating
+# /grade conversation - sequence, admin only, captivating (DM only)
 async def grade_start(update: Update, context: CallbackContext) -> int:
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("Use /grade in private DMs only. 📈")
+        return ConversationHandler.END
     if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("This power is for AVAP masters only!")
         return ConversationHandler.END
@@ -303,8 +362,11 @@ async def grade_feedback(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text("Elevation error—retry the magic.")
     return ConversationHandler.END
 
-# /get_submission conversation - sequence, admin only
+# /get_submission conversation - sequence, admin only (DM only)
 async def get_submission_start(update: Update, context: CallbackContext) -> int:
+    if update.message.chat.type != 'private':
+        await update.message.reply_text("Use /get_submission in private DMs only. 📂")
+        return ConversationHandler.END
     if update.message.from_user.id != ADMIN_ID:
         await update.message.reply_text("Secret archives for admins only!")
         return ConversationHandler.END
@@ -338,9 +400,9 @@ async def get_submission_module(update: Update, context: CallbackContext) -> int
         await update.message.reply_text("Summoning failed—try again.")
     return ConversationHandler.END
 
-# Group handler for major wins/testimonials - engaging replies
+# Group handler for major wins/testimonials - expanded triggers (group only)
 async def group_handler(update: Update, context: CallbackContext) -> None:
-    if update.message.chat.title != SUPPORT_GROUP_TITLE:
+    if update.message.chat.type != 'group' or update.message.chat.title != SUPPORT_GROUP_TITLE:
         return
 
     text = update.message.text.lower() if update.message.text else ""
@@ -349,7 +411,8 @@ async def group_handler(update: Update, context: CallbackContext) -> None:
     photo = update.message.photo[-1].file_id if update.message.photo else None
     video = update.message.video.file_id if update.message.video else None
 
-    major_keywords = ["major win", "big win", "huge achievement", "major success"]
+    # Expanded win triggers
+    major_keywords = ["major win", "big win", "huge achievement", "major success", "congrats to me", "i did it", "achievement unlocked", "proud moment", "celebration time"]
     testimonial_keywords = ["testimonial", "review", "feedback", "course review"]
 
     if any(kw in text for kw in major_keywords):
@@ -374,17 +437,21 @@ async def group_handler(update: Update, context: CallbackContext) -> None:
     except Exception as e:
         logger.error(f"Error logging group: {e}")
 
-# /ask or #question - works in DM and support group, forwards properly
+# /ask or #question - works in DM and support group, forwards properly (group: /ask only)
 async def ask_start(update: Update, context: CallbackContext) -> int:
     if update.message.chat.type == 'group' and update.message.chat.title != SUPPORT_GROUP_TITLE:
         return ConversationHandler.END
-    await update.message.reply_text("Fire away with your quest for knowledge! What's the question?", reply_markup=ReplyKeyboardRemove())
+    if update.message.chat.type == 'group':
+        await update.message.reply_text("Fire away with your quest for knowledge! What's the question? (Group mode active)", reply_markup=ReplyKeyboardRemove())
+    else:
+        await update.message.reply_text("Fire away with your quest for knowledge! What's the question?", reply_markup=ReplyKeyboardRemove())
     return QUESTION
 
 async def ask_question(update: Update, context: CallbackContext) -> int:
     question = update.message.text
     username = get_username(update.message.from_user)
     user_id = update.message.from_user.id
+    chat_id = update.message.chat.id
     try:
         faqs = faq_sheet.get_all_values()
         for row in faqs[1:]:
@@ -393,21 +460,21 @@ async def ask_question(update: Update, context: CallbackContext) -> int:
                 answer = row[1]
                 await update.message.reply_text(f"Unveiling from the archives: {answer}")
                 if row[2] == 'video':
-                    await context.bot.send_video(update.message.chat.id, row[3])
+                    await context.bot.send_video(chat_id, row[3])
                 elif row[2] == 'voice':
-                    await context.bot.send_voice(update.message.chat.id, row[3])
+                    await context.bot.send_voice(chat_id, row[3])
                 return ConversationHandler.END
 
         # Forward to questions group if set
-        forward_text = f"New quest from {username} (ID: {user_id}): {question}"
+        forward_text = f"New quest from {username} (ID: {user_id}) in {chat_id}: {question}"
         await forward_to_group(context.bot, QUESTIONS_GROUP_ID, forward_text)
-        await update.message.reply_text(random.choice(ask_confirm), reply_markup=main_keyboard)
+        await update.message.reply_text(random.choice(ask_confirm), reply_markup=main_keyboard if update.message.chat.type == 'private' else ReplyKeyboardRemove())
     except Exception as e:
         logger.error(f"Error in ask: {e}")
         await update.message.reply_text("Question quest hit a snag—retry!")
     return ConversationHandler.END
 
-# Questions group handler for admin replies - supports media
+# Questions group handler for admin replies - supports media (forward back to user)
 async def questions_group_handler(update: Update, context: CallbackContext) -> None:
     if update.message.chat.id != QUESTIONS_GROUP_ID or update.message.from_user.id != ADMIN_ID:
         return
@@ -418,8 +485,10 @@ async def questions_group_handler(update: Update, context: CallbackContext) -> N
     if "New quest from" not in reply_text:
         return
 
-    user_id_str = reply_text.split("(ID: ")[1].split("):")[0]
+    user_id_str = reply_text.split("(ID: ")[1].split(")")[0]
     user_id = int(user_id_str)
+    chat_id_str = reply_text.split("in ")[1].split(":")[0]
+    chat_id = int(chat_id_str)
     question = reply_text.split(": ")[1]
 
     answer = update.message.text if update.message.text else ""
@@ -429,18 +498,87 @@ async def questions_group_handler(update: Update, context: CallbackContext) -> N
     file_id = video or voice
 
     try:
-        await context.bot.send_message(user_id, f"Behold the answer to your quest: {answer}")
+        await context.bot.send_message(chat_id, f"Behold the answer to your quest: {answer}")
         if file_id:
             if answer_type == 'video':
-                await context.bot.send_video(user_id, file_id)
+                await context.bot.send_video(chat_id, file_id)
             elif answer_type == 'voice':
-                await context.bot.send_voice(user_id, file_id)
+                await context.bot.send_voice(chat_id, file_id)
 
         timestamp = get_timestamp()
         faq_sheet.append_row([question, answer, answer_type, file_id or '', "", timestamp])
         await update.message.reply_text(random.choice(answer_sent))
     except Exception as e:
         logger.error(f"Error replying to question: {e}")
+
+# /verify conversation (new from PDF)
+async def verify_start(update: Update, context: CallbackContext) -> int:
+    await update.message.reply_text("Welcome! To verify your payment, what's your full name?")
+    return VERIFY_NAME
+
+async def verify_name(update: Update, context: CallbackContext) -> int:
+    context.user_data['name'] = update.message.text
+    await update.message.reply_text("Great! Your phone number?")
+    return VERIFY_PHONE
+
+async def verify_phone(update: Update, context: CallbackContext) -> int:
+    context.user_data['phone'] = update.message.text
+    await update.message.reply_text("Almost there! Your email?")
+    return VERIFY_EMAIL
+
+async def verify_email(update: Update, context: CallbackContext) -> int:
+    email = update.message.text
+    name = context.user_data['name']
+    phone = context.user_data['phone']
+    telegram_id = update.message.from_user.id
+    details_str = f"{name.lower()}|{phone.lower()}|{email.lower()}"
+    details_hash = hashlib.sha256(details_str.encode()).hexdigest()
+
+    cursor.execute("SELECT claimed FROM verifications WHERE hash = ?", (details_hash,))
+    result = cursor.fetchone()
+    if result and not result[0]:
+        cursor.execute("UPDATE verifications SET telegram_id = ?, claimed = TRUE WHERE hash = ?", (telegram_id, details_hash))
+        conn.commit()
+        await update.message.reply_text("Verified! 🎉 Here's the group link: t.me/your_group")
+        await update.message.reply_text(f"Walkthrough: {LANDING_PAGE_LINK}")
+        await add_to_systeme(name, email, phone)
+    else:
+        await update.message.reply_text("Verification failed or already claimed. Contact support.")
+    return ConversationHandler.END
+
+# Handle chat join requests (new from PDF)
+async def handle_join_request(update: Update, context: CallbackContext) -> None:
+    request = update.chat_join_request
+    user_id = request.from_user.id
+    cursor.execute("SELECT claimed FROM verifications WHERE telegram_id = ?", (user_id,))
+    result = cursor.fetchone()
+    if result and result[0]:
+        await context.bot.approve_chat_join_request(request.chat.id, user_id)
+        await context.bot.send_message(user_id, "Approved! Welcome. 🚀")
+    else:
+        await context.bot.decline_chat_join_request(request.chat.id, user_id)
+        await context.bot.send_message(user_id, "Join denied—verify first.")
+
+# Flask for WhatsApp webhook (new from PDF)
+app = Flask(__name__)
+
+@app.route('/whatsapp_webhook', methods=['POST'])
+def whatsapp_webhook():
+    data = request.form
+    message = data.get('Body')
+    try:
+        parts = message.split(',')
+        name = parts[0].split(':')[1].strip()
+        phone = parts[1].split(':')[1].strip()
+        email = parts[2].split(':')[1].strip()
+        details_str = f"{name.lower()}|{phone.lower()}|{email.lower()}"
+        details_hash = hashlib.sha256(details_str.encode()).hexdigest()
+        cursor.execute("INSERT OR IGNORE INTO verifications (hash) VALUES (?)", (details_hash,))
+        conn.commit()
+        logger.info("Student data added from WhatsApp.")
+    except Exception as e:
+        logger.error(f"WhatsApp parse error: {e}")
+    return 'OK', 200
 
 def main() -> None:
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -498,7 +636,7 @@ def main() -> None:
     )
     application.add_handler(get_submission_conv)
 
-    # /ask conversation
+    # /ask conversation (group: /ask only)
     ask_conv = ConversationHandler(
         entry_points=[CommandHandler('ask', ask_start), MessageHandler(filters.Regex(r'(?i)^#question'), ask_start)],
         states={
@@ -508,9 +646,22 @@ def main() -> None:
     )
     application.add_handler(ask_conv)
 
-    # Group handlers
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))  # Support group wins
-    application.add_handler(MessageHandler(filters.ALL, questions_group_handler))  # Questions group replies
+    # /verify conversation (new)
+    verify_conv = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^start=verify$"), verify_start)],
+        states={
+            VERIFY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_name)],
+            VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
+            VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)]
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
+    application.add_handler(verify_conv)
+
+    # Group handlers (group only)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))  # Wins
+    application.add_handler(MessageHandler(filters.ALL, questions_group_handler))  # Questions replies
+    application.add_handler(MessageHandler(filters.CHAT_JOIN_REQUEST, handle_join_request))  # Join requests
 
     # FastAPI setup (fixes 404)
     fastapi_app = FastAPI()
@@ -547,6 +698,7 @@ def main() -> None:
             logger.info(f"Webhook set to {webhook_url}")
         asyncio.run(set_webhook())
         uvicorn.run(fastapi_app, host="0.0.0.0", port=port, log_level="info")
+        app.run(host='0.0.0.0', port=port + 1)  # Flask on separate port
     else:
         logger.info("Running in polling mode locally.")
         application.run_polling()
