@@ -1,31 +1,21 @@
-# Python
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
+
+# Virtual envs
 venv/
-env/
+ven/
 .venv/
-.Python
 
-# dotenv
+# Secrets
 .env
-.env.*
-
-# Editor / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
 
 # Logs
 *.log
 bot.log
 
-# SQLite DB files (if you switch from in-memory to file)
-*.db
-
-# Build / distribution
-dist/
-build/
-*.egg-info/
+# System files
+.DS_Store
+Thumbs.db
