@@ -1,20 +1,32 @@
-# Python cache
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.so
 
-# Virtual envs
-venv/
-ven/
+# Virtual environments
 .venv/
+venv/
+env/
+ven/
 
-# Secrets
+# Environment variables
 .env
+*.env
+
+# SQLite database
+database.db
+*.sqlite3
+*.db
 
 # Logs
 *.log
-bot.log
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
 
 # System files
 .DS_Store
