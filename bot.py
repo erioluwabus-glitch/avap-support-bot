@@ -1,3 +1,4 @@
+# bot.py (cleaned, ready for Render)
 import os
 import json
 import logging
@@ -9,7 +10,16 @@ import hashlib
 import sys
 import httpx
 import telegram
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputTextMessageContent, InlineQueryResultArticle, ChatJoinRequest
+import asyncio
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputTextMessageContent,
+    InlineQueryResultArticle,
+    ChatJoinRequest,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -19,10 +29,9 @@ from telegram.ext import (
     ConversationHandler,
     CallbackQueryHandler,
     InlineQueryHandler,
-    ChatJoinRequestHandler
+    ChatJoinRequestHandler,
 )
-from fastapi import FastAPI, Request
-import uvicorn
+from fastapi import FastAPI
 from dotenv import load_dotenv
 import gspread
 from google.oauth2 import service_account
@@ -73,20 +82,20 @@ GOOGLE_CREDENTIALS_STR = os.getenv("GOOGLE_CREDENTIALS")
 SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
 SYSTEME_VERIFIED_STUDENT_TAG_ID = parse_int_env("SYSTEME_VERIFIED_STUDENT_TAG_ID", 1647470)
 LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://your-landing.com/walkthrough")
-PORT = int(os.getenv("PORT", 8000))  # Use Render's PORT or default to 8000
+PORT = int(os.getenv("PORT", 8000))
 
-# FastAPI app for webhook and health check (retained for future use)
+# FastAPI app for webhook and health check (kept for future use)
 webhook_app = FastAPI()
 
 # SQLite database setup (in-memory)
 conn = sqlite3.connect(":memory:", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute(
-    """CREATE TABLE verifications
+    """CREATE TABLE IF NOT EXISTS verifications
        (hash TEXT PRIMARY KEY, telegram_id INTEGER, claimed BOOLEAN DEFAULT FALSE, name TEXT, email TEXT, phone TEXT)"""
 )
 cursor.execute(
-    """CREATE TABLE questions
+    """CREATE TABLE IF NOT EXISTS questions
        (code INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER, username TEXT, question TEXT, chat_id INTEGER, status TEXT, timestamp TEXT)"""
 )
 conn.commit()
@@ -228,11 +237,12 @@ async def sunday_reminder(context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception as e:
                     logger.error(f"Error sending DM to {row[3]}: {e}")
-        await context.bot.send_message(
-            SUPPORT_GROUP_ID,
-            "🌞 Sunday Reminder: Keep pushing forward! Check /status or share a /sharewin!",
-            reply_markup=main_keyboard
-        )
+        if SUPPORT_GROUP_ID:
+            await context.bot.send_message(
+                SUPPORT_GROUP_ID,
+                "🌞 Sunday Reminder: Keep pushing forward! Check /status or share a /sharewin!",
+                reply_markup=main_keyboard
+            )
     except Exception as e:
         logger.error(f"Error in Sunday reminder: {e}")
 
@@ -341,6 +351,7 @@ async def view_comments(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif comment_type == "Video":
             await query.message.reply_video(comment_content, caption=message, reply_markup=main_keyboard)
 
+# Verification conversation
 async def verify_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -367,7 +378,6 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = context.user_data.get("phone", "")
     telegram_id = update.effective_user.id
     username = get_username(update.effective_user)
-    hash_value = hashlib.sha256(f"{name}{email}{phone}0".encode()).hexdigest()
     cursor.execute(
         "SELECT hash FROM verifications WHERE LOWER(name) = LOWER(?) AND LOWER(email) = LOWER(?) AND phone = ? AND claimed = 0",
         (name, email, phone)
@@ -402,6 +412,7 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Check out our walkthrough: {LANDING_PAGE_LINK}")
     return ConversationHandler.END
 
+# Add student flow (admin only)
 async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID or update.effective_chat.id != VERIFICATION_GROUP_ID:
         await update.message.reply_text("Only admins can add students in the verification group.")
@@ -435,6 +446,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
+# Submit flow
 async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -486,6 +498,7 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(f"Please send a {media_type.upper()}.")
         return MEDIA_UPLOAD
     timestamp = get_timestamp()
+    row_index = None
     if assignments_sheet:
         row_index = len(assignments_sheet.get_all_values()) + 1
         assignments_sheet.append_row([username, user_id, str(module), "Submitted", content, "", timestamp, "", "", ""])
@@ -495,10 +508,11 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
         context.bot, ASSIGNMENTS_GROUP_ID,
         f"Submission from {username} - Module {module}: {content}",
         photo=photo, video=video,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📝 Grade", callback_data=f"grade_{row_index}")]])
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📝 Grade", callback_data=f"grade_{row_index or 0}")]])
     )
     return ConversationHandler.END
 
+# Sharewin flow (similar pattern)
 async def sharewin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -549,6 +563,7 @@ async def sharewin_media_upload(update: Update, context: ContextTypes.DEFAULT_TY
         await context.bot.send_message(user_id, "🎉 AVAP Achiever Badge earned!", reply_markup=main_keyboard)
     return ConversationHandler.END
 
+# Grading flows (inline and admin)
 async def grade_inline_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -661,30 +676,26 @@ async def grade_comment_content(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def complete_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, comment_type: str, comment_content: str):
     username = context.user_data.get("username")
-    module = context.user_data.get("module")
-    score = context.user_data.get("score")
     row_index = context.user_data.get("submission_row")
     message_id = context.user_data.get("message_id")
-    if assignments_sheet:
+    score = context.user_data.get("score")
+    if assignments_sheet and row_index:
         assignments_sheet.update_cell(row_index, 4, "Graded")
         assignments_sheet.update_cell(row_index, 6, f"Score: {score}/10")
         assignments_sheet.update_cell(row_index, 7, get_timestamp())
         assignments_sheet.update_cell(row_index, 8, str(score))
         assignments_sheet.update_cell(row_index, 9, comment_type)
         assignments_sheet.update_cell(row_index, 10, comment_content)
-    if message_id:
+    if message_id and ASSIGNMENTS_GROUP_ID:
         try:
             await context.bot.edit_message_reply_markup(chat_id=ASSIGNMENTS_GROUP_ID, message_id=message_id, reply_markup=None)
             await context.bot.send_message(ASSIGNMENTS_GROUP_ID, random.choice(grade_confirm), reply_to_message_id=message_id)
         except Exception as e:
             logger.error(f"Error editing message: {e}")
     await update.effective_message.reply_text(random.choice(grade_confirm))
-    completed_modules = len({row[2] for row in assignments_sheet.get_all_values()[1:] if assignments_sheet and row[0] == username and row[3] == "Graded"}) if assignments_sheet else 0
-    win_count = len([row for row in wins_sheet.get_all_values()[1:] if wins_sheet and row[0] == username]) if wins_sheet else 0
-    if completed_modules >= 3 and win_count >= 3:
-        await context.bot.send_message(int(assignments_sheet.get_all_values()[row_index-1][1]), "🎉 AVAP Achiever Badge earned!", reply_markup=main_keyboard)
     context.user_data.clear()
 
+# Get submission flow
 async def get_submission_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("Only admins can view submissions.")
@@ -729,6 +740,7 @@ async def get_submission_module(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data.clear()
     return ConversationHandler.END
 
+# Ask / answer flows
 async def ask_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -803,8 +815,20 @@ async def join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await join_request.decline()
         await context.bot.send_message(join_request.from_user.id, "Verify to join the support group!", reply_markup=verify_keyboard)
 
-# Conversation handlers
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types (CallbackQueryHandler, MessageHandler, CommandHandler) are intentional for user input flexibility.
+# unified cancel handler
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    # try to reply on callback_query if present
+    try:
+        if getattr(update, "callback_query", None):
+            await update.callback_query.message.reply_text("Canceled.", reply_markup=main_keyboard)
+        else:
+            await update.message.reply_text("Canceled.", reply_markup=main_keyboard)
+    except Exception:
+        pass
+    return ConversationHandler.END
+
+# Conversation handlers registration
 verify_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(verify_start, pattern="^verify_prompt$")],
     states={
@@ -812,11 +836,9 @@ verify_conv = ConversationHandler(
         VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
         VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 submit_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(submit_start, pattern="^submit$")],
     states={
@@ -824,10 +846,9 @@ submit_conv = ConversationHandler(
         MEDIA_TYPE: [CallbackQueryHandler(submit_media_type, pattern="^media_(video|image)$")],
         MEDIA_UPLOAD: [MessageHandler(filters.PHOTO | filters.VIDEO, submit_media_upload)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 grade_inline_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(grade_inline_start, pattern="^grade_")],
     states={
@@ -836,10 +857,9 @@ grade_inline_conv = ConversationHandler(
         GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
         GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 grade_conv = ConversationHandler(
     entry_points=[CommandHandler("grade", grade_start)],
     states={
@@ -850,34 +870,30 @@ grade_conv = ConversationHandler(
         GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
         GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 get_submission_conv = ConversationHandler(
     entry_points=[CommandHandler("get_submission", get_submission_start)],
     states={
         USERNAME_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_username)],
         MODULE_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_module)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 ask_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(ask_start, pattern="^ask$")],
     states={QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 answer_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(answer_start, pattern="^answer_")],
     states={ANSWER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_text)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 add_student_conv = ConversationHandler(
     entry_points=[CommandHandler("add_student", add_student_start)],
     states={
@@ -885,142 +901,10 @@ add_student_conv = ConversationHandler(
         ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
         ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+    fallbacks=[CommandHandler("cancel", cancel)]
 )
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_markup):
-    context.user_data.clear()
-    await update.message.reply_text("Canceled.", reply_markup=reply_markup)
-    return ConversationHandler.END
-
-async def main():
-    try:
-        logger.info("Initializing Application with TELEGRAM_TOKEN")
-        builder = Application.builder()
-        logger.info("Builder created")
-        builder.token(TELEGRAM_TOKEN)
-        logger.info("Token set")
-        app = builder.build()
-        logger.info("Application built successfully")
-        app.add_handler(CommandHandler("start", start_command))
-        app.add_handler(InlineQueryHandler(inline_query))
-        app.add_handler(CallbackQueryHandler(status, pattern="^status$"))
-        app.add_handler(CallbackQueryHandler(view_comments, pattern="^view_comments$"))
-        app.add_handler(verify_conv)
-        app.add_handler(submit_conv)
-        app.add_handler(grade_inline_conv)
-        app.add_handler(grade_conv)
-        app.add_handler(get_submission_conv)
-        app.add_handler(ask_conv)
-        app.add_handler(answer_conv)
-        app.add_handler(add_student_conv)
-        app.add_handler(ChatJoinRequestHandler(join_request))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))
-        app.add_error_handler(error_handler)
-        logger.info("Handlers registered")
-
-        sync_verifications_from_sheets()
-        if app.job_queue is None:
-            logger.error("JobQueue is None - ensure python-telegram-bot[job-queue] is installed")
-            sys.exit(1)
-        app.job_queue.run_daily(
-            sunday_reminder,
-            time=datetime.time(hour=18, minute=0, tzinfo=pytz.timezone("Africa/Lagos")),
-            days=(6,)  # Sunday
-        )
-        logger.info("JobQueue registered for Sunday reminder")
-
-        logger.info("Starting bot with polling")
-        await app.run_polling(poll_interval=0.0, timeout=10)
-        
-    except Exception as e:
-        logger.error(f"Error starting bot: {e}", exc_info=True)
-        sys.exit(1)
-
-if __name__ == "__main__":
-    import asyncio
-    logger.info("Starting bot with asyncio.run(main())")
-    asyncio.run(main())
-
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-submit_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(submit_start, pattern="^submit$")],
-    states={
-        MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, submit_module)],
-        MEDIA_TYPE: [CallbackQueryHandler(submit_media_type, pattern="^media_(video|image)$")],
-        MEDIA_UPLOAD: [MessageHandler(filters.PHOTO | filters.VIDEO, submit_media_upload)],
-    },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-grade_inline_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(grade_inline_start, pattern="^grade_")],
-    states={
-        GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^score_")],
-        GRADE_COMMENT_TYPE: [CallbackQueryHandler(grade_comment_type, pattern="^comment_(yes|no)$")],
-        GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
-        GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
-    },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-grade_conv = ConversationHandler(
-    entry_points=[CommandHandler("grade", grade_start)],
-    states={
-        USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_username)],
-        MODULE_GRADE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_module)],
-        GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^score_")],
-        GRADE_COMMENT_TYPE: [CallbackQueryHandler(grade_comment_type, pattern="^comment_(yes|no)$")],
-        GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
-        GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
-    },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-get_submission_conv = ConversationHandler(
-    entry_points=[CommandHandler("get_submission", get_submission_start)],
-    states={
-        USERNAME_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_username)],
-        MODULE_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_module)],
-    },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-ask_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(ask_start, pattern="^ask$")],
-    states={QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-answer_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(answer_start, pattern="^answer_")],
-    states={ANSWER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_text)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
-add_student_conv = ConversationHandler(
-    entry_points=[CommandHandler("add_student", add_student_start)],
-    states={
-        ADD_STUDENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
-        ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
-        ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
-    },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
-)
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_markup):
-    context.user_data.clear()
-    await update.message.reply_text("Canceled.", reply_markup=reply_markup)
-    return ConversationHandler.END
-
-def register_handlers(app):
+def register_handlers(app: Application):
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(CallbackQueryHandler(status, pattern="^status$"))
@@ -1035,13 +919,16 @@ def register_handlers(app):
     app.add_handler(add_student_conv)
     app.add_handler(ChatJoinRequestHandler(join_request))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))
-    app.add_handler(MessageHandler(filters.COMMAND, lambda u, c: None))  # Ignore unknown commands
+    app.add_handler(MessageHandler(filters.COMMAND, lambda u, c: None))  # ignore unknown commands
     app.add_error_handler(error_handler)
     sync_verifications_from_sheets()
+    if app.job_queue is None:
+        logger.error("JobQueue is None - ensure python-telegram-bot[job-queue] installed")
+        raise SystemExit(1)
     app.job_queue.run_daily(
         sunday_reminder,
         time=datetime.time(hour=18, minute=0, tzinfo=pytz.timezone("Africa/Lagos")),
-        days=(6,)  # Sunday
+        days=(6,)
     )
 
 def main():
@@ -1051,8 +938,6 @@ def main():
 
     logger.info("Initializing Application builder")
     builder = Application.builder().token(TELEGRAM_TOKEN)
-
-    # Add builder configs if needed (persistence, rate limiting, etc.)
     app = builder.build()
     logger.info("Application built; registering handlers")
 
@@ -1065,13 +950,17 @@ def main():
     else:
         logger.info("job_queue available")
 
-    logger.info("Starting bot with Application.run_polling()")
+    logger.info("Starting bot with Application.run_polling() (safe for Render)")
 
-    # ✅ safer for environments like Render
     try:
         asyncio.run(app.run_polling(close_loop=False))
     except RuntimeError as e:
+        # Common deployment environments may raise "event loop is closed" on shutdown; log and exit
         if "event loop is closed" in str(e).lower():
-            logger.warning("Event loop was already closed; ignoring.")
+            logger.warning("Event loop was already closed; exiting gracefully.")
         else:
+            logger.exception("Unhandled RuntimeError while running polling")
             raise
+
+if __name__ == "__main__":
+    main()

@@ -1,13 +1,31 @@
-venv/
-*.pyc
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+.Python
+
+# dotenv
 .env
-*.db
+.env.*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
-check_db.py
-escape_credentials.py
-escape_key.py
-health_check.py
-run.py
-test_credentials.py
-ven/
+bot.log
+
+# SQLite DB files (if you switch from in-memory to file)
+*.db
+
+# Build / distribution
+dist/
+build/
+*.egg-info/
