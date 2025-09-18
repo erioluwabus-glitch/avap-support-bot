@@ -1,4 +1,13 @@
-.env
-credentials.json
-__pycache__/
+venv/
 *.pyc
+__pycache__/
+.env
+*.db
+*.log
+check_db.py
+escape_credentials.py
+escape_key.py
+health_check.py
+run.py
+test_credentials.py
+ven/
