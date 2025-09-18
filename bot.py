@@ -1,3 +1,4 @@
+```python
 import os
 import json
 import logging
@@ -41,7 +42,7 @@ from telegram.ext import (
     JobQueue,
 )
 from telegram.error import TimedOut, InvalidToken, NetworkError, BadRequest, Forbidden
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 import uvicorn
 from dotenv import load_dotenv
 
@@ -132,26 +133,51 @@ try:
         try:
             faq_sheet = sheet.worksheet("FAQ")
         except gspread.exceptions.WorksheetNotFound:
-            faq_sheet = sheet.add_worksheet(title="FAQ", rows=1000, cols=6)
-            faq_sheet.append_row(["Question", "Answer", "Answer Type", "File ID", "Username", "Timestamp"])
+            faq_sheet = sheet.add_worksheet(title="FAQ", rows=1000, cols=7)
+            faq_sheet.append_row(["Question", "Answer", "Answer Type", "File ID", "Username", "Timestamp", "Question ID"])
         logger.info("Google Sheets connected successfully.")
 except Exception as e:
     logger.error(f"Error connecting to Google Sheets: {e}")
     verifications_sheet = assignments_sheet = wins_sheet = faq_sheet = None
 
-# SQLite database setup
-DB_PATH = os.getenv("DB_PATH", "student_data.db")
-conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+# SQLite database setup (in-memory for Render free tier)
+conn = sqlite3.connect(":memory:", check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute(
-    """CREATE TABLE IF NOT EXISTS verifications
+    """CREATE TABLE verifications
        (hash TEXT PRIMARY KEY, telegram_id INTEGER, claimed BOOLEAN DEFAULT FALSE, name TEXT, email TEXT, phone TEXT)"""
 )
 cursor.execute(
-    """CREATE TABLE IF NOT EXISTS questions
+    """CREATE TABLE questions
        (code INTEGER PRIMARY KEY AUTOINCREMENT, telegram_id INTEGER, username TEXT, question TEXT, chat_id INTEGER, status TEXT, timestamp TEXT)"""
 )
 conn.commit()
+
+# Sync verifications from Google Sheets to in-memory SQLite at startup
+def sync_verifications_from_sheets():
+    if not verifications_sheet:
+        logger.warning("sync_verifications_from_sheets: No verifications_sheet available")
+        return
+    try:
+        verifications = verifications_sheet.get_all_values()
+        for row in verifications[1:]:
+            name, email, phone, telegram_id, status = row
+            if status == "Pending":
+                hash_value = hashlib.sha256(f"{name}{email}{phone}0".encode()).hexdigest()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO verifications (hash, telegram_id, name, email, phone, claimed) VALUES (?, ?, ?, ?, ?, ?)",
+                    (hash_value, 0, name, email, phone, 0)
+                )
+            elif status == "Verified" and telegram_id.isdigit():
+                hash_value = hashlib.sha256(f"{name}{email}{phone}{telegram_id}".encode()).hexdigest()
+                cursor.execute(
+                    "INSERT OR IGNORE INTO verifications (hash, telegram_id, name, email, phone, claimed) VALUES (?, ?, ?, ?, ?, ?)",
+                    (hash_value, int(telegram_id), name, email, phone, 1)
+                )
+        conn.commit()
+        logger.info("Synced verifications from Google Sheets to in-memory SQLite")
+    except Exception as e:
+        logger.error(f"Error syncing verifications: {e}")
 
 # Utility functions
 def get_username(user: Optional[telegram.User]) -> str:
@@ -506,11 +532,28 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     telegram_id = update.effective_user.id
     username = get_username(update.effective_user)
     logger.debug(f"verify_email: Processing for user {telegram_id}, name={name}, email={email}, phone={phone}")
+    hash_value = hashlib.sha256(f"{name}{email}{phone}0".encode()).hexdigest()
     cursor.execute(
         "SELECT hash FROM verifications WHERE LOWER(name) = LOWER(?) AND LOWER(email) = LOWER(?) AND phone = ? AND claimed = 0",
         (name, email, phone)
     )
     result = cursor.fetchone()
+    if not result and verifications_sheet:
+        # Check Google Sheets as fallback
+        verifications = verifications_sheet.get_all_values()
+        for row in verifications[1:]:
+            if (row[0].lower() == name.lower() and 
+                row[1].lower() == email.lower() and 
+                row[2] == phone and 
+                row[4] == "Pending"):
+                hash_value = hashlib.sha256(f"{name}{email}{phone}0".encode()).hexdigest()
+                cursor.execute(
+                    "INSERT INTO verifications (hash, telegram_id, name, email, phone, claimed) VALUES (?, ?, ?, ?, ?, ?)",
+                    (hash_value, 0, name, email, phone, 0)
+                )
+                conn.commit()
+                result = (hash_value,)
+                break
     if not result:
         logger.warning(f"verify_email: No matching pending entry for user {telegram_id}, name={name}, email={email}, phone={phone}")
         await update.message.reply_text("Details not found. Contact admin to add you.")
@@ -523,7 +566,7 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             (telegram_id, hash_value)
         )
         conn.commit()
-        logger.debug(f"verify_email: Marked as verified for user {telegram_id}")
+        logger.debug(f"verify_email: Marked as verified in SQLite for user {telegram_id}")
         if verifications_sheet:
             verifications = verifications_sheet.get_all_values()
             for i, row in enumerate(verifications[1:], start=2):
@@ -1069,12 +1112,14 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     chat_id = update.effective_chat.id
     timestamp = get_timestamp()
     try:
-        cursor.execute(
-            "INSERT INTO questions (telegram_id, username, question, chat_id, status, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
-            (telegram_id, username, question, chat_id, "Pending", timestamp)
-        )
-        conn.commit()
-        question_id = cursor.lastrowid
+        # Store in Google Sheets instead of SQLite
+        if faq_sheet:
+            row_index = len(faq_sheet.get_all_values()) + 1
+            faq_sheet.append_row([question, "", "", "", username, timestamp, str(row_index)])
+            question_id = row_index
+        else:
+            logger.warning("ask_question: FAQ sheet not configured")
+            return ConversationHandler.END
         answer_button = InlineKeyboardMarkup([
             [InlineKeyboardButton("📝 Answer", callback_data=f"answer_{question_id}")]
         ])
@@ -1109,21 +1154,29 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     answer = update.message.text.strip()
     question_id = context.user_data.get("question_id")
     try:
-        cursor.execute("SELECT telegram_id, question, chat_id FROM questions WHERE code = ?", (question_id,))
-        result = cursor.fetchone()
-        if not result:
+        if not faq_sheet:
+            await update.message.reply_text("FAQ sheet not configured.")
+            return ConversationHandler.END
+        faq = faq_sheet.get_all_values()
+        found = False
+        for i, row in enumerate(faq[1:], start=2):
+            if row[6] == question_id and row[1] == "":
+                telegram_id = int(row[4]) if row[4].isdigit() else None
+                chat_id = None  # Chat ID not stored in FAQ sheet; rely on QUESTIONS_GROUP_ID
+                question = row[0]
+                faq_sheet.update_cell(i, 2, answer)
+                faq_sheet.update_cell(i, 3, "Text")
+                faq_sheet.update_cell(i, 5, get_username(update.effective_user))
+                found = True
+                break
+        if not found:
             await update.message.reply_text("Question not found.")
             return ConversationHandler.END
-        telegram_id, question, chat_id = result
-        timestamp = get_timestamp()
-        if faq_sheet:
-            faq_sheet.append_row([question, answer, "Text", "", get_username(update.effective_user), timestamp])
-        cursor.execute("UPDATE questions SET status = ? WHERE code = ?", ("Answered", question_id))
-        conn.commit()
+        # Forward answer to QUESTIONS_GROUP_ID (since chat_id isn't stored)
         await context.bot.send_message(
-            chat_id,
-            f"Answer to your question:\nQ: {question}\nA: {answer}",
-            reply_markup=main_keyboard if chat_id == update.effective_user.id else ReplyKeyboardRemove()
+            QUESTIONS_GROUP_ID,
+            f"Answer to question (ID: {question_id}):\nQ: {question}\nA: {answer}",
+            reply_markup=None
         )
         await update.message.reply_text(random.choice(answer_sent))
         context.user_data.clear()
@@ -1289,29 +1342,53 @@ def add_handlers(app: Application) -> None:
     app.add_error_handler(error_handler)
     logger.debug("add_handlers: All handlers registered")
 
+async def webhook_update(request: Request, app: Application):
+    """Process webhook updates."""
+    try:
+        update = Update.de_json(await request.json(), app.bot)
+        await app.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Webhook update error: {e}")
+        return {"status": "error"}
+
 async def main() -> None:
     try:
         app = Application.builder().token(TELEGRAM_TOKEN).build()
         add_handlers(app)
+        Thread(target=run_health_check_server, daemon=True).start()
+        await app.initialize()
+        await app.start()
         # Schedule Sunday reminder at 6 PM WAT
         app.job_queue.run_daily(
             sunday_reminder,
             time=datetime.time(hour=18, minute=0, tzinfo=pytz.timezone("Africa/Lagos")),
             days=(6,)  # Sunday
         )
-        Thread(target=run_health_check_server, daemon=True).start()
-        await app.initialize()
-        await app.start()
-        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
-        logger.info("Polling started successfully")
-        while True:
-            await asyncio.sleep(3600)
+        # Sync verifications from Google Sheets
+        sync_verifications_from_sheets()
+        # Set webhook
+        webhook_url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook"
+        await app.bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook set to {webhook_url}")
+        # Start FastAPI server
+        uvicorn.run(
+            "bot:webhook_app",
+            host="0.0.0.0",
+            port=10000,
+            log_level="info",
+            factory=True
+        )
     except InvalidToken:
         logger.error("Invalid TELEGRAM_TOKEN. Exiting.")
         sys.exit(1)
     except Exception as e:
         logger.error(f"Error starting bot: {e}", exc_info=True)
         sys.exit(1)
+
+# FastAPI app for webhook
+webhook_app = FastAPI()
+webhook_app.post("/webhook")(lambda request: webhook_update(request, app))
 
 if __name__ == "__main__":
     asyncio.run(main())
