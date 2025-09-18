@@ -1052,7 +1052,7 @@ def main():
     logger.info("Initializing Application builder")
     builder = Application.builder().token(TELEGRAM_TOKEN)
 
-    # add any builder config here if needed
+    # Add builder configs if needed (persistence, rate limiting, etc.)
     app = builder.build()
     logger.info("Application built; registering handlers")
 
@@ -1066,8 +1066,12 @@ def main():
         logger.info("job_queue available")
 
     logger.info("Starting bot with Application.run_polling()")
-    app.run_polling()
-    # run_polling() is blocking and manages graceful shutdown.
 
-if __name__ == "__main__":
-    main()
+    # ✅ safer for environments like Render
+    try:
+        asyncio.run(app.run_polling(close_loop=False))
+    except RuntimeError as e:
+        if "event loop is closed" in str(e).lower():
+            logger.warning("Event loop was already closed; ignoring.")
+        else:
+            raise
