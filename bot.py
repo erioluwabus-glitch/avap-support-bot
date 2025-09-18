@@ -1071,4 +1071,3 @@ def main():
 
 if __name__ == "__main__":
     main()
- (Update to python-telegram-bot 22.4 and migrate to Application.run_polling)
