@@ -800,6 +800,7 @@ async def join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(join_request.from_user.id, "Verify to join the support group!", reply_markup=verify_keyboard)
 
 # Conversation handlers
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types (CallbackQueryHandler, MessageHandler, CommandHandler) are intentional for user input flexibility.
 verify_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(verify_start, pattern="^verify_prompt$")],
     states={
@@ -810,6 +811,7 @@ verify_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 submit_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(submit_start, pattern="^submit$")],
     states={
@@ -820,6 +822,7 @@ submit_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 grade_inline_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(grade_inline_start, pattern="^grade_")],
     states={
@@ -831,6 +834,7 @@ grade_inline_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 grade_conv = ConversationHandler(
     entry_points=[CommandHandler("grade", grade_start)],
     states={
@@ -844,6 +848,7 @@ grade_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 get_submission_conv = ConversationHandler(
     entry_points=[CommandHandler("get_submission", get_submission_start)],
     states={
@@ -853,18 +858,21 @@ get_submission_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 ask_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(ask_start, pattern="^ask$")],
     states={QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)]},
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 answer_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(answer_start, pattern="^answer_")],
     states={ANSWER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_text)]},
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 add_student_conv = ConversationHandler(
     entry_points=[CommandHandler("add_student", add_student_start)],
     states={
@@ -882,7 +890,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_marku
 
 async def main():
     try:
+        logger.info("Initializing Application with TELEGRAM_TOKEN")
         app = Application.builder().token(TELEGRAM_TOKEN).build()
+        logger.info("Application initialized successfully")
         app.add_handler(CommandHandler("start", start_command))
         app.add_handler(InlineQueryHandler(inline_query))
         app.add_handler(CallbackQueryHandler(status, pattern="^status$"))
@@ -909,8 +919,9 @@ async def main():
 
         webhook_url = "https://avap-support-bot.onrender.com/webhook"
         try:
+            logger.info(f"Setting webhook to {webhook_url}")
             await app.bot.set_webhook(webhook_url)
-            logger.info(f"Webhook set to {webhook_url}")
+            logger.info(f"Webhook set successfully to {webhook_url}")
         except Exception as e:
             logger.error(f"Failed to set webhook: {e}")
             sys.exit(1)
@@ -929,9 +940,10 @@ async def main():
         await uvicorn.run(webhook_app, host="0.0.0.0", port=PORT, log_level="info")
 
     except Exception as e:
-        logger.error(f"Error starting bot: {e}")
+        logger.error(f"Error starting bot: {e}", exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":
     import asyncio
+    logger.info("Starting bot with asyncio.run(main())")
     asyncio.run(main())
