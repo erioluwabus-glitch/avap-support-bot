@@ -75,7 +75,7 @@ SYSTEME_VERIFIED_STUDENT_TAG_ID = parse_int_env("SYSTEME_VERIFIED_STUDENT_TAG_ID
 LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://your-landing.com/walkthrough")
 PORT = int(os.getenv("PORT", 8000))  # Use Render's PORT or default to 8000
 
-# FastAPI app for webhook and health check
+# FastAPI app for webhook and health check (retained for future use)
 webhook_app = FastAPI()
 
 # SQLite database setup (in-memory)
@@ -895,8 +895,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_marku
 async def main():
     try:
         logger.info("Initializing Application with TELEGRAM_TOKEN")
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        logger.info("Application initialized successfully")
+        builder = Application.builder()
+        logger.info("Builder created")
+        builder.token(TELEGRAM_TOKEN)
+        logger.info("Token set")
+        app = builder.build()
+        logger.info("Application built successfully")
         app.add_handler(CommandHandler("start", start_command))
         app.add_handler(InlineQueryHandler(inline_query))
         app.add_handler(CallbackQueryHandler(status, pattern="^status$"))
@@ -915,14 +919,18 @@ async def main():
         logger.info("Handlers registered")
 
         sync_verifications_from_sheets()
+        if app.job_queue is None:
+            logger.error("JobQueue is None - ensure python-telegram-bot[job-queue] is installed")
+            sys.exit(1)
         app.job_queue.run_daily(
             sunday_reminder,
             time=datetime.time(hour=18, minute=0, tzinfo=pytz.timezone("Africa/Lagos")),
             days=(6,)  # Sunday
         )
+        logger.info("JobQueue registered for Sunday reminder")
 
         logger.info("Starting bot with polling")
-        await app.run_polling()
+        await app.run_polling(poll_interval=0.0, timeout=10)
         
     except Exception as e:
         logger.error(f"Error starting bot: {e}", exc_info=True)
