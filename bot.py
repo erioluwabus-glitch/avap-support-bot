@@ -8,6 +8,7 @@ import sqlite3
 import hashlib
 import sys
 import httpx
+import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputTextMessageContent, InlineQueryResultArticle, ChatJoinRequest
 from telegram.ext import (
     Application,
@@ -43,6 +44,9 @@ logging.basicConfig(
     handlers=[logging.FileHandler("bot.log", mode='a', encoding='utf-8'), logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
+
+# Log python-telegram-bot version for debugging
+logger.info(f"python-telegram-bot version: {telegram.__version__}")
 
 # Parse integer environment variables
 def parse_int_env(name: str, default=None) -> int:
@@ -917,28 +921,9 @@ async def main():
             days=(6,)  # Sunday
         )
 
-        webhook_url = "https://avap-support-bot.onrender.com/webhook"
-        try:
-            logger.info(f"Setting webhook to {webhook_url}")
-            await app.bot.set_webhook(webhook_url)
-            logger.info(f"Webhook set successfully to {webhook_url}")
-        except Exception as e:
-            logger.error(f"Failed to set webhook: {e}")
-            sys.exit(1)
-
-        @webhook_app.post("/webhook")
-        async def webhook(request: Request):
-            update = Update.de_json(await request.json(), app.bot)
-            await app.process_update(update)
-            return {"status": "ok"}
-
-        @webhook_app.get("/health")
-        async def health():
-            return {"status": "ok"}
-
-        logger.info(f"Starting Uvicorn server on port {PORT}")
-        await uvicorn.run(webhook_app, host="0.0.0.0", port=PORT, log_level="info")
-
+        logger.info("Starting bot with polling")
+        await app.run_polling()
+        
     except Exception as e:
         logger.error(f"Error starting bot: {e}", exc_info=True)
         sys.exit(1)
