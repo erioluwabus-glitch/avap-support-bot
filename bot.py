@@ -815,6 +815,7 @@ verify_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
+
 # Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
 submit_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(submit_start, pattern="^submit$")],
@@ -940,3 +941,134 @@ if __name__ == "__main__":
     import asyncio
     logger.info("Starting bot with asyncio.run(main())")
     asyncio.run(main())
+
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+submit_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(submit_start, pattern="^submit$")],
+    states={
+        MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, submit_module)],
+        MEDIA_TYPE: [CallbackQueryHandler(submit_media_type, pattern="^media_(video|image)$")],
+        MEDIA_UPLOAD: [MessageHandler(filters.PHOTO | filters.VIDEO, submit_media_upload)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+grade_inline_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(grade_inline_start, pattern="^grade_")],
+    states={
+        GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^score_")],
+        GRADE_COMMENT_TYPE: [CallbackQueryHandler(grade_comment_type, pattern="^comment_(yes|no)$")],
+        GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
+        GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+grade_conv = ConversationHandler(
+    entry_points=[CommandHandler("grade", grade_start)],
+    states={
+        USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_username)],
+        MODULE_GRADE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_module)],
+        GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^score_")],
+        GRADE_COMMENT_TYPE: [CallbackQueryHandler(grade_comment_type, pattern="^comment_(yes|no)$")],
+        GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
+        GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+get_submission_conv = ConversationHandler(
+    entry_points=[CommandHandler("get_submission", get_submission_start)],
+    states={
+        USERNAME_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_username)],
+        MODULE_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_module)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+ask_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(ask_start, pattern="^ask$")],
+    states={QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)]},
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+answer_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(answer_start, pattern="^answer_")],
+    states={ANSWER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_text)]},
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+# Note: PTBUserWarning about 'per_message=False' is benign and can be ignored, as mixed handler types are intentional.
+add_student_conv = ConversationHandler(
+    entry_points=[CommandHandler("add_student", add_student_start)],
+    states={
+        ADD_STUDENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
+        ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
+        ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
+    },
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
+)
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_markup):
+    context.user_data.clear()
+    await update.message.reply_text("Canceled.", reply_markup=reply_markup)
+    return ConversationHandler.END
+
+def register_handlers(app):
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(CallbackQueryHandler(status, pattern="^status$"))
+    app.add_handler(CallbackQueryHandler(view_comments, pattern="^view_comments$"))
+    app.add_handler(verify_conv)
+    app.add_handler(submit_conv)
+    app.add_handler(grade_inline_conv)
+    app.add_handler(grade_conv)
+    app.add_handler(get_submission_conv)
+    app.add_handler(ask_conv)
+    app.add_handler(answer_conv)
+    app.add_handler(add_student_conv)
+    app.add_handler(ChatJoinRequestHandler(join_request))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, group_handler))
+    app.add_handler(MessageHandler(filters.COMMAND, lambda u, c: None))  # Ignore unknown commands
+    app.add_error_handler(error_handler)
+    sync_verifications_from_sheets()
+    app.job_queue.run_daily(
+        sunday_reminder,
+        time=datetime.time(hour=18, minute=0, tzinfo=pytz.timezone("Africa/Lagos")),
+        days=(6,)  # Sunday
+    )
+
+def main():
+    if not TELEGRAM_TOKEN:
+        logger.error("TELEGRAM_TOKEN env var missing")
+        raise SystemExit(1)
+
+    logger.info("Initializing Application builder")
+    builder = Application.builder().token(TELEGRAM_TOKEN)
+
+    # add any builder config here if needed
+    app = builder.build()
+    logger.info("Application built; registering handlers")
+
+    register_handlers(app)
+
+    # sanity check for JobQueue
+    if app.job_queue is None:
+        logger.error("job_queue not available. Make sure requirements include python-telegram-bot[job-queue]")
+        raise SystemExit(1)
+    else:
+        logger.info("job_queue available")
+
+    logger.info("Starting bot with Application.run_polling()")
+    app.run_polling()
+    # run_polling() is blocking and manages graceful shutdown.
+
+if __name__ == "__main__":
+    main()
+ (Update to python-telegram-bot 22.4 and migrate to Application.run_polling)
