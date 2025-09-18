@@ -69,6 +69,7 @@ GOOGLE_CREDENTIALS_STR = os.getenv("GOOGLE_CREDENTIALS")
 SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
 SYSTEME_VERIFIED_STUDENT_TAG_ID = parse_int_env("SYSTEME_VERIFIED_STUDENT_TAG_ID", 1647470)
 LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://your-landing.com/walkthrough")
+PORT = int(os.getenv("PORT", 8000))  # Use Render's PORT or default to 8000
 
 # FastAPI app for webhook and health check
 webhook_app = FastAPI()
@@ -806,8 +807,7 @@ verify_conv = ConversationHandler(
         VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
         VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 submit_conv = ConversationHandler(
@@ -817,8 +817,7 @@ submit_conv = ConversationHandler(
         MEDIA_TYPE: [CallbackQueryHandler(submit_media_type, pattern="^media_(video|image)$")],
         MEDIA_UPLOAD: [MessageHandler(filters.PHOTO | filters.VIDEO, submit_media_upload)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 grade_inline_conv = ConversationHandler(
@@ -829,8 +828,7 @@ grade_inline_conv = ConversationHandler(
         GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
         GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 grade_conv = ConversationHandler(
@@ -843,8 +841,7 @@ grade_conv = ConversationHandler(
         GRADE_COMMENT: [CallbackQueryHandler(grade_comment, pattern="^comment_(text|audio|video)$")],
         GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT | filters.AUDIO | filters.VIDEO, grade_comment_content)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 get_submission_conv = ConversationHandler(
@@ -853,22 +850,19 @@ get_submission_conv = ConversationHandler(
         USERNAME_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_username)],
         MODULE_GET: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_submission_module)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 ask_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(ask_start, pattern="^ask$")],
     states={QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 answer_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(answer_start, pattern="^answer_")],
     states={ANSWER_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_text)]},
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 add_student_conv = ConversationHandler(
@@ -878,8 +872,7 @@ add_student_conv = ConversationHandler(
         ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
         ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))],
-    per_message=True
+    fallbacks=[CommandHandler("cancel", lambda u, c: cancel(u, c, main_keyboard))]
 )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, reply_markup):
@@ -915,8 +908,12 @@ async def main():
         )
 
         webhook_url = "https://avap-support-bot.onrender.com/webhook"
-        await app.bot.set_webhook(webhook_url)
-        logger.info(f"Webhook set to {webhook_url}")
+        try:
+            await app.bot.set_webhook(webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+        except Exception as e:
+            logger.error(f"Failed to set webhook: {e}")
+            sys.exit(1)
 
         @webhook_app.post("/webhook")
         async def webhook(request: Request):
@@ -928,8 +925,8 @@ async def main():
         async def health():
             return {"status": "ok"}
 
-        logger.info("Starting Uvicorn server on port 10000")
-        await uvicorn.run(webhook_app, host="0.0.0.0", port=10000, log_level="info")
+        logger.info(f"Starting Uvicorn server on port {PORT}")
+        await uvicorn.run(webhook_app, host="0.0.0.0", port=PORT, log_level="info")
 
     except Exception as e:
         logger.error(f"Error starting bot: {e}")
