@@ -16,26 +16,24 @@ import os
 import re
 import json
 import uuid
-import sqlite3
-import hashlib
 import logging
+import hashlib
+import sqlite3
 import datetime
-from typing import Optional, Tuple, Dict, Any
-
-import httpx
+import pytz
+import requests
 import gspread
-from google.oauth2.service_account import Credentials
-
-from fastapi import FastAPI, Request, Response, HTTPException
-import uvicorn
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from google.oauth2 import service_account
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
-    ChatJoinRequest,
-    User,
+    ReplyKeyboardRemove,
+    KeyboardButton,
 )
 from telegram.ext import (
     Application,
@@ -45,180 +43,144 @@ from telegram.ext import (
     ConversationHandler,
     ContextTypes,
     filters,
-    ChatJoinRequestHandler,
 )
+import uvicorn
 
-# -------------------------
-# Logging
-# -------------------------
+# -----------------------------------------------------------------------------
+# Logging setup
+# -----------------------------------------------------------------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger("avap_bot")
 
-# -------------------------
-# Environment variables (REQUIRED)
-# -------------------------
-def _env(key: str, default: Optional[str] = None) -> Optional[str]:
-    v = os.getenv(key, default)
-    logger.debug("ENV %s present: %s", key, bool(v))
-    return v
-
-BOT_TOKEN = _env("BOT_TOKEN")
+# -----------------------------------------------------------------------------
+# Environment Variables
+# -----------------------------------------------------------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    logger.error("BOT_TOKEN is required in environment")
-    raise SystemExit("BOT_TOKEN environment variable is required")
-
-ADMIN_ID = int(_env("ADMIN_ID") or 0) if _env("ADMIN_ID") else None
-SUPPORT_GROUP_ID = int(_env("SUPPORT_GROUP_ID") or 0) if _env("SUPPORT_GROUP_ID") else None
-ASSIGNMENTS_GROUP_ID = int(_env("ASSIGNMENTS_GROUP_ID") or 0) if _env("ASSIGNMENTS_GROUP_ID") else None
-QUESTIONS_GROUP_ID = int(_env("QUESTIONS_GROUP_ID") or 0) if _env("QUESTIONS_GROUP_ID") else None
-VERIFICATION_GROUP_ID = int(_env("VERIFICATION_GROUP_ID") or 0) if _env("VERIFICATION_GROUP_ID") else None
-
-GOOGLE_CREDENTIALS = _env("GOOGLE_CREDENTIALS")
-GOOGLE_SHEET_ID = _env("GOOGLE_SHEET_ID")
-
-SYSTEME_API_KEY = _env("SYSTEME_API_KEY")
-SYSTEME_VERIFIED_TAG_ID = _env("SYSTEME_VERIFIED_TAG_ID")
-
-LANDING_PAGE_LINK = _env("LANDING_PAGE_LINK", default="https://example.com")
-ACHIEVER_MODULES = int(_env("ACHIEVER_MODULES", default="6"))
-ACHIEVER_WINS = int(_env("ACHIEVER_WINS", default="3"))
-
+    raise RuntimeError("BOT_TOKEN not set in environment")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0"))
+ASSIGNMENTS_GROUP_ID = int(os.getenv("ASSIGNMENTS_GROUP_ID", "0"))
+QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0"))
+VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0"))
+SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
+SYSTEME_TAG_ID = os.getenv("SYSTEME_VERIFIED_STUDENT_TAG_ID")
+GOOGLE_SHEETS_SPREADSHEET_ID = os.getenv("GOOGLE_SHEETS_SPREADSHEET_ID")
+GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")  # optional: full JSON in env
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")  # e.g. https://your-app.onrender.com
 PORT = int(os.getenv("PORT", "8080"))
+TZ = pytz.timezone(os.getenv("TZ", "Africa/Lagos"))
 
-# -------------------------
-# Validation regexes
-# -------------------------
-RE_PHONE = re.compile(r"^\+\d{10,15}$")
-RE_EMAIL = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
+# Achiever criteria
+ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
+ACHIEVER_WINS = int(os.getenv("ACHIEVER_WINS", "3"))
 
-# -------------------------
-# Keyboards
-# -------------------------
-STUDENT_MENU = ReplyKeyboardMarkup(
-    [["📤 Submit Assignment", "🎉 Share Small Win"], ["📊 Check Status", "❓ Ask a Question"]],
-    resize_keyboard=True,
-    one_time_keyboard=False,
+# -----------------------------------------------------------------------------
+# SQLite setup
+# -----------------------------------------------------------------------------
+DB_PATH = os.getenv("DB_PATH", "avap_bot.db")
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS pending_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    email TEXT,
+    phone TEXT,
+    telegram_id INTEGER DEFAULT 0,
+    status TEXT,
+    hash TEXT
 )
+"""
+)
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS verified_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    email TEXT,
+    phone TEXT,
+    telegram_id INTEGER,
+    status TEXT
+)
+"""
+)
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER,
+    username TEXT,
+    module INTEGER,
+    file_id TEXT,
+    file_type TEXT,
+    submission_uuid TEXT,
+    status TEXT,
+    score INTEGER,
+    comment_type TEXT,
+    comment_content TEXT,
+    created_at TEXT
+)
+"""
+)
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS wins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER,
+    username TEXT,
+    content_type TEXT,
+    content TEXT,
+    created_at TEXT
+)
+"""
+)
+cursor.execute(
+    """
+CREATE TABLE IF NOT EXISTS questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER,
+    username TEXT,
+    question TEXT,
+    question_uuid TEXT,
+    answer_type TEXT,
+    answer TEXT,
+    created_at TEXT
+)
+"""
+)
+conn.commit()
 
-VERIFY_INLINE = InlineKeyboardMarkup([[InlineKeyboardButton("🔒 Verify Now", callback_data="verify_now")]])
-ASK_INLINE = InlineKeyboardMarkup([[InlineKeyboardButton("❓ Ask a Question", callback_data="ask_dm")]])
-
-# -------------------------
-# Conversation states
-# -------------------------
-(
-    ADD_STUDENT_NAME,
-    ADD_STUDENT_PHONE,
-    ADD_STUDENT_EMAIL,
-    VERIFY_NAME,
-    VERIFY_PHONE,
-    VERIFY_EMAIL,
-    SUBMIT_MODULE,
-    SUBMIT_MEDIA_TYPE,
-    SUBMIT_MEDIA_UPLOAD,
-    GRADE_SCORE,
-    GRADE_COMMENT_TYPE,
-    GRADE_COMMENT_CONTENT,
-    SHARE_WIN_TYPE,
-    SHARE_WIN_UPLOAD,
-    ASK_QUESTION_TEXT,
-    ANSWER_QUESTION_CONTENT,
-    MANUAL_GRADE_USERNAME,
-    MANUAL_GRADE_MODULE,
-) = range(18)
-
-# -------------------------
-# SQLite DB initialization
-# -------------------------
-DB_FILE = "database.db"
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-conn.row_factory = sqlite3.Row
-c = conn.cursor()
-
-def _create_tables():
-    c.execute("""CREATE TABLE IF NOT EXISTS pending_verifications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        telegram_id INTEGER DEFAULT 0,
-        status TEXT DEFAULT 'Pending',
-        hash TEXT NOT NULL UNIQUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS verified_users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        phone TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        telegram_id INTEGER NOT NULL UNIQUE,
-        verified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS submissions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        telegram_id INTEGER NOT NULL,
-        module INTEGER NOT NULL,
-        media_type TEXT NOT NULL,
-        file_id TEXT NOT NULL,
-        status TEXT DEFAULT 'Submitted',
-        submission_uuid TEXT NOT NULL UNIQUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        score INTEGER,
-        comment_type TEXT,
-        comment_content TEXT
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS wins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        telegram_id INTEGER NOT NULL,
-        content_type TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS questions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        telegram_id INTEGER NOT NULL,
-        question TEXT NOT NULL,
-        answer TEXT,
-        question_uuid TEXT NOT NULL UNIQUE,
-        answer_type TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
-    conn.commit()
-
-_create_tables()
-
-# -------------------------
-# Google Sheets init (optional)
-# -------------------------
+# -----------------------------------------------------------------------------
+# Google Sheets setup (optional)
+# -----------------------------------------------------------------------------
 sheets_ok = False
-gclient = None
+gspread_client = None
 sheet = None
-verif_ws = assignments_ws = wins_ws = faq_ws = None
 
-if GOOGLE_CREDENTIALS and GOOGLE_SHEET_ID:
+def _ensure_ws(name, headers):
     try:
-        creds = Credentials.from_service_account_info(
-            json.loads(GOOGLE_CREDENTIALS),
-            scopes=["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"],
+        wks = sheet.worksheet(name)
+    except Exception:
+        wks = sheet.add_worksheet(title=name, rows="100", cols=str(len(headers)))
+        wks.append_row(headers)
+    return wks
+
+if GOOGLE_CREDENTIALS_JSON and GOOGLE_SHEETS_SPREADSHEET_ID:
+    try:
+        creds_info = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info, scopes=["https://www.googleapis.com/auth/spreadsheets"]
         )
-        gclient = gspread.authorize(creds)
-        sheet = gclient.open_by_key(GOOGLE_SHEET_ID)
-
-        def _ensure_ws(name, headers):
-            try:
-                ws = sheet.worksheet(name)
-            except Exception:
-                ws = sheet.add_worksheet(title=name, rows="2000", cols=str(len(headers)))
-                ws.append_row(headers)
-            return ws
-
-        verif_ws = _ensure_ws("Verifications", ["id", "name", "phone", "email", "telegram_id", "status", "hash", "created_at"])
-        assignments_ws = _ensure_ws("Assignments", ["username", "telegram_id", "module", "media_type", "file_id", "status", "submission_uuid", "created_at", "score", "comment_type", "comment_content"])
+        gspread_client = gspread.authorize(creds)
+        sheet = gspread_client.open_by_key(GOOGLE_SHEETS_SPREADSHEET_ID)
+        # ensure basic sheets
+        ver_ws = _ensure_ws("Verifications", ["name", "email", "phone", "telegram_id", "status", "hash"])
+        assignments_ws = _ensure_ws("Assignments", ["username", "telegram_id", "module", "status", "file_id", "file_type", "submission_uuid", "created_at", "score", "comment_type", "comment_content"])
         wins_ws = _ensure_ws("Wins", ["username", "telegram_id", "content_type", "content", "created_at"])
         faq_ws = _ensure_ws("Questions", ["username", "telegram_id", "question", "answer", "question_uuid", "answer_type", "created_at"])
         sheets_ok = True
@@ -229,941 +191,760 @@ if GOOGLE_CREDENTIALS and GOOGLE_SHEET_ID:
 else:
     logger.info("Google Sheets not configured; continuing without Sheets")
 
-# -------------------------
+# -----------------------------------------------------------------------------
 # Helpers for DB + sheets
-# -------------------------
+# -----------------------------------------------------------------------------
 def _sha_hash(name: str, email: str, phone: str) -> str:
-    seed = f"{name}{email}{phone}0"
-    return hashlib.sha256(seed.encode()).hexdigest()
+    return hashlib.sha256(f"{name}{email}{phone}0".encode()).hexdigest()
 
-def db_add_pending(name: str, phone: str, email: str) -> Tuple[bool, Optional[str]]:
+def add_pending_verification(name, email, phone, telegram_id=0):
     h = _sha_hash(name, email, phone)
-    try:
-        c.execute("INSERT INTO pending_verifications (name, phone, email, hash, status) VALUES (?, ?, ?, ?, 'Pending')", (name, phone, email, h))
-        conn.commit()
-        if sheets_ok and verif_ws:
-            try:
-                verif_ws.append_row([None, name, phone, email, 0, "Pending", h, datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("Failed to append pending to sheet")
-        return True, h
-    except sqlite3.IntegrityError:
-        return False, None
-    except Exception:
-        logger.exception("db_add_pending err")
-        return False, None
-
-def db_find_pending_by_details(name: str, phone: str, email: str):
-    c.execute("SELECT * FROM pending_verifications WHERE name = ? AND phone = ? AND email = ? LIMIT 1", (name, phone, email))
-    return c.fetchone()
-
-def db_find_pending_by_email(email: str):
-    c.execute("SELECT * FROM pending_verifications WHERE email = ? LIMIT 1", (email,))
-    return c.fetchone()
-
-def db_verify_user_by_pending(pending_row, telegram_id: int) -> bool:
-    try:
-        name = pending_row["name"]
-        phone = pending_row["phone"]
-        email = pending_row["email"]
-        c.execute("INSERT OR REPLACE INTO verified_users (name, phone, email, telegram_id) VALUES (?, ?, ?, ?)", (name, phone, email, telegram_id))
-        conn.commit()
-        c.execute("UPDATE pending_verifications SET telegram_id = ?, status = 'Verified' WHERE id = ?", (telegram_id, pending_row["id"]))
-        conn.commit()
-        if sheets_ok and verif_ws:
-            try:
-                verif_ws.append_row([None, name, phone, email, telegram_id, "Verified", pending_row["hash"], datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("Failed to append verified to sheet")
-        return True
-    except Exception:
-        logger.exception("db_verify_user_by_pending err")
-        return False
-
-def db_manual_verify_by_email(email: str, telegram_id: Optional[int] = 0) -> bool:
-    r = db_find_pending_by_email(email)
-    if not r:
-        return False
-    return db_verify_user_by_pending(r, telegram_id or 0)
-
-def db_remove_verified(telegram_id: int) -> bool:
-    try:
-        c.execute("SELECT * FROM verified_users WHERE telegram_id = ? LIMIT 1", (telegram_id,))
-        r = c.fetchone()
-        if not r:
-            return False
-        c.execute("DELETE FROM verified_users WHERE telegram_id = ?", (telegram_id,))
-        conn.commit()
-        if sheets_ok and verif_ws:
-            try:
-                verif_ws.append_row([None, r["name"], r["phone"], r["email"], 0, "Removed", "", datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("Failed to append removal to sheet")
-        return True
-    except Exception:
-        logger.exception("db_remove_verified err")
-        return False
-
-def db_add_submission(username: str, telegram_id: int, module: int, media_type: str, file_id: str) -> str:
-    sub_uuid = str(uuid.uuid4())
-    try:
-        c.execute("INSERT INTO submissions (username, telegram_id, module, media_type, file_id, submission_uuid) VALUES (?, ?, ?, ?, ?, ?)", (username, telegram_id, int(module), media_type, file_id, sub_uuid))
-        conn.commit()
-        if sheets_ok and assignments_ws:
-            try:
-                assignments_ws.append_row([username, telegram_id, module, media_type, file_id, "Submitted", sub_uuid, datetime.datetime.utcnow().isoformat(), "", "", ""])
-            except Exception:
-                logger.exception("append submission to sheet failed")
-        return sub_uuid
-    except Exception:
-        logger.exception("db_add_submission err")
-        return sub_uuid
-
-def db_set_submission_graded(sub_uuid: str, score: int, comment_type: Optional[str], comment_content: Optional[str]):
-    try:
-        c.execute("UPDATE submissions SET status='Graded', score=?, comment_type=?, comment_content=? WHERE submission_uuid = ?", (score, comment_type, comment_content, sub_uuid))
-        conn.commit()
-        if sheets_ok and assignments_ws:
-            try:
-                assignments_ws.append_row(["Graded", sub_uuid, score, comment_type or "", comment_content or "", datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("append graded to sheet failed")
-        return True
-    except Exception:
-        logger.exception("db_set_submission_graded err")
-        return False
-
-def db_add_win(username: str, telegram_id: int, content_type: str, content: str):
-    try:
-        c.execute("INSERT INTO wins (username, telegram_id, content_type, content) VALUES (?, ?, ?, ?)", (username, telegram_id, content_type, content))
-        conn.commit()
-        if sheets_ok and wins_ws:
-            try:
-                wins_ws.append_row([username, telegram_id, content_type, content, datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("append win to sheet failed")
-        return True
-    except Exception:
-        logger.exception("db_add_win err")
-        return False
-
-def db_add_question(username: str, telegram_id: int, question_text: str) -> str:
-    q_uuid = str(uuid.uuid4())
-    try:
-        c.execute("INSERT INTO questions (username, telegram_id, question, question_uuid) VALUES (?, ?, ?, ?)", (username, telegram_id, question_text, q_uuid))
-        conn.commit()
-        if sheets_ok and faq_ws:
-            try:
-                faq_ws.append_row([username, telegram_id, question_text, "", q_uuid, "", datetime.datetime.utcnow().isoformat()])
-            except Exception:
-                logger.exception("append question to sheet failed")
-        return q_uuid
-    except Exception:
-        logger.exception("db_add_question err")
-        return q_uuid
-
-def db_get_verified_by_tid(telegram_id: int):
-    c.execute("SELECT * FROM verified_users WHERE telegram_id = ? LIMIT 1", (telegram_id,))
-    return c.fetchone()
-
-# -------------------------
-# Systeme.io integration (optional)
-# -------------------------
-async def systeme_create_contact_and_tag(email: str, first_name: str, phone: Optional[str] = None) -> bool:
-    if not SYSTEME_API_KEY:
-        logger.info("SYSTEME_API_KEY not set; skipping Systeme.io sync")
-        return False
-    headers = {"Accept": "application/json", "Content-Type": "application/json", "X-API-Key": SYSTEME_API_KEY}
-    payload = {"email": email, "first_name": first_name}
-    if phone:
-        payload["phone"] = phone
-    async with httpx.AsyncClient(timeout=15) as client:
+    cursor.execute(
+        "INSERT INTO pending_verifications (name,email,phone,telegram_id,status,hash) VALUES (?,?,?,?,?,?)",
+        (name, email, phone, telegram_id, "Pending", h),
+    )
+    conn.commit()
+    if sheets_ok:
         try:
-            resp = await client.post(f"https://api.systeme.io/api/contacts", headers=headers, json=payload)
-            if resp.status_code in (200, 201):
-                data = resp.json()
-                contact_id = data.get("id")
-                if SYSTEME_VERIFIED_TAG_ID and contact_id:
-                    try:
-                        await client.post(f"https://api.systeme.io/api/contacts/{contact_id}/tags", headers=headers, json={"tag_id": SYSTEME_VERIFIED_TAG_ID})
-                    except Exception:
-                        logger.exception("Failed to tag contact in Systeme.io")
-                logger.info("Systeme.io contact created/tagged for %s", email)
-                return True
-            elif resp.status_code in (409, 422):
-                logger.info("Systeme.io contact may already exist")
-                return True
-            else:
-                logger.warning("Unexpected Systeme.io response: %s", resp.status_code)
-                return False
+            ws = sheet.worksheet("Verifications")
+            ws.append_row([name, email, phone, telegram_id, "Pending", h])
         except Exception:
-            logger.exception("Systeme.io sync error")
-            return False
+            logger.exception("Failed to append pending verification to Sheets")
+    return h
+
+def find_pending_by_hash(h):
+    cursor.execute("SELECT id,name,email,phone,telegram_id,status FROM pending_verifications WHERE hash=?", (h,))
+    return cursor.fetchone()
+
+def find_pending_by_email(email):
+    cursor.execute("SELECT id,name,email,phone,telegram_id,status,hash FROM pending_verifications WHERE email=?", (email,))
+    return cursor.fetchone()
+
+def mark_verified(name, email, phone, telegram_id):
+    cursor.execute("INSERT INTO verified_users (name,email,phone,telegram_id,status) VALUES (?,?,?,?,?)", (name,email,phone,telegram_id,"Verified"))
+    conn.commit()
+    # update pending_verifications
+    cursor.execute("UPDATE pending_verifications SET telegram_id=?, status=? WHERE email=?", (telegram_id, "Verified", email))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Verifications")
+            # find row to update
+            all_vals = ws.get_all_records()
+            for i, row in enumerate(all_vals, start=2):
+                if row.get("email") == email:
+                    ws.update(f"E{i}", "Verified")  # status
+                    ws.update(f"D{i}", telegram_id)  # telegram_id
+                    break
+        except Exception:
+            logger.exception("Failed to update verification in Sheets")
+
+def sync_to_systeme(name, email, phone):
+    if not SYSTEME_API_KEY:
+        return None
+    try:
+        first_name = name.split()[0]
+        last_name = " ".join(name.split()[1:]) if len(name.split())>1 else ""
+        headers = {"Api-Key": SYSTEME_API_KEY, "Content-Type": "application/json"}
+        payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
+        r = requests.post("https://api.systeme.io/api/contacts", json=payload, headers=headers, timeout=15)
+        r.raise_for_status()
+        contact = r.json()
+        contact_id = contact.get("id")
+        # add tag
+        if contact_id and SYSTEME_TAG_ID:
+            try:
+                r2 = requests.post(f"https://api.systeme.io/api/contacts/{contact_id}/tags", json={"tag_id": int(SYSTEME_TAG_ID)}, headers=headers, timeout=15)
+                r2.raise_for_status()
+            except Exception:
+                logger.exception("Failed to add tag in Systeme.io")
+        return contact_id
+    except Exception:
+        logger.exception("Systeme.io sync failed")
+        return None
+
+# -----------------------------------------------------------------------------
+# Utility filters
+# -----------------------------------------------------------------------------
+def _is_admin(user_id):
+    return ADMIN_ID and user_id == ADMIN_ID
+
+# -----------------------------------------------------------------------------
+# Conversation states constants (subset as example)
+# -----------------------------------------------------------------------------
+ADD_STUDENT_NAME, ADD_STUDENT_PHONE, ADD_STUDENT_EMAIL = range(3)
+VERIFY_NAME, VERIFY_PHONE, VERIFY_EMAIL = range(3,6)
+SUBMIT_MODULE, SUBMIT_MEDIA_TYPE, SUBMIT_MEDIA_UPLOAD = range(6,9)
+GRADE_SCORE, GRADE_COMMENT_TYPE, GRADE_COMMENT_CONTENT = range(9,12)
+SHARE_WIN_TYPE, SHARE_WIN_UPLOAD = range(12,14)
+ASK_QUESTION_TEXT, ANSWER_QUESTION = range(14,16)
+
+# -----------------------------------------------------------------------------
+# Handlers (full flows)
+# -----------------------------------------------------------------------------
+
+# Start handler (DM-only)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private" and not _is_admin(update.effective_user.id):
+        # do nothing in groups (admin bypass allowed)
+        return
+    uid = update.effective_user.id
+    cursor.execute("SELECT * FROM verified_users WHERE telegram_id=?", (uid,))
+    if cursor.fetchone():
+        keyboard = ReplyKeyboardMarkup(
+            [["📤 Submit Assignment", "🎉 Share Small Win"], ["❓ Ask a Question", "📊 Check Status"]],
+            resize_keyboard=True
+        )
+        await update.message.reply_text("✅ You're verified! Choose an action:", reply_markup=keyboard)
+    else:
+        keyboard = ReplyKeyboardMarkup([["Verify Now"]], resize_keyboard=True)
+        await update.message.reply_text("Welcome! You need to verify to use student features. Click Verify Now or /verify", reply_markup=keyboard)
 
 # -------------------------
-# Utilities & ACL
+# Admin: /add_student in VERIFICATION_GROUP_ID
 # -------------------------
-def get_display_name(user: User) -> str:
-    if not user:
-        return "Unknown"
-    return user.full_name if getattr(user, "full_name", None) else (user.username or f"{user.first_name}")
+async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Admin only and only allowed in verification group or DM if admin
+    if not _is_admin(update.effective_user.id):
+        return
+    if update.effective_chat.type != "private" and update.effective_chat.id != VERIFICATION_GROUP_ID and not _is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text("Enter student's full name:")
+    return ADD_STUDENT_NAME
 
-def is_private_chat(update: Update) -> bool:
-    chat = update.effective_chat
-    if not chat:
-        return False
-    return chat.type == "private"
+async def add_student_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+    if len(name) < 3:
+        await update.message.reply_text("Name must be at least 3 characters. Try again:")
+        return ADD_STUDENT_NAME
+    context.user_data["add_name"] = name
+    await update.message.reply_text("Enter student's phone number (e.g., +2341234567890):")
+    return ADD_STUDENT_PHONE
 
-def is_admin_user(update: Update) -> bool:
-    user = update.effective_user
-    if not user:
-        return False
-    if ADMIN_ID and user.id == ADMIN_ID:
-        return True
-    return False
+PHONE_RE = re.compile(r'^\+\d{10,15}$')
+EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 
-def require_dm_only(update: Update) -> bool:
-    # True if operation allowed in DM (or admin)
-    if is_admin_user(update):
-        return True
-    return is_private_chat(update)
+async def add_student_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    phone = update.message.text.strip()
+    if not PHONE_RE.match(phone):
+        await update.message.reply_text("Phone invalid. Use format +2341234567890. Try again:")
+        return ADD_STUDENT_PHONE
+    context.user_data["add_phone"] = phone
+    await update.message.reply_text("Enter student's email:")
+    return ADD_STUDENT_EMAIL
+
+async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    email = update.message.text.strip()
+    if not EMAIL_RE.match(email):
+        await update.message.reply_text("Email invalid. Try again:")
+        return ADD_STUDENT_EMAIL
+    name = context.user_data.get("add_name")
+    phone = context.user_data.get("add_phone")
+    h = add_pending_verification(name, email, phone, telegram_id=0)
+    await update.message.reply_text(f"Student {name} added as pending. They can verify with these details. Admins can verify with /verify_student {email}")
+    return ConversationHandler.END
 
 # -------------------------
-# Build telegram application and handlers
+# Student verification flow (DM)
 # -------------------------
-def build_application() -> Application:
+async def verify_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # allow in DM only
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Please DM me to verify.")
+        return ConversationHandler.END
+    await update.message.reply_text("Enter your full name:")
+    return VERIFY_NAME
+
+async def verify_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = update.message.text.strip()
+    if len(name) < 3:
+        await update.message.reply_text("Name must be at least 3 characters. Try again:")
+        return VERIFY_NAME
+    context.user_data["verify_name"] = name
+    await update.message.reply_text("Enter your phone number (+countrycode...):")
+    return VERIFY_PHONE
+
+async def verify_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    phone = update.message.text.strip()
+    if not PHONE_RE.match(phone):
+        await update.message.reply_text("Phone invalid. Try again:")
+        return VERIFY_PHONE
+    context.user_data["verify_phone"] = phone
+    await update.message.reply_text("Enter your email:")
+    return VERIFY_EMAIL
+
+async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    email = update.message.text.strip()
+    if not EMAIL_RE.match(email):
+        await update.message.reply_text("Email invalid. Try again:")
+        return VERIFY_EMAIL
+    name = context.user_data.get("verify_name")
+    phone = context.user_data.get("verify_phone")
+    h = _sha_hash(name, email, phone)
+    # check pending_verifications
+    cursor.execute("SELECT id FROM pending_verifications WHERE hash=? AND status='Pending'", (h,))
+    row = cursor.fetchone()
+    if row:
+        # mark verified
+        mark_verified(name, email, phone, update.effective_user.id)
+        # sync to Systeme.io
+        sync_to_systeme(name, email, phone)
+        await update.message.reply_text("✅ Verified! Welcome to AVAP!", reply_markup=ReplyKeyboardRemove())
+        # send main menu
+        keyboard = ReplyKeyboardMarkup(
+            [["📤 Submit Assignment", "🎉 Share Small Win"], ["❓ Ask a Question", "📊 Check Status"]],
+            resize_keyboard=True
+        )
+        await update.message.reply_text("Choose an action:", reply_markup=keyboard)
+    else:
+        await update.message.reply_text("Details not found. Contact admin or try again.", reply_markup=ReplyKeyboardMarkup([["Verify Now"]], resize_keyboard=True))
+    return ConversationHandler.END
+
+# -------------------------
+# Admin manual verify: /verify_student <email>
+# -------------------------
+async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    if len(context.args) < 1:
+        await update.message.reply_text("Usage: /verify_student email@example.com")
+        return
+    email = context.args[0].strip()
+    if not EMAIL_RE.match(email):
+        await update.message.reply_text("Invalid email format.")
+        return
+    pending = find_pending_by_email(email)
+    if not pending:
+        await update.message.reply_text("No pending student found with that email. Use /add_student first.")
+        return
+    # pending: id,name,email,phone,telegram_id,status,hash
+    _, name, email, phone, _, _, h = pending
+    # mark verified with telegram_id=0 for testing, admin can edit
+    mark_verified(name, email, phone, 0)
+    sync_to_systeme(name, email, phone)
+    await update.message.reply_text(f"Student with email {email} verified successfully!")
+
+# -------------------------
+# Admin remove student: /remove_student <telegram_id>
+# -------------------------
+async def remove_student_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    if len(context.args) < 1:
+        await update.message.reply_text("Usage: /remove_student <telegram_id>")
+        return
+    try:
+        tid = int(context.args[0])
+    except Exception:
+        await update.message.reply_text("telegram_id must be an integer")
+        return
+    cursor.execute("SELECT id,name FROM verified_users WHERE telegram_id=?", (tid,))
+    row = cursor.fetchone()
+    if not row:
+        await update.message.reply_text(f"No verified student found with Telegram ID {tid}.")
+        return
+    cursor.execute("DELETE FROM verified_users WHERE telegram_id=?", (tid,))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Verifications")
+            all_rows = ws.get_all_records()
+            for i,row in enumerate(all_rows, start=2):
+                if int(row.get("telegram_id") or 0) == tid:
+                    ws.update(f"E{i}", "Removed")
+                    ws.update(f"D{i}", "")
+                    break
+        except Exception:
+            logger.exception("Failed to update Sheets when removing student")
+    await update.message.reply_text(f"Student {tid} removed. They must re-verify to regain access.")
+
+# -------------------------
+# Submission flow
+# -------------------------
+async def submit_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # DM only
+    if update.effective_chat.type != "private" and not _is_admin(update.effective_user.id):
+        await update.message.reply_text("Please DM me to submit assignments.")
+        return ConversationHandler.END
+    # ensure verified
+    cursor.execute("SELECT * FROM verified_users WHERE telegram_id=?", (update.effective_user.id,))
+    if not cursor.fetchone():
+        await update.message.reply_text("Please verify first using /verify.")
+        return ConversationHandler.END
+    await update.message.reply_text("Which module? (1-12)")
+    return SUBMIT_MODULE
+
+async def submit_module_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    m = update.message.text.strip()
+    try:
+        module = int(m)
+        if not (1 <= module <= 12):
+            raise ValueError()
+    except Exception:
+        await update.message.reply_text("Invalid module. Enter a number 1-12:")
+        return SUBMIT_MODULE
+    context.user_data["module"] = module
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Video", callback_data="media_video"), InlineKeyboardButton("Image", callback_data="media_image")]])
+    await update.message.reply_text("Video or Image?", reply_markup=keyboard)
+    return SUBMIT_MEDIA_TYPE
+
+async def submit_media_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    media = query.data  # media_video or media_image
+    context.user_data["media_type"] = "video" if "video" in media else "image"
+    await query.message.reply_text(f"Send your {context.user_data['media_type']}:")
+    return SUBMIT_MEDIA_UPLOAD
+
+async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # validate media
+    if context.user_data.get("media_type") == "image":
+        if not update.message.photo:
+            await update.message.reply_text("Please send a photo.")
+            return SUBMIT_MEDIA_UPLOAD
+        file_id = update.message.photo[-1].file_id
+        file_type = "photo"
+    else:
+        if not update.message.video:
+            await update.message.reply_text("Please send a video.")
+            return SUBMIT_MEDIA_UPLOAD
+        file_id = update.message.video.file_id
+        file_type = "video"
+    submission_uuid = str(uuid.uuid4())
+    username = update.effective_user.username or update.effective_user.first_name
+    module = context.user_data.get("module")
+    created_at = datetime.datetime.now(TZ).isoformat()
+    cursor.execute("INSERT INTO submissions (telegram_id,username,module,file_id,file_type,submission_uuid,status,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                   (update.effective_user.id, username, module, file_id, file_type, submission_uuid, "Submitted", created_at))
+    conn.commit()
+    # record in sheets
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Assignments")
+            ws.append_row([username, update.effective_user.id, module, "Submitted", file_id, file_type, submission_uuid, created_at, "", "", ""])
+        except Exception:
+            logger.exception("Failed to append assignment to Sheets")
+    # forward to assignments group with grade button
+    if ASSIGNMENTS_GROUP_ID:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("📝 Grade", callback_data=f"grade_{submission_uuid}")]])
+        try:
+            await context.bot.send_message(chat_id=ASSIGNMENTS_GROUP_ID, text=f"Submission from {username} - Module {module}: {file_type} {file_id}", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to forward submission to assignments group")
+    await update.message.reply_text("Boom! Submission received!")
+    return ConversationHandler.END
+
+# -------------------------
+# Grading flows (inline and manual)
+# -------------------------
+async def grade_inline_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # only admins can start grading in group
+    if not _is_admin(update.effective_user.id):
+        await update.callback_query.answer("Admin only", show_alert=True)
+        return
+    query = update.callback_query
+    await query.answer()
+    # query.data like 'grade_<uuid>'
+    submission_uuid = query.data.split("_",1)[1]
+    # fetch submission
+    cursor.execute("SELECT id,username,module,status FROM submissions WHERE submission_uuid=?", (submission_uuid,))
+    sub = cursor.fetchone()
+    if not sub:
+        await query.message.reply_text("Submission not found.")
+        return
+    # send a private message or reply in group with score options (we'll delete the grade button to keep group clean)
+    try:
+        await context.bot.edit_message_reply_markup(chat_id=query.message.chat_id, message_id=query.message.message_id, reply_markup=None)
+    except Exception:
+        pass
+    keyboard = InlineKeyboardMarkup([ [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(1,6)],
+                                     [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(6,11)] ])
+    # send the score selection message (as a ephemeral message in group which we delete later)
+    sent = await query.message.reply_text("Select score (1-10):", reply_markup=keyboard)
+    # store message id to delete after selection
+    context.user_data["score_select_msg"] = (sent.chat_id, sent.message_id)
+    return
+
+async def grade_score_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # pattern score_<uuid>_<score>
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        await query.answer("Admin only")
+        return
+    parts = query.data.split("_")
+    if len(parts) < 3:
+        return
+    submission_uuid = parts[1]
+    score = int(parts[2])
+    # delete the score selection message to reduce clutter
+    try:
+        chat_id, msg_id = context.user_data.get("score_select_msg", (None,None))
+        if chat_id and msg_id:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+    except Exception:
+        pass
+    # ask whether to add comment
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Comment", callback_data=f"comment_yes_{submission_uuid}_{score}"), InlineKeyboardButton("No Comment", callback_data=f"comment_no_{submission_uuid}_{score}")]])
+    await query.message.reply_text("Add a comment?", reply_markup=keyboard)
+
+async def grade_comment_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # callback f"comment_yes_{submission_uuid}_{score}" or comment_no...
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")
+    mode = parts[1]  # yes or no
+    submission_uuid = parts[2]
+    score = int(parts[3])
+    if mode == "no":
+        # persist grade
+        cursor.execute("UPDATE submissions SET status=?, score=? WHERE submission_uuid=?", ("Graded", score, submission_uuid))
+        conn.commit()
+        if sheets_ok:
+            try:
+                ws = sheet.worksheet("Assignments")
+                all_rows = ws.get_all_records()
+                for i,row in enumerate(all_rows, start=2):
+                    if row.get("submission_uuid") == submission_uuid:
+                        ws.update(f"D{i}", "Graded")
+                        ws.update(f"I{i}", score)
+                        break
+            except Exception:
+                logger.exception("Failed to update Sheets after grading")
+        await query.message.reply_text("✅ Graded!")
+        return
+    else:
+        # ask admin to send the comment text
+        await query.message.reply_text("Send your comment (text/audio/video) in this chat. I'll attach it to the submission.")
+        # to keep flow simple, we'll accept next message from admin and treat as comment
+        # store context to know which submission getting a comment
+        context.user_data["grading_submission_uuid"] = submission_uuid
+        context.user_data["grading_score"] = score
+        return
+
+async def grade_comment_content_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only admin
+    if not _is_admin(update.effective_user.id):
+        return
+    comment = None
+    ctype = None
+    if update.message.text:
+        comment = update.message.text
+        ctype = "text"
+    elif update.message.audio:
+        comment = update.message.audio.file_id
+        ctype = "audio"
+    elif update.message.voice:
+        comment = update.message.voice.file_id
+        ctype = "voice"
+    elif update.message.video:
+        comment = update.message.video.file_id
+        ctype = "video"
+    else:
+        await update.message.reply_text("Unsupported comment type. Send text/audio/video.")
+        return
+    submission_uuid = context.user_data.get("grading_submission_uuid")
+    score = context.user_data.get("grading_score")
+    if not submission_uuid:
+        await update.message.reply_text("No submission in context.")
+        return
+    cursor.execute("UPDATE submissions SET status=?, score=?, comment_type=?, comment_content=? WHERE submission_uuid=?", ("Graded", score, ctype, comment, submission_uuid))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Assignments")
+            all_rows = ws.get_all_records()
+            for i,row in enumerate(all_rows, start=2):
+                if row.get("submission_uuid") == submission_uuid:
+                    ws.update(f"D{i}", "Graded")
+                    ws.update(f"I{i}", score)
+                    ws.update(f"J{i}", ctype)
+                    ws.update(f"K{i}", comment)
+                    break
+        except Exception:
+            logger.exception("Failed to update Sheets with grading comment")
+    await update.message.reply_text("✅ Graded with comment sent.")
+
+# Manual grading command
+async def grade_manual_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not _is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text("Enter username to grade:")
+    return GRADE_SCORE
+
+async def grade_manual_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # user text -> store username then ask for module
+    context.user_data["grade_username"] = update.message.text.strip()
+    await update.message.reply_text("Which module? (1-12)")
+    return GRADE_COMMENT_TYPE
+
+async def grade_manual_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        module = int(update.message.text.strip())
+    except Exception:
+        await update.message.reply_text("Invalid module. Enter 1-12.")
+        return GRADE_COMMENT_TYPE
+    uname = context.user_data.get("grade_username")
+    cursor.execute("SELECT submission_uuid, id FROM submissions WHERE username=? AND module=? AND status='Submitted' ORDER BY created_at DESC", (uname,module))
+    r = cursor.fetchone()
+    if not r:
+        await update.message.reply_text("No submitted assignment found.")
+        return ConversationHandler.END
+    submission_uuid = r[0]
+    context.user_data["grading_submission_uuid"] = submission_uuid
+    await update.message.reply_text("Enter score (1-10):")
+    return GRADE_COMMENT_CONTENT
+
+async def grade_manual_score(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        score = int(update.message.text.strip())
+    except Exception:
+        await update.message.reply_text("Invalid score.")
+        return GRADE_COMMENT_CONTENT
+    context.user_data["grading_score"] = score
+    await update.message.reply_text("Add comment? Send it now or type /nocmt to skip")
+    return GRADE_COMMENT_CONTENT
+
+async def grade_manual_comment_finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    score = context.user_data.get("grading_score")
+    submission_uuid = context.user_data.get("grading_submission_uuid")
+    comment = update.message.text.strip() if update.message.text else ""
+    cursor.execute("UPDATE submissions SET status=?, score=?, comment_type=?, comment_content=? WHERE submission_uuid=?", ("Graded", score, "text", comment, submission_uuid))
+    conn.commit()
+    await update.message.reply_text("Grading saved.")
+    return ConversationHandler.END
+
+# -------------------------
+# Share small win
+# -------------------------
+async def share_win_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private" and not _is_admin(update.effective_user.id):
+        await update.message.reply_text("Please DM me to share a win.")
+        return ConversationHandler.END
+    # ensure verified
+    cursor.execute("SELECT * FROM verified_users WHERE telegram_id=?", (update.effective_user.id,))
+    if not cursor.fetchone():
+        await update.message.reply_text("Please verify first using /verify.")
+        return ConversationHandler.END
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Text", callback_data="win_text"), InlineKeyboardButton("Image", callback_data="win_image"), InlineKeyboardButton("Video", callback_data="win_video")]])
+    await update.message.reply_text("Text, Image, or Video?", reply_markup=keyboard)
+    return SHARE_WIN_TYPE
+
+async def share_win_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    kind = query.data.split("_",1)[1]
+    context.user_data["share_kind"] = kind
+    await query.message.reply_text(f"Send your {kind}:")
+    return SHARE_WIN_UPLOAD
+
+async def share_win_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kind = context.user_data.get("share_kind")
+    username = update.effective_user.username or update.effective_user.first_name
+    created_at = datetime.datetime.now(TZ).isoformat()
+    content = None
+    ctype = None
+    if kind == "text" and update.message.text:
+        content = update.message.text
+        ctype = "text"
+    elif kind == "image" and update.message.photo:
+        content = update.message.photo[-1].file_id
+        ctype = "photo"
+    elif kind == "video" and update.message.video:
+        content = update.message.video.file_id
+        ctype = "video"
+    else:
+        await update.message.reply_text("Invalid content type. Try again.")
+        return SHARE_WIN_UPLOAD
+    cursor.execute("INSERT INTO wins (telegram_id,username,content_type,content,created_at) VALUES (?,?,?,?,?)", (update.effective_user.id, username, ctype, content, created_at))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Wins")
+            ws.append_row([username, update.effective_user.id, ctype, content, created_at])
+        except Exception:
+            logger.exception("Failed to log win to Sheets")
+    # forward to support group
+    if SUPPORT_GROUP_ID:
+        try:
+            await context.bot.send_message(chat_id=SUPPORT_GROUP_ID, text=f"Win from {username}: {ctype} {content}")
+        except Exception:
+            logger.exception("Failed to forward win to support group")
+    await update.message.reply_text("Awesome win shared!")
+    return ConversationHandler.END
+
+# -------------------------
+# Ask a question (works in DM and SUPPORT_GROUP via /ask)
+# -------------------------
+async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # allow from DM or SUPPORT_GROUP_ID
+    if update.effective_chat.type != "private" and update.effective_chat.id != SUPPORT_GROUP_ID and not _is_admin(update.effective_user.id):
+        return
+    if update.effective_chat.type != "private":
+        # ask user to DM for question or use inline button to send DM
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Ask in DM", url=f"https://t.me/{(await context.bot.get_me()).username}?start=verify")]])
+        await update.message.reply_text("Please DM me to ask a question.", reply_markup=keyboard)
+        return ConversationHandler.END
+    await update.message.reply_text("What's your question?")
+    return ASK_QUESTION_TEXT
+
+async def ask_question_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    qtext = update.message.text.strip()
+    if not qtext:
+        await update.message.reply_text("Please type your question.")
+        return ASK_QUESTION_TEXT
+    qid = str(uuid.uuid4())
+    username = update.effective_user.username or update.effective_user.first_name
+    created_at = datetime.datetime.now(TZ).isoformat()
+    cursor.execute("INSERT INTO questions (telegram_id,username,question,question_uuid,created_at) VALUES (?,?,?,?,?)", (update.effective_user.id, username, qtext, qid, created_at))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Questions")
+            ws.append_row([username, update.effective_user.id, qtext, "", qid, "", created_at])
+        except Exception:
+            logger.exception("Failed to append question to Sheets")
+    # forward to QUESTIONS_GROUP_ID
+    if QUESTIONS_GROUP_ID:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Answer", callback_data=f"answer_{qid}")]])
+        try:
+            await context.bot.send_message(chat_id=QUESTIONS_GROUP_ID, text=f"Question from {username}: {qtext}", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to forward question to questions group")
+    await update.message.reply_text("Question sent! We'll get back to you.")
+    return ConversationHandler.END
+
+async def answer_question_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # callback handler in questions group -> admin clicks Answer
+    query = update.callback_query
+    await query.answer()
+    if not _is_admin(query.from_user.id):
+        await query.answer("Admin only", show_alert=True)
+        return
+    qid = query.data.split("_",1)[1]
+    # send admin prompt (we'll handle next message from admin)
+    await query.message.reply_text(f"Send your answer for question {qid} (text/audio/video) in this chat, I'll forward to student.")
+    context.user_data["answer_question_uuid"] = qid
+
+async def answer_question_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # admin responding to question
+    if not _is_admin(update.effective_user.id):
+        return
+    qid = context.user_data.get("answer_question_uuid")
+    if not qid:
+        await update.message.reply_text("No question in context.")
+        return
+    # find question author
+    cursor.execute("SELECT telegram_id,username FROM questions WHERE question_uuid=?", (qid,))
+    row = cursor.fetchone()
+    if not row:
+        await update.message.reply_text("Question not found.")
+        return
+    student_tid, student_uname = row
+    # capture answer
+    ans_type = None
+    ans = None
+    if update.message.text:
+        ans_type = "text"
+        ans = update.message.text
+    elif update.message.audio:
+        ans_type = "audio"
+        ans = update.message.audio.file_id
+    elif update.message.voice:
+        ans_type = "voice"
+        ans = update.message.voice.file_id
+    elif update.message.video:
+        ans_type = "video"
+        ans = update.message.video.file_id
+    else:
+        await update.message.reply_text("Unsupported answer type.")
+        return
+    # update DB
+    cursor.execute("UPDATE questions SET answer_type=?, answer=? WHERE question_uuid=?", (ans_type, ans, qid))
+    conn.commit()
+    # forward to student
+    try:
+        if ans_type == "text":
+            await context.bot.send_message(chat_id=student_tid, text=f"Answer to your question: {ans}")
+        else:
+            if ans_type in ("audio","voice"):
+                await context.bot.send_audio(chat_id=student_tid, audio=ans)
+            elif ans_type == "video":
+                await context.bot.send_video(chat_id=student_tid, video=ans)
+    except Exception:
+        logger.exception("Failed to forward answer to student")
+    await update.message.reply_text("Answer sent to student.")
+    context.user_data.pop("answer_question_uuid", None)
+
+# -------------------------
+# Check status
+# -------------------------
+async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Please DM me to check status.")
+        return
+    tid = update.effective_user.id
+    # submissions
+    cursor.execute("SELECT module,status,score,comment_type,comment_content FROM submissions WHERE telegram_id=?", (tid,))
+    subs = cursor.fetchall()
+    cursor.execute("SELECT COUNT(*) FROM wins WHERE telegram_id=?", (tid,))
+    wins_count = cursor.fetchone()[0]
+    completed_modules = [str(s[0]) for s in subs if s[1] == "Graded"]
+    scores = [str(s[2]) for s in subs if s[2] is not None]
+    comments = [s[4] for s in subs if s[4]]
+    msg = f"Completed modules: {', '.join(completed_modules) or 'None'}\nScores: {', '.join(scores) or 'None'}\nComments: {', '.join(comments) or 'None'}\nWins: {wins_count}"
+    await update.message.reply_text(msg)
+    if len(completed_modules) >= ACHIEVER_MODULES and wins_count >= ACHIEVER_WINS:
+        await update.message.reply_text("🎉 AVAP Achiever Badge earned!")
+    # show main menu
+    keyboard = ReplyKeyboardMarkup(
+        [["📤 Submit Assignment", "🎉 Share Small Win"], ["❓ Ask a Question", "📊 Check Status"]],
+        resize_keyboard=True
+    )
+    await update.message.reply_text("Main menu:", reply_markup=keyboard)
+
+# -------------------------
+# Join request handling (example simplified)
+# -------------------------
+async def chat_join_request_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # in webhook mode this must be handled via ChatMember or chat_join_request updates; simplified placeholder
+    # Approve join requests if the user is verified
+    try:
+        req = update.effective_message  # placeholder
+    except Exception:
+        return
+    # This section depends on library support and update content; left as a placeholder
+
+# -------------------------
+# Sunday reminder job
+# -------------------------
+scheduler = AsyncIOScheduler()
+
+async def sunday_reminder_job():
+    cursor.execute("SELECT telegram_id FROM verified_users WHERE status='Verified'")
+    rows = cursor.fetchall()
+    for (tid,) in rows:
+        try:
+            await telegram_app.bot.send_message(chat_id=tid, text="🌞 Sunday Reminder: Check your progress with /status and share a win with /sharewin!")
+        except Exception:
+            logger.exception("Failed to send Sunday reminder to %s", tid)
+
+scheduler.add_job(sunday_reminder_job, "cron", day_of_week="sun", hour=18, minute=0, timezone=TZ)
+
+# -----------------------------------------------------------------------------
+# Build application and register handlers (fixed entry_points)
+# -----------------------------------------------------------------------------
+def build_application():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers (reuse logic from previous polling version, adapted for webhook)
-    async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if update.message is None:
-            return
-        user = update.effective_user
-        if db_get_verified_by_tid(user.id):
-            await update.message.reply_text("✅ You're verified. Choose an action:", reply_markup=STUDENT_MENU)
-        else:
-            await update.message.reply_text("Welcome! Please verify to access features.", reply_markup=VERIFY_INLINE)
+    # basic handlers
+    app.add_handler(CommandHandler("start", start))
 
-    # Add student (admin only)
-    async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            await update.message.reply_text("Only admin can add students.")
-            return ConversationHandler.END
-        await update.message.reply_text("Enter student's full name (min 3 characters):")
-        return ADD_STUDENT_NAME
-
-    async def add_student_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        text = (update.message.text or "").strip()
-        if len(text) < 3:
-            await update.message.reply_text("Name too short.")
-            return ADD_STUDENT_NAME
-        context.user_data["add_name"] = text
-        await update.message.reply_text("Enter student's phone number (e.g., +2341234567890):")
-        return ADD_STUDENT_PHONE
-
-    async def add_student_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        phone = (update.message.text or "").strip()
-        if not RE_PHONE.match(phone):
-            await update.message.reply_text("Invalid phone format.")
-            return ADD_STUDENT_PHONE
-        context.user_data["add_phone"] = phone
-        await update.message.reply_text("Enter student's email:")
-        return ADD_STUDENT_EMAIL
-
-    async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        email = (update.message.text or "").strip()
-        if not RE_EMAIL.match(email):
-            await update.message.reply_text("Invalid email.")
-            return ADD_STUDENT_EMAIL
-        name = context.user_data.get("add_name")
-        phone = context.user_data.get("add_phone")
-        ok, h = db_add_pending(name, phone, email)
-        if ok:
-            await update.message.reply_text(f"Student {name} added (Pending). Admins can manually verify with /verify_student [email].")
-        else:
-            await update.message.reply_text("Failed to add student; record may exist.")
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    # Verify flow
-    async def verify_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Verification is DM-only. Please DM me.", reply_markup=VERIFY_INLINE)
-            return ConversationHandler.END
-        user = update.effective_user
-        if db_get_verified_by_tid(user.id):
-            await update.message.reply_text("✅ You are already verified.", reply_markup=STUDENT_MENU)
-            return ConversationHandler.END
-        await update.message.reply_text("Enter your full name (min 3 characters):")
-        return VERIFY_NAME
-
-    async def verify_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ This step must be done in private chat.")
-            return ConversationHandler.END
-        name = (update.message.text or "").strip()
-        if len(name) < 3:
-            await update.message.reply_text("Name too short.")
-            return VERIFY_NAME
-        context.user_data["v_name"] = name
-        await update.message.reply_text("Enter your phone number (e.g., +2341234567890):")
-        return VERIFY_PHONE
-
-    async def verify_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ This step must be done in private chat.")
-            return ConversationHandler.END
-        phone = (update.message.text or "").strip()
-        if not RE_PHONE.match(phone):
-            await update.message.reply_text("Invalid phone")
-            return VERIFY_PHONE
-        context.user_data["v_phone"] = phone
-        await update.message.reply_text("Enter your email:")
-        return VERIFY_EMAIL
-
-    async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ This step must be done in private chat.")
-            return ConversationHandler.END
-        email = (update.message.text or "").strip()
-        if not RE_EMAIL.match(email):
-            await update.message.reply_text("Invalid email")
-            return VERIFY_EMAIL
-        name = context.user_data.get("v_name")
-        phone = context.user_data.get("v_phone")
-        pending = db_find_pending_by_details(name, phone, email)
-        if not pending and sheets_ok:
-            try:
-                rows = verif_ws.get_all_records()
-                for r in rows:
-                    if (r.get("email") or "").strip().lower() == email.strip().lower():
-                        pending = {"id": None, "name": r.get("name"), "phone": r.get("phone"), "email": r.get("email"), "hash": r.get("hash") or _sha_hash(name, email, phone)}
-                        break
-            except Exception:
-                logger.exception("Sheet lookup failed in verify_email")
-        if not pending:
-            await update.message.reply_text("Details not found. Contact admin or try again.", reply_markup=VERIFY_INLINE)
-            context.user_data.clear()
-            return ConversationHandler.END
-        # verify and sync
-        if hasattr(pending, "keys"):
-            success = db_verify_user_by_pending(pending, update.effective_user.id)
-        else:
-            try:
-                c.execute("INSERT OR REPLACE INTO verified_users (name, phone, email, telegram_id) VALUES (?, ?, ?, ?)",
-                          (name, phone, email, update.effective_user.id))
-                conn.commit()
-                success = True
-                if sheets_ok and verif_ws:
-                    try:
-                        verif_ws.append_row([None, name, phone, email, update.effective_user.id, "Verified", _sha_hash(name, email, phone), datetime.datetime.utcnow().isoformat()])
-                    except Exception:
-                        logger.exception("Failed to append verified row")
-            except Exception:
-                logger.exception("Failed to insert verified", exc_info=True)
-                success = False
-        if success:
-            try:
-                await systeme_create_contact_and_tag(email, name, phone)
-            except Exception:
-                logger.exception("Systeme sync failed")
-            await update.message.reply_text("✅ Verified! Welcome to AVAP!", reply_markup=STUDENT_MENU)
-            await update.message.reply_text(f"Please visit: {LANDING_PAGE_LINK}")
-        else:
-            await update.message.reply_text("Verification failed. Contact admin.")
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not require_dm_only(update) and not is_admin_user(update):
-            await q.message.reply_text("❌ Please DM the bot to verify.")
-            return
-        user = q.from_user
-        if db_get_verified_by_tid(user.id):
-            await q.message.reply_text("You are already verified.", reply_markup=STUDENT_MENU)
-            return
-        c.execute("SELECT * FROM pending_verifications WHERE telegram_id = ? LIMIT 1", (user.id,))
-        pending = c.fetchone()
-        if pending:
-            ok = db_verify_user_by_pending(pending, user.id)
-            if ok:
-                await systeme_create_contact_and_tag(pending["email"], pending["name"], pending["phone"])
-                await q.message.reply_text("✅ Verified! Welcome.", reply_markup=STUDENT_MENU)
-                return
-        await q.message.reply_text("Please run /verify in DM to complete verification.")
-
-    # Manual verify & remove admin commands
-    async def verify_student_manual(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            await update.message.reply_text("Only admin can manually verify.")
-            return
-        parts = (update.message.text or "").split(maxsplit=1)
-        if len(parts) < 2:
-            await update.message.reply_text("Usage: /verify_student email@example.com")
-            return
-        email = parts[1].strip()
-        if not RE_EMAIL.match(email):
-            await update.message.reply_text("Invalid email.")
-            return
-        pending = db_find_pending_by_email(email)
-        if not pending and sheets_ok:
-            try:
-                rows = verif_ws.get_all_records()
-                for r in rows:
-                    if (r.get("email") or "").strip().lower() == email.lower():
-                        ok_new, h = db_add_pending(r.get("name"), r.get("phone"), r.get("email"))
-                        if ok_new:
-                            pending = db_find_pending_by_email(email)
-                        break
-            except Exception:
-                logger.exception("Sheet query failed")
-        if not pending:
-            await update.message.reply_text(f"No pending student found with email {email}. Add with /add_student.")
-            return
-        ok = db_verify_user_by_pending(pending, 0)
-        if ok:
-            await systeme_create_contact_and_tag(pending["email"], pending["name"], pending["phone"])
-            await update.message.reply_text(f"Student with email {email} verified successfully!")
-        else:
-            await update.message.reply_text("Failed to verify student.")
-
-    async def remove_student_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            await update.message.reply_text("Only admin can remove students.")
-            return
-        parts = (update.message.text or "").split(maxsplit=1)
-        if len(parts) < 2:
-            await update.message.reply_text("Usage: /remove_student <telegram_id>")
-            return
-        try:
-            target = int(parts[1].strip())
-        except ValueError:
-            await update.message.reply_text("Invalid telegram id.")
-            return
-        ok = db_remove_verified(target)
-        if ok:
-            await update.message.reply_text(f"Student {target} removed.")
-        else:
-            await update.message.reply_text("No verified student found with that ID.")
-
-    # Submission conv (DM-only)
-    async def submit_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Submitting assignments only works in private chat. Please DM me.")
-            return ConversationHandler.END
-        user = update.effective_user
-        if not is_admin_user(update) and not db_get_verified_by_tid(user.id):
-            await update.message.reply_text("Please verify first.", reply_markup=VERIFY_INLINE)
-            return ConversationHandler.END
-        await update.message.reply_text("Which module? (1-12)")
-        return SUBMIT_MODULE
-
-    async def submit_module_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ This step must be done in private chat.")
-            return ConversationHandler.END
-        try:
-            module = int((update.message.text or "").strip())
-            if module < 1 or module > 12:
-                raise ValueError
-        except Exception:
-            await update.message.reply_text("Invalid module number (1-12).")
-            return SUBMIT_MODULE
-        context.user_data["submit_module"] = module
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Image", callback_data="media_image"), InlineKeyboardButton("Video", callback_data="media_video")]])
-        await update.message.reply_text("Select media type:", reply_markup=kb)
-        return SUBMIT_MEDIA_TYPE
-
-    async def submit_media_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not require_dm_only(update):
-            await q.message.reply_text("❌ Please DM the bot to submit assignments.")
-            return ConversationHandler.END
-        data = q.data
-        context.user_data["submit_media_type"] = "image" if data == "media_image" else "video"
-        await q.message.reply_text(f"Please send your {context.user_data['submit_media_type']} now.")
-        return SUBMIT_MEDIA_UPLOAD
-
-    async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Please DM the bot to upload your assignment.")
-            return ConversationHandler.END
-        user = update.effective_user
-        username = get_display_name(user)
-        module = context.user_data.get("submit_module")
-        m_type = context.user_data.get("submit_media_type")
-        file_id = None
-        if m_type == "image" and update.message.photo:
-            file_id = update.message.photo[-1].file_id
-        elif m_type == "video" and update.message.video:
-            file_id = update.message.video.file_id
-        else:
-            await update.message.reply_text(f"Please send a valid {m_type}.")
-            return SUBMIT_MEDIA_UPLOAD
-        sub_uuid = db_add_submission(username, user.id, module, m_type, file_id)
-        if ASSIGNMENTS_GROUP_ID:
-            try:
-                caption = f"Submission from {username} - Module {module}: id:{sub_uuid}"
-                kb = InlineKeyboardMarkup([[InlineKeyboardButton("📝 Grade", callback_data=f"grade_{sub_uuid}")]])
-                if m_type == "image":
-                    await context.bot.send_photo(ASSIGNMENTS_GROUP_ID, file_id, caption=caption, reply_markup=kb)
-                else:
-                    await context.bot.send_video(ASSIGNMENTS_GROUP_ID, file_id, caption=caption, reply_markup=kb)
-            except Exception:
-                logger.exception("Failed to forward submission to assignments group")
-        await update.message.reply_text("Submission received!", reply_markup=STUDENT_MENU)
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    # Grading inline flow (admin)
-    def make_score_kb():
-        buttons = [InlineKeyboardButton(str(i), callback_data=f"score_{i}") for i in range(1, 11)]
-        return InlineKeyboardMarkup([buttons[:5], buttons[5:]])
-
-    def make_comment_kb():
-        return InlineKeyboardMarkup([[InlineKeyboardButton("Add Comment", callback_data="comment_yes"), InlineKeyboardButton("No Comment", callback_data="comment_no")]])
-
-    async def grade_inline_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not is_admin_user(update):
-            await q.message.reply_text("Only admin can grade.")
-            return
-        sub_uuid = q.data.replace("grade_", "")
-        context.chat_data["grade_uuid"] = sub_uuid
-        # remove inline keyboard from original submission message to avoid duplicate grading
-        try:
-            await q.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            try:
-                await q.message.delete()
-            except Exception:
-                pass
-        try:
-            sent = await context.bot.send_message(q.message.chat_id, f"Grading submission id: {sub_uuid}\nSelect score (1-10):", reply_markup=make_score_kb())
-            context.chat_data["grading_msg_id"] = sent.message_id
-        except Exception:
-            logger.exception("Failed to send score selection")
-
-    async def grade_score_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not is_admin_user(update):
-            await q.message.reply_text("Only admin can grade.")
-            return
-        score = int(q.data.replace("score_", ""))
-        context.chat_data["grade_score"] = score
-        try:
-            await q.message.delete()
-        except Exception:
-            try:
-                await q.message.edit_reply_markup(reply_markup=None)
-            except Exception:
-                pass
-        try:
-            sent = await context.bot.send_message(q.message.chat_id, "Add a comment?", reply_markup=make_comment_kb())
-            context.chat_data["comment_prompt_msg_id"] = sent.message_id
-        except Exception:
-            logger.exception("Failed to send comment prompt")
-
-    async def grade_comment_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not is_admin_user(update):
-            await q.message.reply_text("Only admin can grade.")
-            return
-        try:
-            await q.message.delete()
-        except Exception:
-            try:
-                await q.message.edit_reply_markup(reply_markup=None)
-            except Exception:
-                pass
-        sub_uuid = context.chat_data.get("grade_uuid")
-        score = context.chat_data.get("grade_score")
-        if q.data == "comment_no":
-            db_set_submission_graded(sub_uuid, score, None, None)
-            try:
-                await context.bot.send_message(q.message.chat_id, f"✅ Graded: {score}/10 - id:{sub_uuid}")
-            except Exception:
-                pass
-            try:
-                c.execute("SELECT telegram_id FROM submissions WHERE submission_uuid = ? LIMIT 1", (sub_uuid,))
-                r = c.fetchone()
-                if r:
-                    student_tid = r["telegram_id"]
-                    await context.bot.send_message(student_tid, f"Your submission (id:{sub_uuid}) was graded: {score}/10. No comment.")
-            except Exception:
-                logger.exception("Failed to notify student")
-            context.chat_data.pop("grade_uuid", None)
-            context.chat_data.pop("grade_score", None)
-        else:
-            # Admin will DM their comment
-            sub_uuid = context.chat_data.get("grade_uuid")
-            score = context.chat_data.get("grade_score")
-            context.user_data["awaiting_grade_comment"] = True
-            context.user_data["grade_uuid"] = sub_uuid
-            context.user_data["grade_score"] = score
-            try:
-                await context.bot.send_message(ADMIN_ID, f"Please send your comment (text/audio/video) for submission id:{sub_uuid} (score: {score}). Reply here with the content.")
-                await context.bot.send_message(q.message.chat_id, "Admin will DM comment privately. Group cleaned.")
-            except Exception:
-                logger.exception("Failed to DM admin for comment")
-
-    async def grade_comment_content_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not ADMIN_ID or not is_admin_user(update):
-            return
-        if not context.user_data.get("awaiting_grade_comment"):
-            return
-        sub_uuid = context.user_data.get("grade_uuid")
-        score = context.user_data.get("grade_score")
-        comment_type = None
-        comment_content = None
-        if update.message.text:
-            comment_type = "text"
-            comment_content = update.message.text.strip()
-        elif update.message.audio:
-            comment_type = "audio"
-            comment_content = update.message.audio.file_id
-        elif update.message.video:
-            comment_type = "video"
-            comment_content = update.message.video.file_id
-        else:
-            await update.message.reply_text("Please send text, audio, or video as comment.")
-            return
-        db_set_submission_graded(sub_uuid, score, comment_type, str(comment_content))
-        try:
-            c.execute("SELECT telegram_id FROM submissions WHERE submission_uuid = ? LIMIT 1", (sub_uuid,))
-            r = c.fetchone()
-            if r:
-                student_tid = r["telegram_id"]
-                if comment_type == "text":
-                    await context.bot.send_message(student_tid, f"Your submission (id:{sub_uuid}) was graded: {score}/10\nComment: {comment_content}")
-                elif comment_type == "audio":
-                    await context.bot.send_audio(student_tid, comment_content, caption=f"Your submission (id:{sub_uuid}) graded: {score}/10")
-                elif comment_type == "video":
-                    await context.bot.send_video(student_tid, comment_content, caption=f"Your submission (id:{sub_uuid}) graded: {score}/10")
-        except Exception:
-            logger.exception("Failed to send graded comment to student")
-        if ASSIGNMENTS_GROUP_ID:
-            try:
-                await context.bot.send_message(ASSIGNMENTS_GROUP_ID, f"✅ Graded: {score}/10 - id:{sub_uuid}")
-            except Exception:
-                logger.exception("Failed to send final graded message to assignments group")
-        await update.message.reply_text("Comment saved and forwarded to student.")
-        context.user_data.pop("awaiting_grade_comment", None)
-        context.user_data.pop("grade_uuid", None)
-        context.user_data.pop("grade_score", None)
-        return ConversationHandler.END
-
-    async def grade_manual_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            await update.message.reply_text("Only admin can use /grade.")
-            return ConversationHandler.END
-        await update.message.reply_text("Enter username to grade:")
-        return MANUAL_GRADE_USERNAME
-
-    async def grade_manual_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            return ConversationHandler.END
-        username = (update.message.text or "").strip()
-        context.user_data["manual_grade_username"] = username
-        await update.message.reply_text("Enter module number (1-12):")
-        return MANUAL_GRADE_MODULE
-
-    async def grade_manual_module(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            return ConversationHandler.END
-        try:
-            module = int((update.message.text or "").strip())
-            if not (1 <= module <= 12):
-                raise ValueError
-        except Exception:
-            await update.message.reply_text("Invalid module.")
-            return ConversationHandler.END
-        username = context.user_data.get("manual_grade_username")
-        c.execute("SELECT * FROM submissions WHERE username = ? AND module = ? AND status = 'Submitted' ORDER BY created_at ASC LIMIT 1", (username, module))
-        row = c.fetchone()
-        if not row:
-            await update.message.reply_text("No submitted assignment found.")
-            context.user_data.clear()
-            return ConversationHandler.END
-        sub_uuid = row["submission_uuid"]
-        context.user_data["grade_uuid"] = sub_uuid
-        await update.message.reply_text(f"Grading submission id:{sub_uuid}\nSelect score (1-10):", reply_markup=make_score_kb())
-        return GRADE_SCORE
-
-    # Share win (DM-only)
-    async def share_win_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Sharing wins only works in private chat. Please DM me.")
-            return ConversationHandler.END
-        user = update.effective_user
-        if not is_admin_user(update) and not db_get_verified_by_tid(user.id):
-            await update.message.reply_text("Please verify first.", reply_markup=VERIFY_INLINE)
-            return ConversationHandler.END
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Text", callback_data="win_text"), InlineKeyboardButton("Image", callback_data="win_image"), InlineKeyboardButton("Video", callback_data="win_video")]])
-        await update.message.reply_text("Choose type of win to share:", reply_markup=kb)
-        return SHARE_WIN_TYPE
-
-    async def share_win_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not require_dm_only(update):
-            await q.message.reply_text("❌ Please DM the bot to share your win.")
-            return ConversationHandler.END
-        data = q.data
-        if data == "win_text":
-            context.user_data["win_type"] = "text"
-            await q.message.reply_text("Send your win text now:")
-        elif data == "win_image":
-            context.user_data["win_type"] = "image"
-            await q.message.reply_text("Send your image now:")
-        else:
-            context.user_data["win_type"] = "video"
-            await q.message.reply_text("Send your video now:")
-        return SHARE_WIN_UPLOAD
-
-    async def share_win_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Please DM the bot to share your win.")
-            return ConversationHandler.END
-        user = update.effective_user
-        username = get_display_name(user)
-        tid = user.id
-        wtype = context.user_data.get("win_type", "text")
-        content = None
-        if wtype == "text":
-            if not (update.message and update.message.text and update.message.text.strip()):
-                await update.message.reply_text("Please send non-empty text.")
-                return SHARE_WIN_UPLOAD
-            content = update.message.text.strip()
-        elif wtype == "image":
-            if not update.message.photo:
-                await update.message.reply_text("Please send an image.")
-                return SHARE_WIN_UPLOAD
-            content = update.message.photo[-1].file_id
-        elif wtype == "video":
-            if not update.message.video:
-                await update.message.reply_text("Please send a video.")
-                return SHARE_WIN_UPLOAD
-            content = update.message.video.file_id
-        else:
-            await update.message.reply_text("Unknown type.")
-            return ConversationHandler.END
-
-        db_add_win(username, tid, wtype, str(content))
-
-        if SUPPORT_GROUP_ID:
-            try:
-                if wtype == "text":
-                    await context.bot.send_message(SUPPORT_GROUP_ID, f"Win from {username}:\n{content}")
-                elif wtype == "image":
-                    await context.bot.send_photo(SUPPORT_GROUP_ID, content, caption=f"Win from {username}")
-                elif wtype == "video":
-                    await context.bot.send_video(SUPPORT_GROUP_ID, content, caption=f"Win from {username}")
-            except Exception:
-                logger.exception("Failed to forward win to support group")
-        await update.message.reply_text("Awesome win shared!", reply_markup=STUDENT_MENU)
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    # Ask question (DM or support group /ask)
-    async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        chat = update.effective_chat
-        if chat and chat.type != "private" and (SUPPORT_GROUP_ID and chat.id != SUPPORT_GROUP_ID):
-            await update.message.reply_text("❌ Ask only works in private chat or in the support group.")
-            return ConversationHandler.END
-        await update.message.reply_text("What's your question? (text only)")
-        return ASK_QUESTION_TEXT
-
-    async def ask_button_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not is_private_chat(update) and not (SUPPORT_GROUP_ID and q.message.chat_id == SUPPORT_GROUP_ID):
-            await q.message.reply_text("❌ Please DM me and type /ask to submit your question.")
-            return ConversationHandler.END
-        await q.message.reply_text("What's your question? (text only)")
-        return ASK_QUESTION_TEXT
-
-    async def ask_question_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_private_chat(update) and not (update.effective_chat and update.effective_chat.id == SUPPORT_GROUP_ID):
-            await update.message.reply_text("❌ Please DM me to ask a question or use the support group /ask.")
-            return ConversationHandler.END
-        qtext = (update.message.text or "").strip()
-        if not qtext:
-            await update.message.reply_text("Please send a non-empty question.")
-            return ASK_QUESTION_TEXT
-        q_uuid = db_add_question(get_display_name(update.effective_user), update.effective_user.id, qtext)
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Answer", callback_data=f"answer_{q_uuid}")]])
-        if QUESTIONS_GROUP_ID:
-            try:
-                await context.bot.send_message(QUESTIONS_GROUP_ID, f"Question from {get_display_name(update.effective_user)} (id:{q_uuid}):\n{qtext}", reply_markup=kb)
-            except Exception:
-                logger.exception("Failed to forward question to questions group")
-        await update.message.reply_text("Question sent! We'll get back to you.", reply_markup=STUDENT_MENU)
-        return ConversationHandler.END
-
-    async def answer_question_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        q = update.callback_query
-        await q.answer()
-        if not is_admin_user(update):
-            await q.message.reply_text("Only admin can answer questions.")
-            return ConversationHandler.END
-        q_uuid = q.data.replace("answer_", "")
-        context.user_data["answer_uuid"] = q_uuid
-        try:
-            await context.bot.send_message(ADMIN_ID, f"Please send your answer (text/audio/video) for question id: {q_uuid}. Reply here and I'll forward it to the asker.")
-            await q.message.reply_text("Admin will DM the answer privately.")
-        except Exception:
-            logger.exception("Failed to request answer DM from admin")
-        return ANSWER_QUESTION_CONTENT
-
-    async def answer_question_content_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not is_admin_user(update):
-            return ConversationHandler.END
-        if not context.user_data.get("answer_uuid"):
-            await update.message.reply_text("No question pending to answer.")
-            return ConversationHandler.END
-        a_uuid = context.user_data.get("answer_uuid")
-        answer_type = None
-        answer_content = None
-        if update.message.text:
-            answer_type = "text"
-            answer_content = update.message.text.strip()
-        elif update.message.audio:
-            answer_type = "audio"
-            answer_content = update.message.audio.file_id
-        elif update.message.video:
-            answer_type = "video"
-            answer_content = update.message.video.file_id
-        else:
-            await update.message.reply_text("Please send text, audio, or video as answer.")
-            return ANSWER_QUESTION_CONTENT
-        try:
-            c.execute("UPDATE questions SET answer = ?, answer_type = ? WHERE question_uuid = ?", (str(answer_content), answer_type, a_uuid))
-            conn.commit()
-            if sheets_ok and faq_ws:
-                try:
-                    faq_ws.append_row(["Answer", a_uuid, str(answer_content), answer_type, datetime.datetime.utcnow().isoformat()])
-                except Exception:
-                    logger.exception("append answer to sheet failed")
-        except Exception:
-            logger.exception("Failed to update question")
-        try:
-            c.execute("SELECT telegram_id FROM questions WHERE question_uuid = ? LIMIT 1", (a_uuid,))
-            r = c.fetchone()
-            if r:
-                asker_id = r["telegram_id"]
-                try:
-                    if answer_type == "text":
-                        await context.bot.send_message(asker_id, f"Answer to your question:\n{answer_content}")
-                    elif answer_type == "audio":
-                        await context.bot.send_audio(asker_id, answer_content, caption="Answer to your question")
-                    elif answer_type == "video":
-                        await context.bot.send_video(asker_id, answer_content, caption="Answer to your question")
-                    await update.message.reply_text("Answer sent to student.")
-                except Exception:
-                    logger.exception("Failed to deliver answer to asker")
-            else:
-                await update.message.reply_text("Asker not found; saved answer in DB.")
-        except Exception:
-            logger.exception("Failed to fetch question asker")
-        context.user_data.pop("answer_uuid", None)
-        return ConversationHandler.END
-
-    # Check status (DM-only)
-    async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not require_dm_only(update):
-            await update.message.reply_text("❌ Checking status only works in private chat. Please DM me.")
-            return
-        user = update.effective_user
-        uid = user.id
-        if not is_admin_user(update) and not db_get_verified_by_tid(uid):
-            await update.message.reply_text("Please verify first.", reply_markup=VERIFY_INLINE)
-            return
-        try:
-            c.execute("SELECT module, status, score FROM submissions WHERE telegram_id = ?", (uid,))
-            rows = c.fetchall()
-            modules = []
-            scores = []
-            graded_count = 0
-            for r in rows:
-                modules.append(str(r["module"]))
-                scores.append(str(r["score"]) if r["score"] is not None else "N/A")
-                if r["status"] == "Graded":
-                    graded_count += 1
-            c.execute("SELECT COUNT(*) as cnt FROM wins WHERE telegram_id = ?", (uid,))
-            wins_count = c.fetchone()["cnt"]
-            msg = f"Completed modules: {', '.join(modules) if modules else 'None'}\nScores: {', '.join(scores) if scores else 'None'}\nWins: {wins_count}\nGraded submissions: {graded_count}"
-            await update.message.reply_text(msg, reply_markup=STUDENT_MENU)
-            if graded_count >= ACHIEVER_MODULES and wins_count >= ACHIEVER_WINS:
-                await update.message.reply_text("🎉 AVAP Achiever Badge earned! Congratulations!", reply_markup=STUDENT_MENU)
-        except Exception:
-            logger.exception("Failed to compute status")
-            await update.message.reply_text("Failed to fetch status. Try again later.", reply_markup=STUDENT_MENU)
-
-    # Chat join request handling
-    async def chat_join_request_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        try:
-            req: ChatJoinRequest = update.chat_join_request
-            user = req.from_user
-            chat = req.chat
-            if SUPPORT_GROUP_ID and chat.id != SUPPORT_GROUP_ID:
-                return
-            if db_get_verified_by_tid(user.id):
-                try:
-                    await context.bot.approve_chat_join_request(chat_id=chat.id, user_id=user.id)
-                    await context.bot.send_message(user.id, f"Welcome to {chat.title}! You were auto-approved.", reply_markup=STUDENT_MENU)
-                except Exception:
-                    logger.exception("Failed to approve chat join request")
-            else:
-                try:
-                    await context.bot.decline_chat_join_request(chat_id=chat.id, user_id=user.id)
-                except Exception:
-                    logger.exception("Failed to decline chat join request")
-                try:
-                    await context.bot.send_message(user.id, "You need to verify first to join. Please verify with /verify or click verify button.", reply_markup=VERIFY_INLINE)
-                except Exception:
-                    pass
-        except Exception:
-            logger.exception("Error in join request handler")
-
-    # Fallback menu text handler
-    async def menu_text_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if not update.message or not update.message.text:
-            return
-        text = update.message.text.strip()
-        if text in ("📤 Submit Assignment", "Submit Assignment"):
-            return await submit_start_handler(update, context)
-        if text in ("🎉 Share Small Win", "Share Win"):
-            return await share_win_start(update, context)
-        if text in ("📊 Check Status", "Check Status", "/status"):
-            return await check_status_handler(update, context)
-        if text in ("❓ Ask a Question", "Ask Question"):
-            if not is_private_chat(update) and not (SUPPORT_GROUP_ID and update.message.chat_id == SUPPORT_GROUP_ID):
-                await update.message.reply_text("❌ Please DM me and type /ask to submit your question.")
-                return
-            return await ask_command(update, context)
-        await update.message.reply_text("Use the menu buttons in DM.", reply_markup=STUDENT_MENU)
-
-    # Error handler
-    async def on_error(update: Optional[Update], context: ContextTypes.DEFAULT_TYPE):
-        logger.exception("Unhandled error in update", exc_info=True)
-        if ADMIN_ID:
-            try:
-                await context.bot.send_message(ADMIN_ID, f"⚠️ Bot error: {context.error}")
-            except Exception:
-                logger.exception("Failed to notify admin about error")
-
-    # Register handlers on the application
-    app.add_handler(CommandHandler("start", start_handler))
-
+    # add_student conversation (admin)
     add_student_conv = ConversationHandler(
-        entry_points=[CommandHandler("add_student", add_student_start)],
+        entry_points=[
+            CommandHandler("add_student", add_student_start),
+        ],
         states={
             ADD_STUDENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
             ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
@@ -1173,28 +954,19 @@ def build_application() -> Application:
         per_message=False,
     )
     app.add_handler(add_student_conv)
-
-    verify_conv = ConversationHandler(
-        entry_points=[CommandHandler("verify", verify_start_cmd), CallbackQueryHandler(verify_now_callback, pattern="^verify_now$")],
-        states={
-            VERIFY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_name)],
-            VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
-            VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
-        },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
-        per_message=False,
-    )
-    app.add_handler(verify_conv)
-
-    app.add_handler(CommandHandler("verify_student", verify_student_manual))
+    app.add_handler(CommandHandler("verify_student", verify_student_cmd))
     app.add_handler(CommandHandler("remove_student", remove_student_handler))
 
+    # submit conversation
     submit_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex(r"^📤 Submit Assignment$") | filters.Regex(r"^Submit Assignment$") | CommandHandler("submit", lambda u, c: submit_start_handler(u, c)), submit_start_handler)],
+        entry_points=[
+            MessageHandler(filters.Regex(r"^📤 Submit Assignment$") | filters.Regex(r"^Submit Assignment$"), submit_start_handler),
+            CommandHandler("submit", submit_start_handler),
+        ],
         states={
             SUBMIT_MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, submit_module_handler)],
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_cb, pattern="^media_")],
-            SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
+            SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO | filters.TEXT) & ~filters.COMMAND, submit_media_upload)],
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         per_message=False,
@@ -1202,6 +974,7 @@ def build_application() -> Application:
     app.add_handler(submit_conv)
     app.add_handler(CallbackQueryHandler(submit_media_type_cb, pattern="^media_"))
 
+    # grading handlers
     app.add_handler(CallbackQueryHandler(grade_inline_start, pattern="^grade_"))
     app.add_handler(CallbackQueryHandler(grade_score_cb, pattern="^score_"))
     app.add_handler(CallbackQueryHandler(grade_comment_type_cb, pattern="^comment_"))
@@ -1209,195 +982,150 @@ def build_application() -> Application:
     manual_grade_conv = ConversationHandler(
         entry_points=[CommandHandler("grade", grade_manual_start)],
         states={
-            MANUAL_GRADE_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_username)],
-            MANUAL_GRADE_MODULE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_module)],
-            GRADE_SCORE: [CallbackQueryHandler(grade_score_cb, pattern="^score_")],
+            GRADE_SCORE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_username)],
+            GRADE_COMMENT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_module)],
+            GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_score)],
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         per_message=False,
     )
     app.add_handler(manual_grade_conv)
 
+    # admin comment content handler (free-form)
     if ADMIN_ID:
         app.add_handler(MessageHandler(filters.ALL & filters.User(user_id=ADMIN_ID), grade_comment_content_handler))
 
+    # share win conversation
     share_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex(r"^🎉 Share Small Win$") | filters.Regex(r"^Share Win$") | CommandHandler("sharewin", lambda u, c: share_win_start(u, c)), share_win_start)],
+        entry_points=[
+            MessageHandler(filters.Regex(r"^🎉 Share Small Win$") | filters.Regex(r"^Share Small Win$"), share_win_start),
+            CommandHandler("sharewin", share_win_start),
+        ],
         states={
             SHARE_WIN_TYPE: [CallbackQueryHandler(share_win_type_cb, pattern="^win_")],
             SHARE_WIN_UPLOAD: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, share_win_upload_handler)],
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
-        per_message=False,
+        per_message=False
     )
     app.add_handler(share_conv)
     app.add_handler(CallbackQueryHandler(share_win_type_cb, pattern="^win_"))
 
+    # ask conversation (works with /ask or Ask button)
     ask_conv = ConversationHandler(
-        entry_points=[CommandHandler("ask", ask_command), CallbackQueryHandler(ask_button_cb, pattern="^ask_dm$")],
-        states={ASK_QUESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question_text_handler)]},
+        entry_points=[
+            CommandHandler("ask", ask_command),
+            MessageHandler(filters.Regex(r"^❓ Ask a Question$") | filters.Regex(r"^Ask a Question$"), ask_command),
+            CallbackQueryHandler(lambda u,c: None, pattern="^ask_dm$"),  # placeholder if you use callback to DM
+        ],
+        states={
+            ASK_QUESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question_text_handler)]
+        },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
-        per_message=False,
+        per_message=False
     )
     app.add_handler(ask_conv)
 
+    # answer question callback in questions group
     app.add_handler(CallbackQueryHandler(answer_question_start, pattern="^answer_"))
+    # admin answer messages (we'll read any admin message to answer question if in context)
     if ADMIN_ID:
-        app.add_handler(MessageHandler(filters.ALL & filters.User(user_id=ADMIN_ID), answer_question_content_handler))
+        app.add_handler(MessageHandler(filters.ALL & filters.User(user_id=ADMIN_ID), answer_question_receive))
 
-    app.add_handler(MessageHandler(filters.Regex(r"^📊 Check Status$|^Check Status$|^/status$"), check_status_handler))
+    # verification conversation
+    verify_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("verify", verify_start_cmd),
+            MessageHandler(filters.Regex(r"^Verify Now$"), verify_start_cmd),
+            CallbackQueryHandler(lambda u,c: None, pattern="^verify_now$"),  # if you show a button that uses callback
+        ],
+        states={
+            VERIFY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_name)],
+            VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
+            VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
+        },
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        per_message=False
+    )
+    app.add_handler(verify_conv)
 
-    try:
-        app.add_handler(ChatJoinRequestHandler(chat_join_request_handler))
-    except Exception:
-        logger.info("ChatJoinRequestHandler not available in this environment")
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_text_fallback))
-
-    app.add_error_handler(on_error)
-
-    # schedule job (Sunday 18:00 local server time; adjust if necessary)
-    try:
-        job_time = datetime.time(hour=18, minute=0)
-        app.job_queue.run_daily(sunday_reminder_job, time=job_time, days=(6,), name="sunday_reminder")
-    except Exception:
-        logger.exception("Failed to schedule Sunday reminder")
-
-    # Extra callback registrations
-    app.add_handler(CallbackQueryHandler(verify_now_callback, pattern="^verify_now$"))
-    app.add_handler(CallbackQueryHandler(answer_question_start, pattern="^answer_"))
+    # status and simple commands
+    app.add_handler(CommandHandler("status", status_handler))
 
     return app
 
-# Sunday reminder job (async job handler runs with Application context)
-async def sunday_reminder_job(context: ContextTypes.DEFAULT_TYPE):
-    logger.info("Running Sunday reminder job")
-    try:
-        c.execute("SELECT * FROM verified_users")
-        rows = c.fetchall()
-        for r in rows:
-            tid = r["telegram_id"]
-            try:
-                await context.bot.send_message(tid, "🌞 Sunday Reminder: Check your progress with /status and share a win with /sharewin!", reply_markup=STUDENT_MENU)
-            except Exception:
-                logger.exception("Failed to send reminder to user")
-        if SUPPORT_GROUP_ID:
-            try:
-                await context.bot.send_message(SUPPORT_GROUP_ID, "🌞 Sunday Reminder: Encourage students to submit and share wins!")
-            except Exception:
-                logger.exception("Failed to send Sunday reminder to support group")
-    except Exception:
-        logger.exception("Failed in sunday_reminder_job")
+# Build application globally for webhook processing
+telegram_app = build_application()
 
-# Application lifecycle: initialize/start/stop
-telegram_app: Optional[Application] = None
+# -----------------------------------------------------------------------------
+# FastAPI app for webhooks
+# -----------------------------------------------------------------------------
+api = FastAPI()
 
-async def on_startup():
-    global telegram_app
-    logger.info("Initializing Telegram Application for webhook mode")
-    telegram_app = build_application()
-
-    # Initialize app internals and start job queue, etc.
-    await telegram_app.initialize()
-    # Set webhook URL
-    WEBHOOK_URL = f"https://{_env('RENDER_EXTERNAL_HOSTNAME') or _env('WEBHOOK_HOST') or os.getenv('WEBHOOK_URL') or _env('PRIMARY_DOMAIN') or 'avap-support-bot.onrender.com'}/webhook/{BOT_TOKEN}"
-    # If you prefer explicitly set WEBHOOK_URL in env: set WEBHOOK_URL env var.
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL", WEBHOOK_URL)
-    logger.info("Using webhook URL: %s", WEBHOOK_URL)
-    try:
-        # ensure bot object available
-        await telegram_app.bot.set_webhook(WEBHOOK_URL)
-        logger.info("Webhook set at %s", WEBHOOK_URL)
-    except Exception:
-        logger.exception("Failed to set webhook; continue and hope it's already set")
-
-    # Start the application (job queue and other internals)
-    await telegram_app.start()
-    logger.info("Telegram Application started (webhook mode)")
-
-async def on_shutdown():
-    global telegram_app
-    logger.info("Shutting down Telegram Application")
-    if telegram_app:
-        try:
-            await telegram_app.bot.delete_webhook()
-        except Exception:
-            logger.exception("Failed to delete webhook")
-        try:
-            await telegram_app.stop()
-            await telegram_app.shutdown()
-        except Exception:
-            logger.exception("Failed to stop/shutdown telegram_app")
-    logger.info("Shutdown complete")
-
-# FastAPI app
-web_app = FastAPI(on_startup=[on_startup], on_shutdown=[on_shutdown])
-
-@web_app.get("/")
+@api.get("/")
 async def root():
-    return {"message": "AVAP bot is running 🚀"}
-
-@web_app.get("/health")
-async def health():
     return {"status": "ok"}
 
-@web_app.post(f"/webhook/{BOT_TOKEN}")
-async def webhook(request: Request):
-    """
-    Main webhook entrypoint for Telegram to POST updates.
-    We convert JSON to Update and hand it to Application.process_update().
-    """
-    global telegram_app
-    if telegram_app is None:
-        logger.error("telegram_app not initialized")
-        raise HTTPException(status_code=503, detail="Bot not initialized")
-    try:
-        data = await request.json()
-    except Exception:
-        logger.exception("Invalid JSON in webhook")
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-    try:
-        update = Update.de_json(data, telegram_app.bot)
-    except Exception:
-        logger.exception("Failed to deserialize update")
-        raise HTTPException(status_code=400, detail="Invalid update")
-    # Process update via application
-    try:
-        await telegram_app.process_update(update)
-    except Exception:
-        logger.exception("Failed to process update")
-        # We still return 200 to Telegram to avoid retries loop; errors are logged and admin notified via on_error
-    return {"ok": True}
+@api.get("/health")
+async def health():
+    return {"status": "healthy"}
 
-# If you want a convenience endpoint to set/delete webhook manually:
-@web_app.post("/webhook/set")
-async def set_webhook_endpoint():
-    global telegram_app
-    if telegram_app is None:
-        raise HTTPException(status_code=503, detail="Bot not initialized")
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    if not WEBHOOK_URL:
-        raise HTTPException(status_code=400, detail="WEBHOOK_URL env required")
-    try:
-        await telegram_app.bot.set_webhook(WEBHOOK_URL)
-        return {"status": "ok", "webhook": WEBHOOK_URL}
-    except Exception as e:
-        logger.exception("Failed to set webhook via endpoint")
-        raise HTTPException(status_code=500, detail=str(e))
+@api.post(f"/webhook/{BOT_TOKEN}")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = Update.de_json(data, telegram_app.bot)
+    await telegram_app.process_update(update)
+    return JSONResponse({"ok": True})
 
-@web_app.post("/webhook/delete")
-async def delete_webhook_endpoint():
+@api.post("/webhook/set")
+async def set_webhook(req: Request):
+    # convenience endpoint to set webhook to WEBHOOK_BASE_URL
+    if not WEBHOOK_BASE_URL:
+        return JSONResponse({"ok": False, "error": "WEBHOOK_BASE_URL not configured"})
+    webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{BOT_TOKEN}"
+    await telegram_app.bot.set_webhook(webhook_url)
+    return JSONResponse({"ok": True, "webhook": webhook_url})
+
+@api.post("/webhook/delete")
+async def delete_webhook(req: Request):
+    await telegram_app.bot.delete_webhook()
+    return JSONResponse({"ok": True})
+
+# Startup and shutdown events
+@api.on_event("startup")
+async def on_startup():
+    logger.info("Starting AVAP bot (webhook mode)")
     global telegram_app
-    if telegram_app is None:
-        raise HTTPException(status_code=503, detail="Bot not initialized")
+    # Application already built above; ensure webhook set if base URL provided
+    if WEBHOOK_BASE_URL:
+        webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{BOT_TOKEN}"
+        try:
+            await telegram_app.bot.set_webhook(webhook_url)
+            logger.info(f"Webhook set to {webhook_url}")
+        except Exception:
+            logger.exception("Failed to set webhook")
+    # start scheduler
+    try:
+        scheduler.start()
+        logger.info("Scheduler started")
+    except Exception:
+        logger.exception("Failed to start scheduler")
+
+@api.on_event("shutdown")
+async def on_shutdown():
     try:
         await telegram_app.bot.delete_webhook()
-        return {"status": "deleted"}
-    except Exception as e:
-        logger.exception("Failed to delete webhook via endpoint")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        pass
+    try:
+        scheduler.shutdown()
+    except Exception:
+        pass
+    logger.info("AVAP bot shutdown complete")
 
-# Run app with uvicorn when executed directly (Render start command: python bot.py)
+# -----------------------------------------------------------------------------
+# Entrypoint for local run (uvicorn)
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
     logger.info("Starting uvicorn web server for webhook mode on port %s", PORT)
-    uvicorn.run("bot:web_app", host="0.0.0.0", port=PORT, log_level="info")
+    uvicorn.run("bot:api", host="0.0.0.0", port=PORT, log_level="info")
