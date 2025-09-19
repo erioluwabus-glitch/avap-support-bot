@@ -1,23 +1,24 @@
-# Virtual envs
+# Virtualenvs
 ven/
 venv/
 .env
 .env.*
-.pyenv
+
+# Python bytecode
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# IDE/editor
-.vscode/
-.idea/
-.DS_Store
-
-# SQLite DB (optional: ignore local DB)
+# SQLite DB
 database.db
 *.sqlite
 *.sqlite3
 
-# System files
+# IDEs
+.vscode/
+.idea/
+.DS_Store
+
+# System
 Thumbs.db
