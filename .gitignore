@@ -1,33 +1,21 @@
-# Byte-compiled / optimized / DLL files
+# Virtual envs
+ven/
+venv/
+.env
+.env.*
+.pyenv
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
 *.pyd
-*.so
 
-# Virtual environments
-.venv/
-venv/
-env/
-ven/
-
-# Environment variables
-.env
-*.env
-
-# SQLite database
-database.db
-*.sqlite3
-*.db
-
-# Logs
-*.log
-
-# IDE / Editor
+# IDE/editor
 .vscode/
 .idea/
-*.swp
+.DS_Store
+
+# SQLite DB
+database.db
 
 # System files
-.DS_Store
 Thumbs.db
