@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-AVAP Support Bot - Full, ready-to-deploy version.
-
-Notes:
-- Deploy as a Render Background Worker (command: python bot.py).
-- All student features are DM-only except /ask which works in DM and in SUPPORT_GROUP_ID.
-- Admin-only actions are gated by ADMIN_ID environment variable.
+AVAP Support Bot - Web service + polling bot (single-file).
+- Runs a FastAPI web server (health endpoints) so Render can keep it alive.
+- Runs the Telegram Application in a background thread (safe for Render).
+- All student features are DM-only except /ask which works in DM + SUPPORT_GROUP_ID.
+- Admin bypass available (ADMIN_ID).
+- Uses SQLite as primary persistence. Optional Google Sheets & Systeme.io integration if configured.
 """
 
 import os
@@ -16,11 +16,15 @@ import sqlite3
 import hashlib
 import logging
 import datetime
+import threading
 from typing import Optional, Tuple
 
 import httpx
 import gspread
 from google.oauth2.service_account import Credentials
+
+from fastapi import FastAPI
+import uvicorn
 
 from telegram import (
     Update,
@@ -73,6 +77,8 @@ SYSTEME_VERIFIED_TAG_ID = _env("SYSTEME_VERIFIED_TAG_ID")
 LANDING_PAGE_LINK = _env("LANDING_PAGE_LINK", default="https://example.com")
 ACHIEVER_MODULES = int(_env("ACHIEVER_MODULES", default="6"))
 ACHIEVER_WINS = int(_env("ACHIEVER_WINS", default="3"))
+
+PORT = int(os.getenv("PORT", "8080"))
 
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN not set. Exiting.")
@@ -842,6 +848,8 @@ async def grade_comment_type_cb(update: Update, context: ContextTypes.DEFAULT_TY
         sub_uuid = context.chat_data.get("grade_uuid")
         score = context.chat_data.get("grade_score")
         context.user_data["awaiting_grade_comment"] = True
+        context.user_data["grade_uuid"] = sub_uuid
+        context.user_data["grade_score"] = score
         # send DM to admin requesting actual comment
         try:
             await context.bot.send_message(ADMIN_ID, f"Please send your comment (text/audio/video) for submission id:{sub_uuid} (score: {score}). Reply here with the content.")
@@ -1368,17 +1376,42 @@ async def menu_text_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text("Use the menu buttons in DM.", reply_markup=STUDENT_MENU)
 
 # -------------------------
-# Entrypoint (run in main thread)
+# Entrypoint: run bot in background thread + FastAPI server as main process
 # -------------------------
-def main():
-    logger.info("Building Telegram Application")
-    app = build_application()
-    logger.info("Application built - starting polling (blocking).")
-    # This is the recommended blocking call. Run this as the main process (Render background worker)
+web_app = FastAPI()
+
+@web_app.get("/")
+async def root():
+    return {"message": "AVAP bot is running 🚀"}
+
+@web_app.get("/health")
+async def health():
+    # basic liveness check; returns ok if we reached here
+    return {"status": "ok"}
+
+def run_bot_thread(app: Application):
+    """
+    Run Application.run_polling in a background thread.
+    We set stop_signals=() to avoid adding signal handlers from a non-main thread.
+    """
+    logger.info("Starting bot polling in background thread")
     try:
-        app.run_polling(close_loop=False)
+        # Important: stop_signals=() prevents adding signal handlers from thread (avoids set_wakeup_fd error)
+        app.run_polling(stop_signals=(), close_loop=False)
     except Exception:
-        logger.exception("Application run_polling failed", exc_info=True)
+        logger.exception("Bot polling failed")
+
+def start_all():
+    # Build the telegram application
+    telegram_app = build_application()
+    # Start bot polling in separate thread (daemon)
+    t = threading.Thread(target=run_bot_thread, args=(telegram_app,), daemon=True)
+    t.start()
+    logger.info("Bot thread started")
+    return telegram_app, t
 
 if __name__ == "__main__":
-    main()
+    telegram_app, thread = start_all()
+    # Start uvicorn (main process) for FastAPI
+    logger.info("Starting FastAPI web server on port %s", PORT)
+    uvicorn.run("bot:web_app", host="0.0.0.0", port=PORT, log_level="info")
