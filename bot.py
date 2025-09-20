@@ -1306,4 +1306,5 @@ async def on_shutdown():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     logger.info("Starting uvicorn for webhook on port %s", port)
+    logger.info("Bot version: 1.0.1 - Fixed ASK_QUESTION state")
     uvicorn.run("bot:app", host="0.0.0.0", port=port, log_level="info")
