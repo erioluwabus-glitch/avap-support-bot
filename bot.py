@@ -74,7 +74,7 @@ ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0")) if os.getenv("ADMIN_USER_ID
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
-SYSTEME_IO_API_KEY = os.getenv("SYSTEME_IO_API_KEY")
+SYSTEME_IO_API_KEY = os.getenv("SYSTEME_API_KEY")
 SYSTEME_VERIFIED_STUDENT_TAG_ID = os.getenv("SYSTEME_VERIFIED_STUDENT_TAG_ID")
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0")) if os.getenv("SUPPORT_GROUP_ID") else None
 ASSIGNMENTS_GROUP_ID = int(os.getenv("ASSIGNMENTS_GROUP_ID", "0")) if os.getenv("ASSIGNMENTS_GROUP_ID") else None
@@ -82,7 +82,7 @@ QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0")) if os.getenv("QUE
 VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0")) if os.getenv("VERIFICATION_GROUP_ID") else None
 DB_PATH = os.getenv("DB_PATH", "./bot.db")
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
-ACHIEVER_WINS = int(os.getenv("ACHIEVER_WINS", "3"))
+ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 
 # Validate required environment variables
@@ -830,7 +830,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     context.user_data['grading_sub_id'] = sub_id
     context.user_data['grading_expected'] = 'comment'
-        context.user_data['comment_type'] = comment_type
+    context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
     return
 
@@ -1193,8 +1193,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-    body = await request.json()
-    update = Update.de_json(body, telegram_app.bot)
+        body = await request.json()
+        update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1205,9 +1205,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-        await telegram_app.process_update(update)
+            await telegram_app.process_update(update)
         
-    return {"ok": True}
+        return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
