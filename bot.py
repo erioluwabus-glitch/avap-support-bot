@@ -830,7 +830,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     context.user_data['grading_sub_id'] = sub_id
     context.user_data['grading_expected'] = 'comment'
-        context.user_data['comment_type'] = comment_type
+    context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
     return
 
@@ -1195,8 +1195,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-    body = await request.json()
-    update = Update.de_json(body, telegram_app.bot)
+        body = await request.json()
+        update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1207,9 +1207,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-        await telegram_app.process_update(update)
+            await telegram_app.process_update(update)
         
-    return {"ok": True}
+        return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
