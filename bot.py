@@ -114,10 +114,11 @@ webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
     SUBMIT_MEDIA_UPLOAD,
     WIN_TYPE,
     WIN_UPLOAD,
+    ASK_QUESTION,
     ANSWER_QUESTION,
     GRADE_USERNAME,
     GRADE_MODULE,
-) = range(100, 114)
+) = range(100, 115)
 
 # Regex validators
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
