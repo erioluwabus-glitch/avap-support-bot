@@ -88,3 +88,16 @@ This bot is designed to be deployed as a Web Service on Render.
 -   Click "Create Web Service". Render will build and deploy your bot.
 -   The bot will automatically set the webhook to your Render service URL on startup.
 -   You can check the logs to ensure everything is running correctly. The health check endpoint at `/health` should return a 200 OK status.
+
+### Important: Persisting the Database on Render
+By default, Render's free Web Services have an ephemeral filesystem, which means the SQLite database file (`avap_bot.db`) will be deleted every time the bot restarts or is re-deployed. To prevent this and keep your data, you must attach a **Render Free Disk**.
+
+1.  **Create a Disk**: In your Render dashboard, go to the "Disks" section and create a new disk.
+    -   **Name**: `avap-bot-data` (or any name you prefer).
+    -   **Mount Path**: `/data`
+    -   **Size**: 1 GB is sufficient.
+2.  **Attach the Disk**: Go to your Web Service's "Settings" and find the "Disks" section. Attach the disk you just created.
+3.  **Update Environment Variable**: In your Web Service's "Environment" settings, update the `DB_PATH` variable to point to the disk's mount path:
+    -   `DB_PATH`: `/data/avap_bot.db`
+
+After making these changes, re-deploy your service. The database will now be stored on the persistent disk and will not be lost on restarts.
