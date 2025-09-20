@@ -1153,7 +1153,12 @@ async def telegram_webhook(token: str, request: Request):
             logger.error("Application not initialized")
             raise HTTPException(status_code=500, detail="Application not initialized")
         
-        await telegram_app.process_update(update)
+        # Handle chat join requests directly
+        if update.chat_join_request:
+            await chat_join_request_handler(update, None)
+        else:
+            await telegram_app.process_update(update)
+        
         return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
@@ -1188,7 +1193,7 @@ def register_handlers(app_obj: Application):
             VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
         },
         fallbacks=[],
-        per_message=False,
+        per_message=True,
     )
     app_obj.add_handler(verify_conv)
     
@@ -1204,7 +1209,7 @@ def register_handlers(app_obj: Application):
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
         },
         fallbacks=[],
-        per_message=False,
+        per_message=True,
     )
     app_obj.add_handler(submit_conv)
     
@@ -1227,7 +1232,7 @@ def register_handlers(app_obj: Application):
         entry_points=[CommandHandler("ask", ask_start_cmd)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
         fallbacks=[],
-        per_message=False
+        per_message=True
     )
     app_obj.add_handler(ask_conv)
     
@@ -1237,7 +1242,7 @@ def register_handlers(app_obj: Application):
         entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
         states={ANSWER_QUESTION: [MessageHandler(filters.ALL & ~filters.COMMAND, answer_receive)]},
         fallbacks=[],
-        per_message=False
+        per_message=True
     )
     app_obj.add_handler(answer_conv)
     
@@ -1245,8 +1250,8 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("status", check_status_handler))
     app_obj.add_handler(CallbackQueryHandler(check_status_handler, pattern="^status$"))
     
-    # Chat join request handler
-    app_obj.add_handler(MessageHandler(filters.StatusUpdate.CHAT_JOIN_REQUEST, chat_join_request_handler))
+    # Chat join request handler - handle in main update processing
+    # PTB 22.4 handles this differently, we'll process it in the webhook
 
 # Startup and shutdown events
 @app.on_event("startup")
