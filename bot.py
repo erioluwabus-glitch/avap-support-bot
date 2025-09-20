@@ -839,6 +839,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only process if we're expecting a grading comment
     if context.user_data.get('grading_expected') != 'comment':
         return
     sub_id = context.user_data.get('grading_sub_id')
@@ -905,6 +906,10 @@ async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WIN_UPLOAD
 
 async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only process if we're in the win conversation state
+    if context.user_data.get('win_type') is None:
+        return
+    
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
         return ConversationHandler.END
@@ -1276,12 +1281,12 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
     app_obj.add_handler(CallbackQueryHandler(comment_type_callback, pattern="^comment_type_"))
 
-    # Receive grading comments as normal messages from admin
-    app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, grading_comment_receive))
-
     # Wins
     app_obj.add_handler(CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$"))
     app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, win_receive), group=4)
+
+    # Receive grading comments as normal messages from admin (lower priority)
+    app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, grading_comment_receive), group=5)
 
     # Ask questions
     app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
