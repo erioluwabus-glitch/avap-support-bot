@@ -1139,6 +1139,17 @@ async def root():
 async def health():
     return {"status": "ok"}
 
+@app.post("/setup-webhook")
+async def setup_webhook():
+    """Manual webhook setup endpoint"""
+    try:
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
+        await telegram_app.bot.set_webhook(webhook_url)
+        return {"status": "success", "webhook_url": webhook_url}
+    except Exception as e:
+        logger.exception("Failed to set webhook manually: %s", e)
+        return {"status": "error", "message": str(e)}
+
 @app.post("/webhook/{token}")
 async def telegram_webhook(token: str, request: Request):
     if token != BOT_TOKEN:
@@ -1285,10 +1296,13 @@ async def on_startup():
     try:
         logger.info("Deleting old webhook (if any) and setting new webhook to %s", webhook_url)
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+        # Wait a moment for the service to be fully ready
+        await asyncio.sleep(3)
         await telegram_app.bot.set_webhook(webhook_url)
         logger.info("Webhook set successfully")
     except Exception as e:
         logger.exception("Failed to set webhook: %s", e)
+        # Don't fail startup if webhook fails, we can set it manually later
 
 @app.on_event("shutdown")
 async def on_shutdown():
