@@ -283,6 +283,16 @@ ASK_QUESTION_TEXT, ANSWER_QUESTION = range(14,16)
 # Handlers (full flows)
 # -----------------------------------------------------------------------------
 
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancels and ends the conversation."""
+    user_data = context.user_data
+    if user_data:
+        user_data.clear()
+    await update.message.reply_text(
+        "Action cancelled.", reply_markup=ReplyKeyboardRemove()
+    )
+    return ConversationHandler.END
+
 # Start handler (DM-only)
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private" and not _is_admin(update.effective_user.id):
@@ -544,126 +554,122 @@ async def grade_inline_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     query = update.callback_query
     await query.answer()
-    # query.data like 'grade_<uuid>'
+
     submission_uuid = query.data.split("_",1)[1]
-    # fetch submission
     cursor.execute("SELECT id,username,module,status FROM submissions WHERE submission_uuid=?", (submission_uuid,))
     sub = cursor.fetchone()
+
     if not sub:
-        await query.message.reply_text("Submission not found.")
+        await query.edit_message_text("Submission not found.")
         return
-    # send a private message or reply in group with score options (we'll delete the grade button to keep group clean)
-    try:
-        await context.bot.edit_message_reply_markup(chat_id=query.message.chat_id, message_id=query.message.message_id, reply_markup=None)
-    except Exception:
-        pass
-    keyboard = InlineKeyboardMarkup([ [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(1,6)],
-                                     [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(6,11)] ])
-    # send the score selection message (as a ephemeral message in group which we delete later)
-    sent = await query.message.reply_text("Select score (1-10):", reply_markup=keyboard)
-    # store message id to delete after selection
-    context.user_data["score_select_msg"] = (sent.chat_id, sent.message_id)
-    return
+
+    if sub[3] == "Graded":
+        await query.edit_message_text("This submission has already been graded.")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(1,6)],
+        [InlineKeyboardButton(str(i), callback_data=f"score_{submission_uuid}_{i}") for i in range(6,11)]
+    ])
+
+    await query.edit_message_text("Select score (1-10):", reply_markup=keyboard)
 
 async def grade_score_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # pattern score_<uuid>_<score>
     query = update.callback_query
     await query.answer()
     if not _is_admin(query.from_user.id):
-        await query.answer("Admin only")
+        await query.answer("Admin only", show_alert=True)
         return
+
     parts = query.data.split("_")
-    if len(parts) < 3:
-        return
-    submission_uuid = parts[1]
-    score = int(parts[2])
-    # delete the score selection message to reduce clutter
-    try:
-        chat_id, msg_id = context.user_data.get("score_select_msg", (None,None))
-        if chat_id and msg_id:
-            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-    except Exception:
-        pass
-    # ask whether to add comment
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Comment", callback_data=f"comment_yes_{submission_uuid}_{score}"), InlineKeyboardButton("No Comment", callback_data=f"comment_no_{submission_uuid}_{score}")]])
-    await query.message.reply_text("Add a comment?", reply_markup=keyboard)
+    if len(parts) < 3: return
+
+    submission_uuid, score = parts[1], int(parts[2])
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Comment", callback_data=f"comment_yes_{submission_uuid}_{score}"),
+        InlineKeyboardButton("No Comment", callback_data=f"comment_no_{submission_uuid}_{score}")
+    ]])
+    await query.edit_message_text("Add a comment?", reply_markup=keyboard)
 
 async def grade_comment_type_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # callback f"comment_yes_{submission_uuid}_{score}" or comment_no...
     query = update.callback_query
     await query.answer()
+    if not _is_admin(query.from_user.id):
+        await query.answer("Admin only", show_alert=True)
+        return
+
     parts = query.data.split("_")
-    mode = parts[1]  # yes or no
-    submission_uuid = parts[2]
-    score = int(parts[3])
+    mode, submission_uuid, score = parts[1], parts[2], int(parts[3])
+
     if mode == "no":
-        # persist grade
         cursor.execute("UPDATE submissions SET status=?, score=? WHERE submission_uuid=?", ("Graded", score, submission_uuid))
         conn.commit()
         if sheets_ok:
             try:
                 ws = sheet.worksheet("Assignments")
-                all_rows = ws.get_all_records()
-                for i,row in enumerate(all_rows, start=2):
-                    if row.get("submission_uuid") == submission_uuid:
-                        ws.update(f"D{i}", "Graded")
-                        ws.update(f"I{i}", score)
-                        break
+                cell = ws.find(submission_uuid, in_column=7) # find by uuid
+                if cell:
+                    ws.update_cell(cell.row, 4, "Graded")
+                    ws.update_cell(cell.row, 9, score)
             except Exception:
                 logger.exception("Failed to update Sheets after grading")
-        await query.message.reply_text("✅ Graded!")
-        return
+        await query.edit_message_text("✅ Graded!")
     else:
-        # ask admin to send the comment text
-        await query.message.reply_text("Send your comment (text/audio/video) in this chat. I'll attach it to the submission.")
-        # to keep flow simple, we'll accept next message from admin and treat as comment
-        # store context to know which submission getting a comment
+        await query.edit_message_text("Please send your comment (text, audio, or video).")
         context.user_data["grading_submission_uuid"] = submission_uuid
         context.user_data["grading_score"] = score
-        return
+        context.user_data["grading_message_id"] = query.message.message_id
+        context.user_data["grading_chat_id"] = query.message.chat_id
 
 async def grade_comment_content_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only admin
-    if not _is_admin(update.effective_user.id):
+    if not _is_admin(update.effective_user.id) or "grading_submission_uuid" not in context.user_data:
         return
-    comment = None
-    ctype = None
-    if update.message.text:
-        comment = update.message.text
-        ctype = "text"
-    elif update.message.audio:
-        comment = update.message.audio.file_id
-        ctype = "audio"
-    elif update.message.voice:
-        comment = update.message.voice.file_id
-        ctype = "voice"
-    elif update.message.video:
-        comment = update.message.video.file_id
-        ctype = "video"
-    else:
-        await update.message.reply_text("Unsupported comment type. Send text/audio/video.")
-        return
+
     submission_uuid = context.user_data.get("grading_submission_uuid")
     score = context.user_data.get("grading_score")
-    if not submission_uuid:
-        await update.message.reply_text("No submission in context.")
-        return
+    message_id = context.user_data.get("grading_message_id")
+    chat_id = context.user_data.get("grading_chat_id")
+
+    comment, ctype = (None, None)
+    if update.message.text:
+        comment, ctype = update.message.text, "text"
+    elif update.message.audio:
+        comment, ctype = update.message.audio.file_id, "audio"
+    elif update.message.voice:
+        comment, ctype = update.message.voice.file_id, "voice"
+    elif update.message.video:
+        comment, ctype = update.message.video.file_id, "video"
+    else:
+        return # Ignore non-content messages
+
     cursor.execute("UPDATE submissions SET status=?, score=?, comment_type=?, comment_content=? WHERE submission_uuid=?", ("Graded", score, ctype, comment, submission_uuid))
     conn.commit()
     if sheets_ok:
         try:
             ws = sheet.worksheet("Assignments")
-            all_rows = ws.get_all_records()
-            for i,row in enumerate(all_rows, start=2):
-                if row.get("submission_uuid") == submission_uuid:
-                    ws.update(f"D{i}", "Graded")
-                    ws.update(f"I{i}", score)
-                    ws.update(f"J{i}", ctype)
-                    ws.update(f"K{i}", comment)
-                    break
+            cell = ws.find(submission_uuid, in_column=7)
+            if cell:
+                ws.update_cell(cell.row, 4, "Graded")
+                ws.update_cell(cell.row, 9, score)
+                ws.update_cell(cell.row, 10, ctype)
+                ws.update_cell(cell.row, 11, comment)
         except Exception:
             logger.exception("Failed to update Sheets with grading comment")
-    await update.message.reply_text("✅ Graded with comment sent.")
+
+    if chat_id and message_id:
+        try:
+            await context.bot.edit_message_text("✅ Graded with comment.", chat_id=chat_id, message_id=message_id)
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="✅ Graded with comment.")
+
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    for key in ["grading_submission_uuid", "grading_score", "grading_message_id", "grading_chat_id"]:
+        context.user_data.pop(key, None)
 
 # Manual grading command
 async def grade_manual_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -754,7 +760,8 @@ async def share_win_upload_handler(update: Update, context: ContextTypes.DEFAULT
         content = update.message.video.file_id
         ctype = "video"
     else:
-        await update.message.reply_text("Invalid content type. Try again.")
+        # This case should now be handled by share_win_invalid_upload, but as a fallback:
+        await update.message.reply_text("Invalid content type. Please try again or /cancel.")
         return SHARE_WIN_UPLOAD
     cursor.execute("INSERT INTO wins (telegram_id,username,content_type,content,created_at) VALUES (?,?,?,?,?)", (update.effective_user.id, username, ctype, content, created_at))
     conn.commit()
@@ -771,28 +778,58 @@ async def share_win_upload_handler(update: Update, context: ContextTypes.DEFAULT
         except Exception:
             logger.exception("Failed to forward win to support group")
     await update.message.reply_text("Awesome win shared!")
+    context.user_data.clear()
     return ConversationHandler.END
 
+async def share_win_invalid_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kind = context.user_data.get("share_kind", "content")
+    await update.message.reply_text(f"That's not a {kind}. Please send a {kind} for your win, or /cancel to stop.")
+    return SHARE_WIN_UPLOAD
+
 # -------------------------
-# Ask a question (works in DM and SUPPORT_GROUP via /ask)
+# Ask a question
 # -------------------------
-async def ask_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # allow from DM or SUPPORT_GROUP_ID
-    if update.effective_chat.type != "private" and update.effective_chat.id != SUPPORT_GROUP_ID and not _is_admin(update.effective_user.id):
-        return
-    if update.effective_chat.type != "private":
-        # ask user to DM for question or use inline button to send DM
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Ask in DM", url=f"https://t.me/{(await context.bot.get_me()).username}?start=verify")]])
-        await update.message.reply_text("Please DM me to ask a question.", reply_markup=keyboard)
-        return ConversationHandler.END
+async def ask_dm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for asking a question in a DM. Starts a conversation."""
     await update.message.reply_text("What's your question?")
     return ASK_QUESTION_TEXT
 
+async def ask_group_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles /ask command in the support group."""
+    if not context.args:
+        await update.message.reply_text("Please provide your question after the /ask command.\nE.g., /ask How do I...?")
+        return
+
+    qtext = " ".join(context.args)
+    qid = str(uuid.uuid4())
+    username = update.effective_user.username or update.effective_user.first_name
+    created_at = datetime.datetime.now(TZ).isoformat()
+
+    cursor.execute("INSERT INTO questions (telegram_id,username,question,question_uuid,created_at) VALUES (?,?,?,?,?)", (update.effective_user.id, username, qtext, qid, created_at))
+    conn.commit()
+    if sheets_ok:
+        try:
+            ws = sheet.worksheet("Questions")
+            ws.append_row([username, update.effective_user.id, qtext, "", qid, "", created_at])
+        except Exception:
+            logger.exception("Failed to append question to Sheets")
+
+    if QUESTIONS_GROUP_ID:
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Answer", callback_data=f"answer_{qid}")]])
+        try:
+            await context.bot.send_message(chat_id=QUESTIONS_GROUP_ID, text=f"Question from {username} (from group): {qtext}", reply_markup=keyboard)
+        except Exception:
+            logger.exception("Failed to forward question to questions group")
+
+    await update.message.reply_text("Question sent! Our support team will get back to you.")
+
 async def ask_question_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles the question text received in a DM conversation."""
     qtext = update.message.text.strip()
     if not qtext:
-        await update.message.reply_text("Please type your question.")
+        await update.message.reply_text("Please type your question or use /cancel.")
         return ASK_QUESTION_TEXT
+
     qid = str(uuid.uuid4())
     username = update.effective_user.username or update.effective_user.first_name
     created_at = datetime.datetime.now(TZ).isoformat()
@@ -811,6 +848,7 @@ async def ask_question_text_handler(update: Update, context: ContextTypes.DEFAUL
             await context.bot.send_message(chat_id=QUESTIONS_GROUP_ID, text=f"Question from {username}: {qtext}", reply_markup=keyboard)
         except Exception:
             logger.exception("Failed to forward question to questions group")
+
     await update.message.reply_text("Question sent! We'll get back to you.")
     return ConversationHandler.END
 
@@ -828,12 +866,10 @@ async def answer_question_start(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def answer_question_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # admin responding to question
-    if not _is_admin(update.effective_user.id):
+    if not _is_admin(update.effective_user.id) or "answer_question_uuid" not in context.user_data:
         return
+
     qid = context.user_data.get("answer_question_uuid")
-    if not qid:
-        await update.message.reply_text("No question in context.")
-        return
     # find question author
     cursor.execute("SELECT telegram_id,username FROM questions WHERE question_uuid=?", (qid,))
     row = cursor.fetchone()
@@ -950,7 +986,7 @@ def build_application():
             ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
             ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(add_student_conv)
@@ -968,7 +1004,7 @@ def build_application():
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_cb, pattern="^media_")],
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO | filters.TEXT) & ~filters.COMMAND, submit_media_upload)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(submit_conv)
@@ -986,7 +1022,7 @@ def build_application():
             GRADE_COMMENT_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_module)],
             GRADE_COMMENT_CONTENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grade_manual_score)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False,
     )
     app.add_handler(manual_grade_conv)
@@ -1003,28 +1039,33 @@ def build_application():
         ],
         states={
             SHARE_WIN_TYPE: [CallbackQueryHandler(share_win_type_cb, pattern="^win_")],
-            SHARE_WIN_UPLOAD: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, share_win_upload_handler)],
+            SHARE_WIN_UPLOAD: [
+                MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, share_win_upload_handler),
+                MessageHandler(filters.ALL & ~filters.COMMAND, share_win_invalid_upload)
+            ],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False
     )
     app.add_handler(share_conv)
-    app.add_handler(CallbackQueryHandler(share_win_type_cb, pattern="^win_"))
 
-    # ask conversation (works with /ask or Ask button)
+    # ask conversation for DMs
     ask_conv = ConversationHandler(
         entry_points=[
-            CommandHandler("ask", ask_command),
-            MessageHandler(filters.Regex(r"^❓ Ask a Question$") | filters.Regex(r"^Ask a Question$"), ask_command),
-            CallbackQueryHandler(lambda u,c: None, pattern="^ask_dm$"),  # placeholder if you use callback to DM
+            CommandHandler("ask", ask_dm_command, filters.PRIVATE),
+            MessageHandler(filters.Regex(r"^❓ Ask a Question$") | filters.Regex(r"^Ask a Question$"), ask_dm_command),
         ],
         states={
             ASK_QUESTION_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_question_text_handler)]
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False
     )
     app.add_handler(ask_conv)
+
+    # ask command for groups
+    if SUPPORT_GROUP_ID:
+        app.add_handler(CommandHandler("ask", ask_group_command, filters.Chat(chat_id=SUPPORT_GROUP_ID)))
 
     # answer question callback in questions group
     app.add_handler(CallbackQueryHandler(answer_question_start, pattern="^answer_"))
@@ -1044,7 +1085,7 @@ def build_application():
             VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
             VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("cancel", cancel)],
         per_message=False
     )
     app.add_handler(verify_conv)
@@ -1094,38 +1135,71 @@ async def delete_webhook(req: Request):
 # Startup and shutdown events
 @api.on_event("startup")
 async def on_startup():
-    logger.info("Starting AVAP bot (webhook mode)")
-    global telegram_app
-    # Application already built above; ensure webhook set if base URL provided
+    logger.info("Starting AVAP bot (webhook mode)...")
+    await telegram_app.initialize()
+
     if WEBHOOK_BASE_URL:
         webhook_url = f"{WEBHOOK_BASE_URL}/webhook/{BOT_TOKEN}"
         try:
-            await telegram_app.bot.set_webhook(webhook_url)
+            await telegram_app.bot.set_webhook(webhook_url, allowed_updates=Update.ALL_TYPES)
             logger.info(f"Webhook set to {webhook_url}")
         except Exception:
             logger.exception("Failed to set webhook")
-    # start scheduler
+
+    await telegram_app.start()
+
     try:
-        scheduler.start()
-        logger.info("Scheduler started")
+        if not scheduler.running:
+            scheduler.start()
+            logger.info("Scheduler started.")
     except Exception:
         logger.exception("Failed to start scheduler")
 
+
 @api.on_event("shutdown")
 async def on_shutdown():
+    logger.info("Stopping AVAP bot...")
+    try:
+        if scheduler.running:
+            scheduler.shutdown()
+            logger.info("Scheduler stopped.")
+    except Exception:
+        logger.exception("Failed to stop scheduler")
+
+    await telegram_app.stop()
+
     try:
         await telegram_app.bot.delete_webhook()
+        logger.info("Webhook deleted successfully.")
     except Exception:
-        pass
-    try:
-        scheduler.shutdown()
-    except Exception:
-        pass
-    logger.info("AVAP bot shutdown complete")
+        logger.exception("Failed to delete webhook")
+
+    logger.info("AVAP bot shutdown complete.")
 
 # -----------------------------------------------------------------------------
 # Entrypoint for local run (uvicorn)
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    logger.info("Starting uvicorn web server for webhook mode on port %s", PORT)
-    uvicorn.run("bot:api", host="0.0.0.0", port=PORT, log_level="info")
+    import sys
+    import asyncio
+
+    if len(sys.argv) > 1 and sys.argv[1] == "poll":
+        logger.info("Starting bot in polling mode...")
+
+        async def main():
+            # In polling mode, we need to initialize the app and start the scheduler manually
+            # The FastAPI startup events won't run.
+            await telegram_app.initialize()
+            if scheduler.running:
+                scheduler.shutdown()
+            scheduler.start()
+            logger.info("Scheduler started for polling mode.")
+            await telegram_app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user")
+    else:
+        logger.info("Starting uvicorn web server for webhook mode on port %s", PORT)
+        uvicorn.run("bot:api", host="0.0.0.0", port=PORT, log_level="info")
