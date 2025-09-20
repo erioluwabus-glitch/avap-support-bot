@@ -1139,6 +1139,23 @@ async def root():
 async def health():
     return {"status": "ok"}
 
+@app.get("/debug-webhook")
+async def debug_webhook():
+    """Debug webhook URL and current webhook info"""
+    try:
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
+        webhook_info = await telegram_app.bot.get_webhook_info()
+        return {
+            "status": "success",
+            "constructed_webhook_url": webhook_url,
+            "current_webhook_info": webhook_info.to_dict(),
+            "render_external_url": RENDER_EXTERNAL_URL,
+            "bot_token_length": len(BOT_TOKEN) if BOT_TOKEN else 0
+        }
+    except Exception as e:
+        logger.exception("Failed to get webhook info: %s", e)
+        return {"status": "error", "message": str(e)}
+
 @app.post("/setup-webhook")
 async def setup_webhook():
     """Manual webhook setup endpoint"""
@@ -1298,6 +1315,12 @@ async def on_startup():
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
         # Wait a moment for the service to be fully ready
         await asyncio.sleep(3)
+        
+        # Validate webhook URL before setting
+        if not webhook_url.startswith('https://'):
+            logger.error("Invalid webhook URL: %s - must start with https://", webhook_url)
+            return
+        
         await telegram_app.bot.set_webhook(webhook_url)
         logger.info("Webhook set successfully")
     except Exception as e:
