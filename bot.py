@@ -348,7 +348,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         if not query:
             return
-        await query.answer()
+            await query.answer()
         
         if query.data == "verify_now":
             # Start verify conversation by asking for name
@@ -362,7 +362,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             await query.message.reply_text("Which module? (1-12)")
             return SUBMIT_MODULE
             
@@ -1255,7 +1255,7 @@ def register_handlers(app_obj: Application):
             VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
         },
         fallbacks=[],
-        per_message=True,
+        per_message=False,
     )
     app_obj.add_handler(verify_conv)
 
@@ -1271,7 +1271,7 @@ def register_handlers(app_obj: Application):
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
         },
         fallbacks=[],
-        per_message=True,
+        per_message=False,
     )
     app_obj.add_handler(submit_conv)
 
@@ -1294,7 +1294,7 @@ def register_handlers(app_obj: Application):
         entry_points=[CommandHandler("ask", ask_start_cmd)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
         fallbacks=[],
-        per_message=True
+        per_message=False
     )
     app_obj.add_handler(ask_conv)
     
@@ -1304,7 +1304,7 @@ def register_handlers(app_obj: Application):
         entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
         states={ANSWER_QUESTION: [MessageHandler(filters.ALL & ~filters.COMMAND, answer_receive)]},
         fallbacks=[],
-        per_message=True
+        per_message=False
     )
     app_obj.add_handler(answer_conv)
     
