@@ -1052,7 +1052,7 @@ def build_application():
     # ask conversation for DMs
     ask_conv = ConversationHandler(
         entry_points=[
-            CommandHandler("ask", ask_dm_command, filters.PRIVATE),
+            CommandHandler("ask", ask_dm_command, filters.ChatType.PRIVATE),
             MessageHandler(filters.Regex(r"^❓ Ask a Question$") | filters.Regex(r"^Ask a Question$"), ask_dm_command),
         ],
         states={
