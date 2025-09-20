@@ -236,7 +236,7 @@ def init_gsheets():
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             with open('google-credentials.json', 'w') as f:
                 f.write(GOOGLE_CREDENTIALS_JSON)
-        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
