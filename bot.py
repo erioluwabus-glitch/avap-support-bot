@@ -98,8 +98,11 @@ if not ADMIN_USER_ID:
     logger.critical("ADMIN_USER_ID not set. Exiting.")
     raise SystemExit("ADMIN_USER_ID not set")
 
-# Webhook URL
-webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
+# Webhook URL - handle both cases where RENDER_EXTERNAL_URL includes or excludes https://
+base_url = RENDER_EXTERNAL_URL.strip('/')
+if not base_url.startswith('https://'):
+    base_url = f"https://{base_url}"
+webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
 
 # Conversation states
 (
@@ -1143,7 +1146,10 @@ async def health():
 async def debug_webhook():
     """Debug webhook URL and current webhook info"""
     try:
-        webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
+        base_url = RENDER_EXTERNAL_URL.strip('/')
+        if not base_url.startswith('https://'):
+            base_url = f"https://{base_url}"
+        webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
         webhook_info = await telegram_app.bot.get_webhook_info()
         return {
             "status": "success",
@@ -1160,7 +1166,10 @@ async def debug_webhook():
 async def setup_webhook():
     """Manual webhook setup endpoint"""
     try:
-        webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
+        base_url = RENDER_EXTERNAL_URL.strip('/')
+        if not base_url.startswith('https://'):
+            base_url = f"https://{base_url}"
+        webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
         
         # Clear pending updates first
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
