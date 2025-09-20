@@ -236,7 +236,7 @@ def init_gsheets():
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             with open('google-credentials.json', 'w') as f:
                 f.write(GOOGLE_CREDENTIALS_JSON)
-            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
@@ -345,7 +345,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         if not query:
             return
-        await query.answer()
+            await query.answer()
         
         if query.data == "verify_now":
             # Start verify conversation by asking for name
@@ -359,7 +359,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             await query.message.reply_text("Which module? (1-12)")
             return SUBMIT_MODULE
             
@@ -396,7 +396,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             await query.message.reply_text("What's your question?")
             return ASK_QUESTION
             
@@ -827,12 +827,12 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
-        await query.answer()
-        context.user_data['grading_sub_id'] = sub_id
-        context.user_data['grading_expected'] = 'comment'
+    await query.answer()
+    context.user_data['grading_sub_id'] = sub_id
+    context.user_data['grading_expected'] = 'comment'
         context.user_data['comment_type'] = comment_type
-        await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-        return
+    await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
+    return
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -958,7 +958,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         if len(context.args) < 1:
             await update.message.reply_text("Usage: /ask <question>")
-            return
+        return
         question_text = " ".join(context.args).strip()
         if not question_text:
             await update.message.reply_text("Please provide a question.")
@@ -1156,9 +1156,10 @@ async def debug_webhook():
         logger.exception("Failed to get webhook info: %s", e)
         return {"status": "error", "message": str(e)}
 
+@app.get("/setup-webhook")
 @app.post("/setup-webhook")
 async def setup_webhook():
-    """Manual webhook setup endpoint"""
+    """Manual webhook setup endpoint - works with both GET and POST"""
     try:
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
         
@@ -1181,7 +1182,8 @@ async def setup_webhook():
         return {
             "status": "success", 
             "webhook_url": webhook_url,
-            "webhook_info": webhook_info.to_dict()
+            "webhook_info": webhook_info.to_dict(),
+            "message": "Webhook set successfully! Bot should now respond to messages."
         }
     except Exception as e:
         logger.exception("Failed to set webhook manually: %s", e)
@@ -1193,8 +1195,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-        body = await request.json()
-        update = Update.de_json(body, telegram_app.bot)
+    body = await request.json()
+    update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1205,9 +1207,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-            await telegram_app.process_update(update)
+        await telegram_app.process_update(update)
         
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1244,10 +1246,10 @@ def register_handlers(app_obj: Application):
         per_message=True,
     )
     app_obj.add_handler(verify_conv)
-    
+
     # Menu callback handler
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask|verify_now)$"))
-    
+
     # Submission conversation
     submit_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
@@ -1260,20 +1262,20 @@ def register_handlers(app_obj: Application):
         per_message=True,
     )
     app_obj.add_handler(submit_conv)
-    
+
     # Grading callbacks
     app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
     app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
     app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
     app_obj.add_handler(CallbackQueryHandler(comment_type_callback, pattern="^comment_type_"))
-    
+
     # Receive grading comments as normal messages from admin
     app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, grading_comment_receive))
-    
+
     # Wins
     app_obj.add_handler(CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$"))
     app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, win_receive), group=4)
-    
+
     # Ask questions
     app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
     ask_conv = ConversationHandler(
@@ -1329,40 +1331,9 @@ async def on_startup():
     except Exception as e:
         logger.exception("Failed to start scheduler: %s", e)
     
-    # Delete old webhook and set new one
-    try:
-        logger.info("Deleting old webhook (if any) and setting new webhook to %s", webhook_url)
-        
-        # First, get current webhook info
-        webhook_info = await telegram_app.bot.get_webhook_info()
-        logger.info("Current webhook info: %s", webhook_info.to_dict())
-        
-        # Delete webhook and clear pending updates
-        await telegram_app.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Deleted old webhook and cleared pending updates")
-        
-        # Wait a moment for the service to be fully ready
-        await asyncio.sleep(5)
-        
-        # Validate webhook URL before setting
-        if not webhook_url.startswith('https://'):
-            logger.error("Invalid webhook URL: %s - must start with https://", webhook_url)
-            return
-        
-        # Set webhook with specific parameters
-        await telegram_app.bot.set_webhook(
-            url=webhook_url,
-            allowed_updates=["message", "callback_query", "chat_join_request"]
-        )
-        logger.info("Webhook set successfully: %s", webhook_url)
-        
-        # Verify webhook was set
-        new_webhook_info = await telegram_app.bot.get_webhook_info()
-        logger.info("New webhook info: %s", new_webhook_info.to_dict())
-        
-    except Exception as e:
-        logger.exception("Failed to set webhook: %s", e)
-        # Don't fail startup if webhook fails, we can set it manually later
+    # Skip webhook setup during startup - we'll set it manually
+    logger.info("Skipping webhook setup during startup - will set manually via endpoint")
+    logger.info("Webhook URL should be: %s", webhook_url)
 
 @app.on_event("shutdown")
 async def on_shutdown():
