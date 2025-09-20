@@ -830,7 +830,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     context.user_data['grading_sub_id'] = sub_id
     context.user_data['grading_expected'] = 'comment'
-    context.user_data['comment_type'] = comment_type
+        context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
     return
 
@@ -1143,7 +1143,7 @@ async def health():
 async def debug_webhook():
     """Debug webhook URL and current webhook info"""
     try:
-        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
+        webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
         webhook_info = await telegram_app.bot.get_webhook_info()
         return {
             "status": "success",
@@ -1156,12 +1156,11 @@ async def debug_webhook():
         logger.exception("Failed to get webhook info: %s", e)
         return {"status": "error", "message": str(e)}
 
-@app.get("/setup-webhook")
 @app.post("/setup-webhook")
 async def setup_webhook():
-    """Manual webhook setup endpoint - works with both GET and POST"""
+    """Manual webhook setup endpoint"""
     try:
-        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
+        webhook_url = f"https://{RENDER_EXTERNAL_URL.strip('/')}/webhook/{BOT_TOKEN}"
         
         # Clear pending updates first
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
@@ -1182,8 +1181,7 @@ async def setup_webhook():
         return {
             "status": "success", 
             "webhook_url": webhook_url,
-            "webhook_info": webhook_info.to_dict(),
-            "message": "Webhook set successfully! Bot should now respond to messages."
+            "webhook_info": webhook_info.to_dict()
         }
     except Exception as e:
         logger.exception("Failed to set webhook manually: %s", e)
@@ -1195,8 +1193,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-        body = await request.json()
-        update = Update.de_json(body, telegram_app.bot)
+    body = await request.json()
+    update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1207,9 +1205,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-            await telegram_app.process_update(update)
+        await telegram_app.process_update(update)
         
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1331,7 +1329,7 @@ async def on_startup():
     except Exception as e:
         logger.exception("Failed to start scheduler: %s", e)
     
-    # Skip webhook setup during startup - we'll set it manually
+    # Skip webhook setup during startup - we'll set it manually via endpoint
     logger.info("Skipping webhook setup during startup - will set manually via endpoint")
     logger.info("Webhook URL should be: %s", webhook_url)
 
