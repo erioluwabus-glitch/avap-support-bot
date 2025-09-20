@@ -1161,8 +1161,28 @@ async def setup_webhook():
     """Manual webhook setup endpoint"""
     try:
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
-        await telegram_app.bot.set_webhook(webhook_url)
-        return {"status": "success", "webhook_url": webhook_url}
+        
+        # Clear pending updates first
+        await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Cleared pending updates")
+        
+        # Wait a moment
+        await asyncio.sleep(2)
+        
+        # Set webhook with specific parameters
+        await telegram_app.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=["message", "callback_query", "chat_join_request"]
+        )
+        
+        # Verify webhook was set
+        webhook_info = await telegram_app.bot.get_webhook_info()
+        
+        return {
+            "status": "success", 
+            "webhook_url": webhook_url,
+            "webhook_info": webhook_info.to_dict()
+        }
     except Exception as e:
         logger.exception("Failed to set webhook manually: %s", e)
         return {"status": "error", "message": str(e)}
@@ -1312,17 +1332,34 @@ async def on_startup():
     # Delete old webhook and set new one
     try:
         logger.info("Deleting old webhook (if any) and setting new webhook to %s", webhook_url)
+        
+        # First, get current webhook info
+        webhook_info = await telegram_app.bot.get_webhook_info()
+        logger.info("Current webhook info: %s", webhook_info.to_dict())
+        
+        # Delete webhook and clear pending updates
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Deleted old webhook and cleared pending updates")
+        
         # Wait a moment for the service to be fully ready
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
         
         # Validate webhook URL before setting
         if not webhook_url.startswith('https://'):
             logger.error("Invalid webhook URL: %s - must start with https://", webhook_url)
             return
         
-        await telegram_app.bot.set_webhook(webhook_url)
-        logger.info("Webhook set successfully")
+        # Set webhook with specific parameters
+        await telegram_app.bot.set_webhook(
+            url=webhook_url,
+            allowed_updates=["message", "callback_query", "chat_join_request"]
+        )
+        logger.info("Webhook set successfully: %s", webhook_url)
+        
+        # Verify webhook was set
+        new_webhook_info = await telegram_app.bot.get_webhook_info()
+        logger.info("New webhook info: %s", new_webhook_info.to_dict())
+        
     except Exception as e:
         logger.exception("Failed to set webhook: %s", e)
         # Don't fail startup if webhook fails, we can set it manually later
