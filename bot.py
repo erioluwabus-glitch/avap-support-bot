@@ -348,7 +348,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         if not query:
             return
-            await query.answer()
+        await query.answer()
         
         if query.data == "verify_now":
             # Start verify conversation by asking for name
@@ -362,7 +362,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-            return
+                return
             await query.message.reply_text("Which module? (1-12)")
             return SUBMIT_MODULE
             
