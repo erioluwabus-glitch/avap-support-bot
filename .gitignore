@@ -1,25 +1,29 @@
-# Virtualenvs
-ven/
+# Virtual environments
 venv/
-.env
-.env.*
+.venv/
+ven/
 
-# Python bytecode
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.pdb
 
-# SQLite DB
-database.db
-*.sqlite
-*.sqlite3
-*.db
+# Env files / secrets
+.env
+.env.*
+google-credentials.json
+credentials.json
 
-# IDEs
+# Databases (optional to ignore)
+# if you want to persist DB across deploys don't ignore bot.db; otherwise:
+# bot.db
+data/
+
+# IDE
 .vscode/
 .idea/
-.DS_Store
 
-# System
-Thumbs.db
+# Others
+*.log
