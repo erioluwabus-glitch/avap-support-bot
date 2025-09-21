@@ -445,6 +445,7 @@ async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
         return
     
+    logger.info(f"Status button clicked by user {update.effective_user.id}")
     await check_status_handler(update, context)
 
 async def ask_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -751,7 +752,11 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = name.split()
         first = parts[0]
         last = " ".join(parts[1:]) if len(parts) > 1 else ""
-        systeme_create_contact(first, last, email, phone)
+        contact_id = systeme_create_contact(first, last, email, phone)
+        if contact_id:
+            logger.info(f"Systeme.io contact created with ID: {contact_id}")
+        else:
+            logger.warning("Systeme.io contact creation failed or API key not set")
     except Exception:
         logger.exception("Systeme sync error")
     
@@ -1185,6 +1190,7 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Check status
 async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"check_status_handler called by user {update.effective_user.id}")
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
         return
