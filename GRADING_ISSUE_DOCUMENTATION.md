@@ -53,32 +53,96 @@ app_obj.add_handler(ConversationHandler(
 
 ## **Fix Applied**
 
-### **1. Fixed Handler Pattern**
+### **1. Complete ConversationHandler Implementation**
+**BEFORE (problematic multiple handlers):**
 ```python
-# BEFORE (problematic):
-app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
-
-# AFTER (fixed):
+# Multiple independent handlers causing conflicts
+app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
+app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
 app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_(yes|no)_"))
+app_obj.add_handler(ConversationHandler(
+    entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
+    states={GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]},
+    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    per_message=False,
+))
 ```
 
-### **2. Added Debugging**
+**AFTER (single robust ConversationHandler):**
 ```python
-async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if not query:
-        return
-    data = query.data
-    logger.info(f"comment_type_callback received data: {data}")  # Added debugging
-    # ... rest of function
+# Single ConversationHandler with complete flow
+grading_conv = ConversationHandler(
+    entry_points=[CallbackQueryHandler(grade_callback, pattern="^grade_")],
+    states={
+        GradingStates.GRADE_SCORE: [
+            CallbackQueryHandler(score_selected_callback, pattern="^score_")
+        ],
+        GradingStates.GRADE_COMMENT_CHOICE: [
+            CallbackQueryHandler(comment_choice_callback, pattern="^comment_(yes|no)_")
+        ],
+        GradingStates.GRADE_COMMENT_TYPE: [
+            CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")
+        ],
+        GradingStates.GRADING_COMMENT: [
+            MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive_text),
+            MessageHandler(filters.VOICE, grading_comment_receive_audio),
+            MessageHandler(filters.AUDIO, grading_comment_receive_audio),
+            MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, grading_comment_receive_video),
+        ],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    per_message=False,
+    name="grading_conversation",
+    persistent=False,
+    conversation_timeout=300,  # 5 minutes timeout
+)
 ```
 
-### **3. Enhanced Error Handling**
+### **2. State Management with GradingStates**
 ```python
-else:
-    logger.warning(f"Invalid callback data format: {data}")  # Added logging
-    await query.answer("Invalid callback data")
-    return ConversationHandler.END
+class GradingStates:
+    GRADE_SCORE = 200
+    GRADE_COMMENT_CHOICE = 201
+    GRADE_COMMENT_TYPE = 202
+    GRADING_COMMENT = 203
+```
+
+### **3. Enhanced Callback Functions with State Returns**
+```python
+async def grade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... validation and setup ...
+    return GradingStates.GRADE_SCORE  # Return next state
+
+async def score_selected_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... score processing ...
+    return GradingStates.GRADE_COMMENT_CHOICE  # Return next state
+```
+
+### **4. Separate Media Type Handlers**
+```python
+async def grading_comment_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Handle text comments specifically
+    
+async def grading_comment_receive_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Handle audio/voice comments specifically
+    
+async def grading_comment_receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Handle video comments specifically
+```
+
+### **5. Comprehensive Helper Functions**
+```python
+def score_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    # Generate score selection keyboard
+    
+def comment_choice_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    # Generate comment choice keyboard
+    
+def comment_type_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    # Generate comment type keyboard
+    
+async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, comment: str = None):
+    # Complete grading process with DB save, student notification, and cleanup
 ```
 
 ## **Testing Steps**

@@ -121,10 +121,15 @@ webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
     ANSWER_QUESTION,
     GRADE_USERNAME,
     GRADE_MODULE,
-
-
     GRADING_COMMENT,
 ) = range(100, 116)
+
+# Grading conversation states (separate from main conversation states)
+class GradingStates:
+    GRADE_SCORE = 200
+    GRADE_COMMENT_CHOICE = 201
+    GRADE_COMMENT_TYPE = 202
+    GRADING_COMMENT = 203
 
 # Regex validators
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -332,6 +337,81 @@ def get_main_menu_keyboard():
         [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
+
+# Grading helper functions
+def score_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    """Generate score selection keyboard"""
+    buttons = [
+        [InlineKeyboardButton(str(i), callback_data=f"score_{i}_{uuid}") for i in range(1, 6)],
+        [InlineKeyboardButton(str(i), callback_data=f"score_{i}_{uuid}") for i in range(6, 11)]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def comment_choice_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    """Generate comment choice keyboard"""
+    buttons = [
+        [InlineKeyboardButton("Comment", callback_data=f"comment_yes_{uuid}"),
+         InlineKeyboardButton("No Comment", callback_data=f"comment_no_{uuid}")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+def comment_type_keyboard(uuid: str) -> InlineKeyboardMarkup:
+    """Generate comment type keyboard"""
+    buttons = [
+        [InlineKeyboardButton("Text", callback_data=f"comment_type_text_{uuid}"),
+         InlineKeyboardButton("Audio", callback_data=f"comment_type_audio_{uuid}"),
+         InlineKeyboardButton("Video", callback_data=f"comment_type_video_{uuid}")]
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, comment: str = None):
+    """Finalize grading process - save to DB, notify student, cleanup"""
+    try:
+        uuid = context.user_data.get('grading_uuid')
+        score = context.user_data.get('grading_score')
+        comment_type = context.user_data.get('comment_type', 'text')
+        
+        if not uuid or not score:
+            logger.error("Missing grading data in finalize_grading")
+            return
+        
+        # Save to database
+        async with db_lock:
+            cur = db_conn.cursor()
+            cur.execute("UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?", 
+                       (int(score), "Graded", datetime.utcnow().isoformat(), uuid))
+            
+            if comment:
+                cur.execute("UPDATE submissions SET comment = ?, comment_type = ? WHERE submission_id = ?", 
+                           (comment, comment_type, uuid))
+            
+            db_conn.commit()
+            
+            # Get student info
+            cur.execute("SELECT telegram_id, username FROM submissions WHERE submission_id = ?", (uuid,))
+            row = cur.fetchone()
+        
+        if row:
+            student_tg, username = row
+            # Notify student
+            try:
+                msg = f"Your submission has been graded!\nScore: {score}/10"
+                if comment:
+                    msg += f"\nComment: {comment}"
+                await telegram_app.bot.send_message(chat_id=student_tg, text=msg)
+            except Exception as e:
+                logger.exception("Failed to notify student: %s", e)
+        
+        # Cleanup
+        context.user_data.pop('grading_uuid', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('comment_type', None)
+        context.user_data.pop('grading_expected', None)
+        
+        logger.info(f"Grading finalized for submission {uuid} with score {score}")
+        
+    except Exception as e:
+        logger.exception("Error in finalize_grading: %s", e)
 
 # ----- Handlers -----
 
@@ -895,167 +975,212 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text("Boom! Submission received!", reply_markup=get_main_menu_keyboard())
     return ConversationHandler.END
 
-# Grading handlers
+# Grading handlers - Updated for ConversationHandler
 async def grade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point for grading conversation"""
     query = update.callback_query
     if not query:
         return
+    
     data = query.data  # e.g., "grade_{uuid}"
     if not data.startswith("grade_"):
         return
-    sub_id = data.split("_", 1)[1]
     
     # Only admin can grade
     if not await is_admin(query.from_user.id):
         await query.answer("You are not authorized to perform this action.", show_alert=True)
-        return
+        return ConversationHandler.END
     
-    # Show score selection inline and delete original grade button message
-    try:
-        await query.message.delete()
-    except Exception:
-        pass
+    sub_id = data.split("_", 1)[1]
+    context.user_data['grading_uuid'] = sub_id
     
-    score_buttons = [[InlineKeyboardButton(str(i), callback_data=f"score_{i}_{sub_id}") for i in range(1, 6)],
-                     [InlineKeyboardButton(str(i), callback_data=f"score_{i}_{sub_id}") for i in range(6, 11)]]
+    logger.info(f"Starting grading conversation for submission: {sub_id}")
+    
+    # Show score selection
     try:
-        await context.bot.send_message(chat_id=ASSIGNMENTS_GROUP_ID, text=f"Grading submission {sub_id}. Select score (1-10):", reply_markup=InlineKeyboardMarkup(score_buttons))
-    except Exception:
-        logger.exception("Failed to send score selection")
+        await query.edit_message_text(f"Grading submission {sub_id}. Select score (1-10):", reply_markup=score_keyboard(sub_id))
+    except Exception as e:
+        logger.exception("Failed to show score selection: %s", e)
+        await query.answer("Error starting grading process")
+        return ConversationHandler.END
+    
+    return GradingStates.GRADE_SCORE
 
 async def score_selected_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle score selection in grading conversation"""
     query = update.callback_query
     if not query:
         return
-    parts = query.data.split("_")  # ["score", score, sub_id]
+    
+    data = query.data
+    logger.info(f"score_selected_callback received data: {data}")
+    
+    parts = data.split("_")  # ["score", score, sub_id]
     if len(parts) != 3:
-        return
+        logger.warning(f"Invalid score callback data format: {data}")
+        await query.answer("Invalid score selection")
+        return ConversationHandler.END
+    
     _, score_str, sub_id = parts
-    score = int(score_str)
-    
-    # Record score and ask for comment choice
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?", 
-                   (score, "Graded", datetime.utcnow().isoformat(), sub_id))
-        db_conn.commit()
-        cur.execute("SELECT username, telegram_id FROM submissions WHERE submission_id = ?", (sub_id,))
-        row = cur.fetchone()
-    
-    username, t_id = row if row else ("unknown", None)
-    
-    # Send comment options
-    comment_kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Comment", callback_data=f"comment_yes_{sub_id}"), 
-         InlineKeyboardButton("No Comment", callback_data=f"comment_no_{sub_id}")]
-    ])
     try:
-        await query.answer()
-        await query.message.reply_text(f"Score {score} recorded for {sub_id}. Add a comment?", reply_markup=comment_kb)
-    except Exception:
-        logger.exception("Failed after score selection")
+        score = int(score_str)
+    except ValueError:
+        logger.warning(f"Invalid score value: {score_str}")
+        await query.answer("Invalid score value")
+        return ConversationHandler.END
+    
+    # Store score in context
+    context.user_data['grading_score'] = score
+    
+    logger.info(f"Score {score} selected for submission {sub_id}")
+    
+    # Show comment choice
+    try:
+        await query.edit_message_text(f"Score {score} recorded. Add a comment?", reply_markup=comment_choice_keyboard(sub_id))
+    except Exception as e:
+        logger.exception("Failed to show comment choice: %s", e)
+        await query.answer("Error showing comment options")
+        return ConversationHandler.END
+    
+    return GradingStates.GRADE_COMMENT_CHOICE
 
 async def comment_choice_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle comment choice in grading conversation"""
     query = update.callback_query
     if not query:
         return
+    
     data = query.data
     logger.info(f"comment_choice_callback received data: {data}")
     
     if data.startswith("comment_no_"):
         sub_id = data.split("_", 2)[2]
         logger.info(f"Comment choice: No comment for sub_id: {sub_id}")
+        
         # Finalize without comment
         await query.answer()
+        await finalize_grading(update, context)
+        
         try:
-            await query.message.reply_text("Grading complete. ✅")
+            await query.edit_message_text("Grading complete. ✅")
         except Exception:
             pass
-        return
+        return ConversationHandler.END
     
     if data.startswith("comment_yes_"):
         sub_id = data.split("_", 2)[2]
         logger.info(f"Comment choice: Yes comment for sub_id: {sub_id}")
+        
         # Ask for comment type
-        await query.answer()
-        await query.message.reply_text("Text, Audio, or Video?", reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Text", callback_data=f"comment_type_text_{sub_id}"),
-             InlineKeyboardButton("Audio", callback_data=f"comment_type_audio_{sub_id}"),
-             InlineKeyboardButton("Video", callback_data=f"comment_type_video_{sub_id}")]
-        ]))
-        return
+        try:
+            await query.edit_message_text("Choose comment type:", reply_markup=comment_type_keyboard(sub_id))
+        except Exception as e:
+            logger.exception("Failed to show comment type options: %s", e)
+            await query.answer("Error showing comment type options")
+            return ConversationHandler.END
+        
+        return GradingStates.GRADE_COMMENT_TYPE
+    
+    # Invalid data
+    logger.warning(f"Invalid comment choice data: {data}")
+    await query.answer("Invalid comment choice")
+    return ConversationHandler.END
 
 async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle comment type selection in grading conversation"""
     query = update.callback_query
     if not query:
         return
+    
     data = query.data
     logger.info(f"comment_type_callback received data: {data}")
+    
     parts = data.split("_")
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
         logger.info(f"Processing comment type: {comment_type}, sub_id: {sub_id}")
-        await query.answer()
-        context.user_data['grading_sub_id'] = sub_id
-        context.user_data['grading_expected'] = 'comment'
+        
+        # Store comment type in context
         context.user_data['comment_type'] = comment_type
-        await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-        return GRADING_COMMENT
+        
+        # Prompt for input
+        try:
+            if comment_type == "text":
+                await query.edit_message_text("Send your text comment now:")
+            elif comment_type == "audio":
+                await query.edit_message_text("Send your audio comment now:")
+            elif comment_type == "video":
+                await query.edit_message_text("Send your video comment now:")
+            else:
+                await query.edit_message_text("Send your comment now:")
+        except Exception as e:
+            logger.exception("Failed to prompt for comment: %s", e)
+            await query.answer("Error prompting for comment")
+            return ConversationHandler.END
+        
+        return GradingStates.GRADING_COMMENT
     else:
         logger.warning(f"Invalid callback data format: {data}")
         await query.answer("Invalid callback data")
         return ConversationHandler.END
 
-# For simplicity, treat next admin message as comment and store it
-async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Only process if we're expecting a grading comment
-    if context.user_data.get('grading_expected') != 'comment':
-        return
-    sub_id = context.user_data.get('grading_sub_id')
-    if not sub_id:
+# Grading comment handlers for different media types
+async def grading_comment_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text comment in grading conversation"""
+    if context.user_data.get('comment_type') != 'text':
         return
     
-    # Extract comment text or file_id
-    comment_text = None
-    comment_type = context.user_data.get('comment_type', 'text')
+    comment_text = update.message.text
+    logger.info(f"Received text comment: {comment_text}")
     
-    if update.message.text:
-        comment_text = update.message.text
-    elif update.message.voice:
-        comment_text = f"[voice:{update.message.voice.file_id}]"
-    elif update.message.video:
-        comment_text = f"[video:{update.message.video.file_id}]"
+    await finalize_grading(update, context, comment=comment_text)
+    await update.message.reply_text("Text comment stored and sent to student.")
+    
+    return ConversationHandler.END
+
+async def grading_comment_receive_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle audio comment in grading conversation"""
+    if context.user_data.get('comment_type') != 'audio':
+        return
+    
+    if update.message.voice:
+        file_id = update.message.voice.file_id
+        comment_text = f"[voice:{file_id}]"
     elif update.message.audio:
-        comment_text = f"[audio:{update.message.audio.file_id}]"
+        file_id = update.message.audio.file_id
+        comment_text = f"[audio:{file_id}]"
     else:
-        await update.message.reply_text("Unsupported comment type, please send text, audio or video.")
+        await update.message.reply_text("Please send a voice message or audio file.")
         return
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("UPDATE submissions SET comment = ?, comment_type = ? WHERE submission_id = ?", 
-                   (comment_text, comment_type, sub_id))
-        db_conn.commit()
-        cur.execute("SELECT telegram_id FROM submissions WHERE submission_id = ?", (sub_id,))
-        r = cur.fetchone()
+    logger.info(f"Received audio comment: {comment_text}")
     
-    t_id = r[0] if r else None
+    await finalize_grading(update, context, comment=comment_text)
+    await update.message.reply_text("Audio comment stored and sent to student.")
     
-    # Send comment to student if possible
-    if t_id:
-        try:
-            if comment_text.startswith("[voice:") or comment_text.startswith("[audio:") or comment_text.startswith("[video:"):
-                await telegram_app.bot.send_message(chat_id=t_id, text=f"You received a grader comment (media): {comment_text}")
-            else:
-                await telegram_app.bot.send_message(chat_id=t_id, text=f"Your submission {sub_id} was graded. Comment: {comment_text}")
-        except Exception:
-            logger.exception("Failed to send grade comment to student")
+    return ConversationHandler.END
+
+async def grading_comment_receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle video comment in grading conversation"""
+    if context.user_data.get('comment_type') != 'video':
+        return
     
-    await update.message.reply_text("Comment stored and sent (if possible).")
-    context.user_data.pop('grading_expected', None)
-    context.user_data.pop('grading_sub_id', None)
-    context.user_data.pop('comment_type', None)
+    if update.message.video:
+        file_id = update.message.video.file_id
+        comment_text = f"[video:{file_id}]"
+    elif update.message.video_note:
+        file_id = update.message.video_note.file_id
+        comment_text = f"[video_note:{file_id}]"
+    else:
+        await update.message.reply_text("Please send a video file.")
+        return
+    
+    logger.info(f"Received video comment: {comment_text}")
+    
+    await finalize_grading(update, context, comment=comment_text)
+    await update.message.reply_text("Video comment stored and sent to student.")
+    
     return ConversationHandler.END
 
 # Share small win flow
@@ -1467,10 +1592,37 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(submit_conv)
 
-    # Grading callbacks
-    app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
-    app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
-    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_(yes|no)_"))
+    # Grading conversation - Complete flow in single ConversationHandler
+    grading_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(grade_callback, pattern="^grade_")],
+        states={
+            GradingStates.GRADE_SCORE: [
+                CallbackQueryHandler(score_selected_callback, pattern="^score_")
+            ],
+            GradingStates.GRADE_COMMENT_CHOICE: [
+                CallbackQueryHandler(comment_choice_callback, pattern="^comment_(yes|no)_")
+            ],
+            GradingStates.GRADE_COMMENT_TYPE: [
+                CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")
+            ],
+            GradingStates.GRADING_COMMENT: [
+                # Handle text input
+                MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive_text),
+                # Handle audio (voice messages)
+                MessageHandler(filters.VOICE, grading_comment_receive_audio),
+                # Handle audio files
+                MessageHandler(filters.AUDIO, grading_comment_receive_audio),
+                # Handle video
+                MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, grading_comment_receive_video),
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,  # Important for callback queries
+        name="grading_conversation",  # For logging/identification
+        persistent=False,  # Set to True if you want to persist across restarts
+        conversation_timeout=300,  # 5 minutes timeout
+    )
+    app_obj.add_handler(grading_conv)
 
     # Wins conversation
     win_conv = ConversationHandler(
@@ -1487,17 +1639,6 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(win_conv)
-
-    # Grading comments conversation
-    grading_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
-        states={
-            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(grading_conv)
 
     # Ask questions conversation
     ask_conv = ConversationHandler(
