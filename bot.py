@@ -264,7 +264,13 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         return None
     try:
         url = "https://api.systeme.io/api/contacts"
-        payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
+        payload = {
+            "first_name": first_name, 
+            "last_name": last_name, 
+            "email": email, 
+            "phone": phone,
+            "tags": [SYSTEME_VERIFIED_STUDENT_TAG_ID] if SYSTEME_VERIFIED_STUDENT_TAG_ID else []
+        }
         headers = {"Authorization": f"Bearer {SYSTEME_IO_API_KEY}", "Content-Type": "application/json"}
         logger.info(f"Creating Systeme.io contact for {email}")
         r = requests.post(url, json=payload, headers=headers, timeout=15)
@@ -273,8 +279,8 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         contact_id = str(data.get("id") or data.get("contact_id"))
         logger.info(f"Systeme.io contact created with ID: {contact_id}")
         
-        # Add tag if tag id provided
-        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+        # Add tag if tag id provided and not already in payload
+        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID and not payload.get("tags"):
             tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
             tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
             tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
@@ -978,7 +984,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['grading_expected'] = 'comment'
     context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-    return ConversationHandler.END
+    return GRADING_COMMENT
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1029,6 +1035,7 @@ async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop('grading_expected', None)
     context.user_data.pop('grading_sub_id', None)
     context.user_data.pop('comment_type', None)
+    return ConversationHandler.END
 
 # Share small win flow
 async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1202,14 +1209,28 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         student_tg = row[0]
         # Save answer as text for simplicity
-        ans = update.message.text or "[non-text answer]"
+        if update.message.text:
+            ans = update.message.text
+        elif update.message.voice:
+            ans = f"[voice:{update.message.voice.file_id}]"
+        elif update.message.video:
+            ans = f"[video:{update.message.video.file_id}]"
+        elif update.message.audio:
+            ans = f"[audio:{update.message.audio.file_id}]"
+        elif update.message.photo:
+            ans = f"[photo:{update.message.photo[-1].file_id}]"
+        else:
+            ans = "[non-text answer]"
         cur.execute("UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?", 
                    (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid))
         db_conn.commit()
     
     # Send answer to student
     try:
-        await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question: {ans}")
+        if ans.startswith("[voice:") or ans.startswith("[video:") or ans.startswith("[audio:") or ans.startswith("[photo:"):
+            await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question (media): {ans}")
+        else:
+            await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question: {ans}")
     except Exception:
         logger.exception("Failed to send answer to student")
     
