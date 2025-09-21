@@ -270,9 +270,14 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         
         # Add tag if tag id provided
         if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
-            tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
-            tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
-            requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
+            try:
+                tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
+                tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
+                tag_response = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
+                tag_response.raise_for_status()
+                logger.info(f"Tag 'verified' added to contact {contact_id}")
+            except Exception as e:
+                logger.exception(f"Failed to add tag to contact {contact_id}: {e}")
         
         return contact_id
     except Exception as e:
@@ -651,6 +656,26 @@ async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(f"Student {name} ({t_id}) removed. They must re-verify to regain access.")
 
+# Cancel command - resets conversations
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel current conversation and return to main menu"""
+    # Clear user data
+    context.user_data.clear()
+    
+    # Check if user is verified
+    if await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text(
+            "❌ Conversation cancelled. You're back to the main menu.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            "❌ Conversation cancelled. Use /start to begin verification.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
+        )
+    
+    return ConversationHandler.END
+
 # Admin get submission /get_submission [submission_id]
 async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update.effective_user.id):
@@ -967,7 +992,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['grading_expected'] = 'comment'
     context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-    return ConversationHandler.END
+    return
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1363,6 +1388,7 @@ async def telegram_webhook(token: str, request: Request):
 def register_handlers(app_obj: Application):
     # Basic handlers
     app_obj.add_handler(CommandHandler("start", start_handler))
+    app_obj.add_handler(CommandHandler("cancel", cancel_command))
     
     # Admin handlers
     add_student_conv = ConversationHandler(
@@ -1372,7 +1398,7 @@ def register_handlers(app_obj: Application):
             ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
             ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel_command)],
         per_message=False,
     )
     app_obj.add_handler(add_student_conv)
@@ -1388,7 +1414,7 @@ def register_handlers(app_obj: Application):
             VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
             VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel_command)],
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
@@ -1401,7 +1427,7 @@ def register_handlers(app_obj: Application):
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(video|image)$")],
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
         },
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel_command)],
         per_message=False,
     )
     app_obj.add_handler(submit_conv)
@@ -1414,7 +1440,7 @@ def register_handlers(app_obj: Application):
 
     # Wins
     app_obj.add_handler(CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$"))
-    app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, win_receive), group=6)
+    app_obj.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, win_receive), group=6)
 
     # Receive grading comments as normal messages from admin (lower priority)
     app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, grading_comment_receive), group=7)
@@ -1424,7 +1450,7 @@ def register_handlers(app_obj: Application):
     ask_conv = ConversationHandler(
         entry_points=[CommandHandler("ask", ask_start_cmd), MessageHandler(filters.Regex("^❓ Ask a Question$"), ask_button_handler)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
-        fallbacks=[],
+        fallbacks=[CommandHandler("cancel", cancel_command)],
         per_message=False
     )
     app_obj.add_handler(ask_conv)
@@ -1433,8 +1459,8 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
     answer_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
-        states={ANSWER_QUESTION: [MessageHandler(filters.ALL & ~filters.COMMAND, answer_receive)]},
-        fallbacks=[],
+        states={ANSWER_QUESTION: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE) & ~filters.COMMAND, answer_receive)]},
+        fallbacks=[CommandHandler("cancel", cancel_command)],
         per_message=False
     )
     app_obj.add_handler(answer_conv)
