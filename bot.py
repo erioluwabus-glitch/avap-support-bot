@@ -579,6 +579,57 @@ async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(f"Student {name} ({t_id}) removed. They must re-verify to regain access.")
 
+# Admin get submission /get_submission [submission_id]
+async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await is_admin(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return
+    
+    if len(context.args) < 1:
+        await update.message.reply_text("Usage: /get_submission [submission_id]")
+        return
+    
+    sub_id = context.args[0]
+    
+    async with db_lock:
+        cur = db_conn.cursor()
+        cur.execute("SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?", (sub_id,))
+        row = cur.fetchone()
+        if not row:
+            await update.message.reply_text(f"No submission found with ID {sub_id}.")
+            return
+        
+        module, content_type, content, score, comment, created_at, telegram_id = row
+        
+        # Get student info
+        cur.execute("SELECT name, email FROM verified_users WHERE telegram_id = ?", (telegram_id,))
+        student_info = cur.fetchone()
+        student_name = student_info[0] if student_info else "Unknown"
+        student_email = student_info[1] if student_info else "Unknown"
+    
+    # Format submission info
+    msg = f"📋 Submission Details:\n"
+    msg += f"ID: {sub_id}\n"
+    msg += f"Student: {student_name} ({student_email})\n"
+    msg += f"Module: {module}\n"
+    msg += f"Type: {content_type}\n"
+    msg += f"Created: {created_at}\n"
+    msg += f"Score: {score if score else 'Not graded'}\n"
+    if comment:
+        msg += f"Comment: {comment}\n"
+    
+    await update.message.reply_text(msg)
+    
+    # Send the actual content if it's media
+    if content_type in ['image', 'video'] and content:
+        try:
+            if content_type == 'image':
+                await update.message.reply_photo(photo=content, caption=f"Module {module} submission")
+            elif content_type == 'video':
+                await update.message.reply_video(video=content, caption=f"Module {module} submission")
+        except Exception as e:
+            await update.message.reply_text(f"Could not send media: {str(e)}")
+
 # Student verification conversation
 async def verify_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = (update.message.text or "").strip()
@@ -1245,6 +1296,7 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(add_student_conv)
     app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
     app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
+    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
