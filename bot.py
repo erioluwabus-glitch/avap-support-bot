@@ -990,12 +990,15 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
-    await query.answer()
-    context.user_data['grading_sub_id'] = sub_id
-    context.user_data['grading_expected'] = 'comment'
-    context.user_data['comment_type'] = comment_type
-    await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-    return GRADING_COMMENT
+        await query.answer()
+        context.user_data['grading_sub_id'] = sub_id
+        context.user_data['grading_expected'] = 'comment'
+        context.user_data['comment_type'] = comment_type
+        await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
+        return GRADING_COMMENT
+    else:
+        await query.answer("Invalid callback data")
+        return ConversationHandler.END
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1046,6 +1049,7 @@ async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop('grading_expected', None)
     context.user_data.pop('grading_sub_id', None)
     context.user_data.pop('comment_type', None)
+    return ConversationHandler.END
 
 # Share small win flow
 async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1453,7 +1457,6 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
     app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
     app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
-    app_obj.add_handler(CallbackQueryHandler(comment_type_callback, pattern="^comment_type_"))
 
     # Wins conversation
     win_conv = ConversationHandler(
@@ -1488,8 +1491,7 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(ask_conv)
     
-    # Answer callbacks and conversation
-    app_obj.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
+    # Answer conversation
     answer_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
         states={ANSWER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_receive)]},
