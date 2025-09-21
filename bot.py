@@ -986,27 +986,34 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if not query:
         return
     data = query.data
+    logger.info(f"comment_type_callback called with data: {data}")
     parts = data.split("_")
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
+        logger.info(f"Setting up comment for type: {comment_type}, sub_id: {sub_id}")
         await query.answer()
         context.user_data['grading_sub_id'] = sub_id
         context.user_data['grading_expected'] = 'comment'
         context.user_data['comment_type'] = comment_type
+        logger.info(f"User data set: {context.user_data}")
         await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
         return GRADING_COMMENT
     else:
+        logger.warning(f"Invalid callback data format: {data}")
         await query.answer("Invalid callback data")
         return ConversationHandler.END
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Only process if we're expecting a grading comment
+    logger.info(f"grading_comment_receive called with user_data: {context.user_data}")
     if context.user_data.get('grading_expected') != 'comment':
+        logger.warning("Not expecting a grading comment, ignoring message")
         return
     sub_id = context.user_data.get('grading_sub_id')
     if not sub_id:
+        logger.warning("No submission ID found in user_data")
         return
     
     # Extract comment text or file_id
@@ -1407,11 +1414,22 @@ async def telegram_webhook(token: str, request: Request):
 
 # Handler registration
 def register_handlers(app_obj: Application):
-    # Basic handlers
+    """Register all handlers with the application - COMPLETELY REWRITTEN FOR RELIABILITY"""
+    
+    # ===== COMMAND HANDLERS (Highest Priority) =====
     app_obj.add_handler(CommandHandler("start", start_handler))
     app_obj.add_handler(CommandHandler("cancel", cancel_handler))
+    app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
+    app_obj.add_handler(CommandHandler("status", check_status_handler))
     
-    # Admin handlers
+    # Admin commands
+    app_obj.add_handler(CommandHandler("add_student", add_student_start))
+    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
+    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
+    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
+    
+    # ===== CONVERSATION HANDLERS (Medium Priority) =====
+    # Add student conversation
     add_student_conv = ConversationHandler(
         entry_points=[CommandHandler("add_student", add_student_start)],
         states={
@@ -1423,11 +1441,8 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(add_student_conv)
-    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
-    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
-    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     
-    # Verification conversation for students
+    # Verify conversation
     verify_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(verify_now_callback, pattern="^verify_now$")],
         states={
@@ -1439,10 +1454,13 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
-
-    # Submission conversation
+    
+    # Submit conversation - SIMPLIFIED
     submit_conv = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
+        entry_points=[
+            MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler),
+            MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)
+        ],
         states={
             SUBMIT_MODULE: [MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(video|image)$")],
@@ -1452,42 +1470,16 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(submit_conv)
-
-    # Grading callbacks
-    app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
-    app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
-    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
-
-    # Wins conversation
-    win_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")],
-        states={
-            WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
-                        MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
-                        MessageHandler(filters.VIDEO & ~filters.COMMAND, win_receive)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(win_conv)
-
-    # Grading comments conversation
-    grading_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
-        states={
-            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(grading_conv)
-
+    
     # Ask questions conversation
     ask_conv = ConversationHandler(
-        entry_points=[CommandHandler("ask", ask_start_cmd), MessageHandler(filters.Regex("^❓ Ask a Question$"), ask_button_handler)],
+        entry_points=[
+            CommandHandler("ask", ask_start_cmd),
+            MessageHandler(filters.Regex("^❓ Ask a Question$") & filters.ChatType.PRIVATE, ask_button_handler)
+        ],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
         fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False
+        per_message=False,
     )
     app_obj.add_handler(ask_conv)
     
@@ -1500,17 +1492,46 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(answer_conv)
     
-    # Menu callback handler (for other inline buttons) - DM ONLY
+    # Grading conversation - SIMPLIFIED AND FIXED
+    grading_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
+        states={
+            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(grading_conv)
+    
+    # Wins conversation
+    win_conv = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler),
+            CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")
+        ],
+        states={
+            WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
+                        MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
+                        MessageHandler(filters.VIDEO & ~filters.COMMAND, win_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(win_conv)
+    
+    # ===== CALLBACK HANDLERS (Lower Priority) =====
+    # Grading callbacks
+    app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
+    app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
+    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
+    
+    # Menu callbacks
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
-    
-    # Reply keyboard button handlers - DM ONLY
-    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$") & filters.ChatType.PRIVATE, status_button_handler))
-    
-    # Check status
-    app_obj.add_handler(CommandHandler("status", check_status_handler))
     app_obj.add_handler(CallbackQueryHandler(check_status_handler, pattern="^status$"))
+    
+    # ===== MESSAGE HANDLERS (Lowest Priority) =====
+    # Status button handler
+    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$") & filters.ChatType.PRIVATE, status_button_handler))
     
     # Chat join request handler - handle in main update processing
     # PTB 22.4 handles this differently, we'll process it in the webhook
