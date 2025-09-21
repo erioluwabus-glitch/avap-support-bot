@@ -305,9 +305,9 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
-    ], resize_keyboard=True, persistent=True)
+    ], resize_keyboard=True, is_persistent=True)
 
 # ----- Handlers -----
 
@@ -403,6 +403,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logger.exception("Error in menu_callback: %s", e)
+
+# Verify now callback for conversation entry
+async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer()
+    await query.message.reply_text("Enter your full name:")
+    return VERIFY_NAME
 
 # Reply keyboard button handlers
 async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1373,7 +1382,7 @@ def register_handlers(app_obj: Application):
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(menu_callback, pattern="^verify_now$")],
+        entry_points=[CallbackQueryHandler(verify_now_callback, pattern="^verify_now$")],
         states={
             VERIFY_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_name)],
             VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
@@ -1383,14 +1392,6 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
-
-    # Menu callback handler (only for verify_now)
-    app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^verify_now$"))
-    
-    # Reply keyboard button handlers
-    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$"), submit_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$"), share_win_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$"), status_button_handler))
 
     # Submission conversation
     submit_conv = ConversationHandler(
@@ -1437,6 +1438,14 @@ def register_handlers(app_obj: Application):
         per_message=False
     )
     app_obj.add_handler(answer_conv)
+    
+    # Menu callback handler (for other inline buttons)
+    app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
+    
+    # Reply keyboard button handlers
+    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$"), submit_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$"), share_win_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$"), status_button_handler))
     
     # Check status
     app_obj.add_handler(CommandHandler("status", check_status_handler))
