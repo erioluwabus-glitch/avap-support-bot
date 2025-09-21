@@ -305,7 +305,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, persistent=True)
 
@@ -397,7 +397,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-            return
+                return
             await query.message.reply_text("What's your question?")
             return ASK_QUESTION
             
@@ -1089,7 +1089,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         if len(context.args) < 1:
             await update.message.reply_text("Usage: /ask <question>")
-            return
+        return
         question_text = " ".join(context.args).strip()
         if not question_text:
             await update.message.reply_text("Please provide a question.")
