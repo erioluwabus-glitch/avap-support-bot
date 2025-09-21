@@ -302,14 +302,12 @@ async def find_pending_by_hash(h: str):
         cur.execute("SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?", (h,))
         return cur.fetchone()
 
-# Main menu inline keyboard (permanently fixed below typing area)
+# Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📤 Submit Assignment", callback_data="submit"), 
-         InlineKeyboardButton("🎉 Share Small Win", callback_data="share_win")],
-        [InlineKeyboardButton("📊 Check Status", callback_data="status"), 
-         InlineKeyboardButton("❓ Ask a Question", callback_data="ask")]
-    ])
+    return ReplyKeyboardMarkup([
+        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+        [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
+    ], resize_keyboard=True, persistent=True)
 
 # ----- Handlers -----
 
@@ -348,7 +346,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         if not query:
             return
-        await query.answer()
+            await query.answer()
         
         if query.data == "verify_now":
             # Start verify conversation by asking for name
@@ -362,7 +360,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             await query.message.reply_text("Which module? (1-12)")
             return SUBMIT_MODULE
             
@@ -399,12 +397,68 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Check if verified
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             await query.message.reply_text("What's your question?")
             return ASK_QUESTION
             
     except Exception as e:
         logger.exception("Error in menu_callback: %s", e)
+
+# Reply keyboard button handlers
+async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        return
+    
+    # Check if verified
+    if not await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
+        return
+    
+    await update.message.reply_text("Which module? (1-12)")
+    return SUBMIT_MODULE
+
+async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        return
+    
+    # Check if verified
+    if not await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
+        return
+    
+    await update.message.reply_text("What type of win? Choose:", reply_markup=InlineKeyboardMarkup([
+        [InlineKeyboardButton("Text", callback_data="win_text"),
+         InlineKeyboardButton("Image", callback_data="win_image"),
+         InlineKeyboardButton("Video", callback_data="win_video")]
+    ]))
+    return WIN_TYPE
+
+async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        return
+    
+    # Check if verified
+    if not await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
+        return
+    
+    await check_status_handler(update, context)
+
+async def ask_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != ChatType.PRIVATE:
+        await update.message.reply_text("To ask a question in group, please type /ask")
+        return
+    
+    # Check if verified
+    if not await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
+        return
+    
+    await update.message.reply_text("What's your question?")
+    return ASK_QUESTION
 
 # Admin: /add_student conversation
 async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1035,7 +1089,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         if len(context.args) < 1:
             await update.message.reply_text("Usage: /ask <question>")
-        return
+            return
         question_text = " ".join(context.args).strip()
         if not question_text:
             await update.message.reply_text("Please provide a question.")
@@ -1330,8 +1384,13 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(verify_conv)
 
-    # Menu callback handler
-    app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask|verify_now)$"))
+    # Menu callback handler (only for verify_now)
+    app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^verify_now$"))
+    
+    # Reply keyboard button handlers
+    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$"), submit_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$"), share_win_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$"), status_button_handler))
 
     # Submission conversation
     submit_conv = ConversationHandler(
@@ -1362,7 +1421,7 @@ def register_handlers(app_obj: Application):
     # Ask questions
     app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
     ask_conv = ConversationHandler(
-        entry_points=[CommandHandler("ask", ask_start_cmd)],
+        entry_points=[CommandHandler("ask", ask_start_cmd), MessageHandler(filters.Regex("^❓ Ask a Question$"), ask_button_handler)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
         fallbacks=[],
         per_message=False
