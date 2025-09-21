@@ -1353,8 +1353,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-    body = await request.json()
-    update = Update.de_json(body, telegram_app.bot)
+        body = await request.json()
+        update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1367,7 +1367,7 @@ async def telegram_webhook(token: str, request: Request):
         else:
             await telegram_app.process_update(update)
         
-    return {"ok": True}
+        return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
