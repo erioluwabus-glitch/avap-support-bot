@@ -240,7 +240,7 @@ def init_gsheets():
     try:
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
-                # Assume it's a JSON string
+            # Assume it's a JSON string
             creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
@@ -329,7 +329,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
 
@@ -466,10 +466,10 @@ async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT
         return
     
     await update.message.reply_text("What type of win? Choose:", reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Text", callback_data="win_text"),
-                 InlineKeyboardButton("Image", callback_data="win_image"),
-                 InlineKeyboardButton("Video", callback_data="win_video")]
-            ]))
+        [InlineKeyboardButton("Text", callback_data="win_text"),
+         InlineKeyboardButton("Image", callback_data="win_image"),
+         InlineKeyboardButton("Video", callback_data="win_video")]
+    ]))
     return WIN_TYPE
 
 async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -960,11 +960,8 @@ async def comment_choice_callback(update: Update, context: ContextTypes.DEFAULT_
     if not query:
         return
     data = query.data
-    logger.info(f"comment_choice_callback received data: {data}")
-    
     if data.startswith("comment_no_"):
         sub_id = data.split("_", 2)[2]
-        logger.info(f"Comment choice: No comment for sub_id: {sub_id}")
         # Finalize without comment
         await query.answer()
         try:
@@ -975,7 +972,6 @@ async def comment_choice_callback(update: Update, context: ContextTypes.DEFAULT_
     
     if data.startswith("comment_yes_"):
         sub_id = data.split("_", 2)[2]
-        logger.info(f"Comment choice: Yes comment for sub_id: {sub_id}")
         # Ask for comment type
         await query.answer()
         await query.message.reply_text("Text, Audio, or Video?", reply_markup=InlineKeyboardMarkup([
@@ -990,12 +986,10 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if not query:
         return
     data = query.data
-    logger.info(f"comment_type_callback received data: {data}")
     parts = data.split("_")
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
-        logger.info(f"Processing comment type: {comment_type}, sub_id: {sub_id}")
         await query.answer()
         context.user_data['grading_sub_id'] = sub_id
         context.user_data['grading_expected'] = 'comment'
@@ -1003,7 +997,6 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
         return GRADING_COMMENT
     else:
-        logger.warning(f"Invalid callback data format: {data}")
         await query.answer("Invalid callback data")
         return ConversationHandler.END
 
@@ -1169,7 +1162,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
             return
         await update.message.reply_text("What's your question?")
-    return ASK_QUESTION
+        return ASK_QUESTION
 
 async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text or len(update.message.text.strip()) == 0:
@@ -1243,12 +1236,8 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Record FAQ in Google Sheets if configured
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("FAQ")
-            except Exception:
-                sheet = gs_sheet.add_worksheet("FAQ", rows=100, cols=10)
-                sheet.append_row(["question", "answer", "created_at"])
+        if gsheets_service and QUESTIONS_SHEET_ID:
+            sheet = gsheets_service.open_by_key(QUESTIONS_SHEET_ID).sheet1
             sheet.append_row([question_text, ans, datetime.utcnow().isoformat()])
             logger.info("FAQ recorded in Google Sheets")
     except Exception as e:
@@ -1453,10 +1442,7 @@ def register_handlers(app_obj: Application):
 
     # Submission conversation
     submit_conv = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler),
-            MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)
-        ],
+        entry_points=[MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
         states={
             SUBMIT_MODULE: [MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(video|image)$")],
@@ -1470,14 +1456,11 @@ def register_handlers(app_obj: Application):
     # Grading callbacks
     app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
     app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
-    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_(yes|no)_"))
+    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
 
     # Wins conversation
     win_conv = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler),
-            CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")
-        ],
+        entry_points=[CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")],
         states={
             WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
                         MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
@@ -1501,10 +1484,7 @@ def register_handlers(app_obj: Application):
 
     # Ask questions conversation
     ask_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("ask", ask_start_cmd), 
-            MessageHandler(filters.Regex("^❓ Ask a Question$") & filters.ChatType.PRIVATE, ask_button_handler)
-        ],
+        entry_points=[CommandHandler("ask", ask_start_cmd), MessageHandler(filters.Regex("^❓ Ask a Question$"), ask_button_handler)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
         fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False
@@ -1523,9 +1503,9 @@ def register_handlers(app_obj: Application):
     # Menu callback handler (for other inline buttons) - DM ONLY
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
     
-    # Reply keyboard button handlers - DM ONLY (handled by conversation handlers above)
-    # app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler))
-    # app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler))
+    # Reply keyboard button handlers - DM ONLY
+    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler))
     app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$") & filters.ChatType.PRIVATE, status_button_handler))
     
     # Check status
