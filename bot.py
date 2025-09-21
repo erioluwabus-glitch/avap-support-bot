@@ -260,7 +260,7 @@ def init_gsheets():
 # Systeme.io helper (optional)
 def systeme_create_contact(first_name: str, last_name: str, email: str, phone: str) -> Optional[str]:
     if not SYSTEME_IO_API_KEY:
-        logger.warning("Systeme.io API key not set")
+        logger.warning("Systeme.io API key not set - skipping contact creation")
         return None
     
     try:
@@ -268,10 +268,13 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
         headers = {"Authorization": f"Bearer {SYSTEME_IO_API_KEY}", "Content-Type": "application/json"}
         
-        logger.info(f"Creating Systeme.io contact for {email} with payload: {payload}")
+        logger.info(f"Creating Systeme.io contact for {email}")
         r = requests.post(url, json=payload, headers=headers, timeout=15)
         logger.info(f"Systeme.io API response status: {r.status_code}")
-        logger.info(f"Systeme.io API response: {r.text}")
+        
+        if r.status_code == 401:
+            logger.error("Systeme.io API key is invalid or expired. Please check your SYSTEME_IO_API_KEY environment variable.")
+            return None
         
         r.raise_for_status()
         data = r.json()
@@ -286,7 +289,6 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
                 logger.info(f"Adding tag {SYSTEME_VERIFIED_STUDENT_TAG_ID} to contact {contact_id}")
                 tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
                 logger.info(f"Tag API response status: {tag_r.status_code}")
-                logger.info(f"Tag API response: {tag_r.text}")
                 tag_r.raise_for_status()
                 logger.info(f"Successfully added verified tag to Systeme.io contact {contact_id}")
             except Exception as tag_e:
@@ -1468,7 +1470,7 @@ def register_handlers(app_obj: Application):
 
     # Grading comments conversation
     grading_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_text$")],
+        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
         states={
             GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
         },
