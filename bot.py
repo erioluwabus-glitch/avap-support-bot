@@ -121,7 +121,10 @@ webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
     ANSWER_QUESTION,
     GRADE_USERNAME,
     GRADE_MODULE,
-) = range(100, 115)
+
+
+    GRADING_COMMENT,
+) = range(100, 116)
 
 # Regex validators
 EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
