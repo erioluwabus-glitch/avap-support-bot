@@ -262,32 +262,41 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
     if not SYSTEME_IO_API_KEY:
         logger.warning("Systeme.io API key not set")
         return None
+    
     try:
         url = "https://api.systeme.io/api/contacts"
-        payload = {
-            "first_name": first_name, 
-            "last_name": last_name, 
-            "email": email, 
-            "phone": phone,
-            "tags": [SYSTEME_VERIFIED_STUDENT_TAG_ID] if SYSTEME_VERIFIED_STUDENT_TAG_ID else []
-        }
+        payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
         headers = {"Authorization": f"Bearer {SYSTEME_IO_API_KEY}", "Content-Type": "application/json"}
-        logger.info(f"Creating Systeme.io contact for {email}")
+        
+        logger.info(f"Creating Systeme.io contact for {email} with payload: {payload}")
         r = requests.post(url, json=payload, headers=headers, timeout=15)
+        logger.info(f"Systeme.io API response status: {r.status_code}")
+        logger.info(f"Systeme.io API response: {r.text}")
+        
         r.raise_for_status()
         data = r.json()
         contact_id = str(data.get("id") or data.get("contact_id"))
         logger.info(f"Systeme.io contact created with ID: {contact_id}")
         
-        # Add tag if tag id provided and not already in payload
-        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID and not payload.get("tags"):
-            tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
-            tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
-            tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
-            tag_r.raise_for_status()
-            logger.info(f"Added verified tag to Systeme.io contact {contact_id}")
+        # Add tag if tag id provided
+        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+            try:
+                tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
+                tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
+                logger.info(f"Adding tag {SYSTEME_VERIFIED_STUDENT_TAG_ID} to contact {contact_id}")
+                tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
+                logger.info(f"Tag API response status: {tag_r.status_code}")
+                logger.info(f"Tag API response: {tag_r.text}")
+                tag_r.raise_for_status()
+                logger.info(f"Successfully added verified tag to Systeme.io contact {contact_id}")
+            except Exception as tag_e:
+                logger.exception("Failed to add tag to Systeme.io contact: %s", tag_e)
+                # Don't fail the whole operation if tagging fails
         
         return contact_id
+    except requests.exceptions.RequestException as e:
+        logger.exception("Systeme.io API request failed: %s", e)
+        return None
     except Exception as e:
         logger.exception("Systeme.io contact creation failed: %s", e)
         return None
@@ -1035,7 +1044,6 @@ async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_
     context.user_data.pop('grading_expected', None)
     context.user_data.pop('grading_sub_id', None)
     context.user_data.pop('comment_type', None)
-    return ConversationHandler.END
 
 # Share small win flow
 async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1202,39 +1210,34 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get question info
     async with db_lock:
         cur = db_conn.cursor()
-        cur.execute("SELECT telegram_id FROM questions WHERE question_id = ?", (qid,))
+        cur.execute("SELECT telegram_id, question FROM questions WHERE question_id = ?", (qid,))
         row = cur.fetchone()
         if not row:
             await update.message.reply_text("Question not found.")
             return ConversationHandler.END
-        student_tg = row[0]
+        student_tg, question_text = row
         # Save answer as text for simplicity
-        if update.message.text:
-            ans = update.message.text
-        elif update.message.voice:
-            ans = f"[voice:{update.message.voice.file_id}]"
-        elif update.message.video:
-            ans = f"[video:{update.message.video.file_id}]"
-        elif update.message.audio:
-            ans = f"[audio:{update.message.audio.file_id}]"
-        elif update.message.photo:
-            ans = f"[photo:{update.message.photo[-1].file_id}]"
-        else:
-            ans = "[non-text answer]"
+        ans = update.message.text or "[non-text answer]"
         cur.execute("UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?", 
                    (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid))
         db_conn.commit()
     
     # Send answer to student
     try:
-        if ans.startswith("[voice:") or ans.startswith("[video:") or ans.startswith("[audio:") or ans.startswith("[photo:"):
-            await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question (media): {ans}")
-        else:
-            await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question: {ans}")
+        await telegram_app.bot.send_message(chat_id=student_tg, text=f"Answer to your question: {ans}")
     except Exception:
         logger.exception("Failed to send answer to student")
     
-    await update.message.reply_text("Answer sent!")
+    # Record FAQ in Google Sheets if configured
+    try:
+        if gsheets_service and QUESTIONS_SHEET_ID:
+            sheet = gsheets_service.open_by_key(QUESTIONS_SHEET_ID).sheet1
+            sheet.append_row([question_text, ans, datetime.utcnow().isoformat()])
+            logger.info("FAQ recorded in Google Sheets")
+    except Exception as e:
+        logger.exception("Failed to record FAQ in Google Sheets: %s", e)
+    
+    await update.message.reply_text("Answer sent and FAQ recorded!")
     context.user_data.pop('answer_question_id', None)
     return ConversationHandler.END
 
