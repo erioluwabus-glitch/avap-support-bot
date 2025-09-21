@@ -240,7 +240,7 @@ def init_gsheets():
     try:
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
-            # Assume it's a JSON string
+                # Assume it's a JSON string
             creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
@@ -329,7 +329,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
 
@@ -466,10 +466,10 @@ async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT
         return
     
     await update.message.reply_text("What type of win? Choose:", reply_markup=InlineKeyboardMarkup([
-        [InlineKeyboardButton("Text", callback_data="win_text"),
-         InlineKeyboardButton("Image", callback_data="win_image"),
-         InlineKeyboardButton("Video", callback_data="win_video")]
-    ]))
+                [InlineKeyboardButton("Text", callback_data="win_text"),
+                 InlineKeyboardButton("Image", callback_data="win_image"),
+                 InlineKeyboardButton("Video", callback_data="win_video")]
+            ]))
     return WIN_TYPE
 
 async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -986,34 +986,27 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if not query:
         return
     data = query.data
-    logger.info(f"comment_type_callback called with data: {data}")
     parts = data.split("_")
     if len(parts) >= 4:
         comment_type = parts[2]  # text, audio, video
         sub_id = parts[3]
-        logger.info(f"Setting up comment for type: {comment_type}, sub_id: {sub_id}")
         await query.answer()
         context.user_data['grading_sub_id'] = sub_id
         context.user_data['grading_expected'] = 'comment'
         context.user_data['comment_type'] = comment_type
-        logger.info(f"User data set: {context.user_data}")
         await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
         return GRADING_COMMENT
     else:
-        logger.warning(f"Invalid callback data format: {data}")
         await query.answer("Invalid callback data")
         return ConversationHandler.END
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Only process if we're expecting a grading comment
-    logger.info(f"grading_comment_receive called with user_data: {context.user_data}")
     if context.user_data.get('grading_expected') != 'comment':
-        logger.warning("Not expecting a grading comment, ignoring message")
         return
     sub_id = context.user_data.get('grading_sub_id')
     if not sub_id:
-        logger.warning("No submission ID found in user_data")
         return
     
     # Extract comment text or file_id
@@ -1169,7 +1162,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
             return
         await update.message.reply_text("What's your question?")
-        return ASK_QUESTION
+    return ASK_QUESTION
 
 async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text or len(update.message.text.strip()) == 0:
@@ -1243,8 +1236,12 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Record FAQ in Google Sheets if configured
     try:
-        if gsheets_service and QUESTIONS_SHEET_ID:
-            sheet = gsheets_service.open_by_key(QUESTIONS_SHEET_ID).sheet1
+        if gs_sheet:
+            try:
+                sheet = gs_sheet.worksheet("FAQ")
+            except Exception:
+                sheet = gs_sheet.add_worksheet("FAQ", rows=100, cols=10)
+                sheet.append_row(["question", "answer", "created_at"])
             sheet.append_row([question_text, ans, datetime.utcnow().isoformat()])
             logger.info("FAQ recorded in Google Sheets")
     except Exception as e:
@@ -1414,22 +1411,11 @@ async def telegram_webhook(token: str, request: Request):
 
 # Handler registration
 def register_handlers(app_obj: Application):
-    """Register all handlers with the application - COMPLETELY REWRITTEN FOR RELIABILITY"""
-    
-    # ===== COMMAND HANDLERS (Highest Priority) =====
+    # Basic handlers
     app_obj.add_handler(CommandHandler("start", start_handler))
     app_obj.add_handler(CommandHandler("cancel", cancel_handler))
-    app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
-    app_obj.add_handler(CommandHandler("status", check_status_handler))
     
-    # Admin commands
-    app_obj.add_handler(CommandHandler("add_student", add_student_start))
-    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
-    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
-    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
-    
-    # ===== CONVERSATION HANDLERS (Medium Priority) =====
-    # Add student conversation
+    # Admin handlers
     add_student_conv = ConversationHandler(
         entry_points=[CommandHandler("add_student", add_student_start)],
         states={
@@ -1441,8 +1427,11 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(add_student_conv)
+    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
+    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
+    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     
-    # Verify conversation
+    # Verification conversation for students
     verify_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(verify_now_callback, pattern="^verify_now$")],
         states={
@@ -1454,8 +1443,8 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
-    
-    # Submit conversation - SIMPLIFIED
+
+    # Submission conversation
     submit_conv = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler),
@@ -1470,39 +1459,12 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(submit_conv)
-    
-    # Ask questions conversation
-    ask_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("ask", ask_start_cmd),
-            MessageHandler(filters.Regex("^❓ Ask a Question$") & filters.ChatType.PRIVATE, ask_button_handler)
-        ],
-        states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(ask_conv)
-    
-    # Answer conversation
-    answer_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
-        states={ANSWER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_receive)]},
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False
-    )
-    app_obj.add_handler(answer_conv)
-    
-    # Grading conversation - SIMPLIFIED AND FIXED
-    grading_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
-        states={
-            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(grading_conv)
-    
+
+    # Grading callbacks
+    app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
+    app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
+    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
+
     # Wins conversation
     win_conv = ConversationHandler(
         entry_points=[
@@ -1518,20 +1480,50 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(win_conv)
+
+    # Grading comments conversation
+    grading_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_(text|audio|video)_")],
+        states={
+            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(grading_conv)
+
+    # Ask questions conversation
+    ask_conv = ConversationHandler(
+        entry_points=[
+            CommandHandler("ask", ask_start_cmd), 
+            MessageHandler(filters.Regex("^❓ Ask a Question$") & filters.ChatType.PRIVATE, ask_button_handler)
+        ],
+        states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False
+    )
+    app_obj.add_handler(ask_conv)
     
-    # ===== CALLBACK HANDLERS (Lower Priority) =====
-    # Grading callbacks
-    app_obj.add_handler(CallbackQueryHandler(grade_callback, pattern="^grade_"))
-    app_obj.add_handler(CallbackQueryHandler(score_selected_callback, pattern="^score_"))
-    app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
+    # Answer conversation
+    answer_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
+        states={ANSWER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_receive)]},
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False
+    )
+    app_obj.add_handler(answer_conv)
     
-    # Menu callbacks
+    # Menu callback handler (for other inline buttons) - DM ONLY
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
-    app_obj.add_handler(CallbackQueryHandler(check_status_handler, pattern="^status$"))
     
-    # ===== MESSAGE HANDLERS (Lowest Priority) =====
-    # Status button handler
+    # Reply keyboard button handlers - DM ONLY (handled by conversation handlers above)
+    # app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler))
+    # app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler))
     app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$") & filters.ChatType.PRIVATE, status_button_handler))
+    
+    # Check status
+    app_obj.add_handler(CommandHandler("status", check_status_handler))
+    app_obj.add_handler(CallbackQueryHandler(check_status_handler, pattern="^status$"))
     
     # Chat join request handler - handle in main update processing
     # PTB 22.4 handles this differently, we'll process it in the webhook
