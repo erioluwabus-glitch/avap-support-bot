@@ -237,8 +237,7 @@ def init_gsheets():
     try:
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
-            with open('google-credentials.json', 'w') as f:
-                f.write(GOOGLE_CREDENTIALS_JSON)
+            # Assume it's a JSON string
             creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
@@ -258,26 +257,26 @@ def init_gsheets():
 # Systeme.io helper (optional)
 def systeme_create_contact(first_name: str, last_name: str, email: str, phone: str) -> Optional[str]:
     if not SYSTEME_IO_API_KEY:
+        logger.warning("Systeme.io API key not set")
         return None
     try:
         url = "https://api.systeme.io/api/contacts"
         payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
         headers = {"Authorization": f"Bearer {SYSTEME_IO_API_KEY}", "Content-Type": "application/json"}
+        logger.info(f"Creating Systeme.io contact for {email}")
         r = requests.post(url, json=payload, headers=headers, timeout=15)
         r.raise_for_status()
         data = r.json()
         contact_id = str(data.get("id") or data.get("contact_id"))
+        logger.info(f"Systeme.io contact created with ID: {contact_id}")
         
         # Add tag if tag id provided
         if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
-            try:
-                tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
-                tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
-                tag_response = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
-                tag_response.raise_for_status()
-                logger.info(f"Tag 'verified' added to contact {contact_id}")
-            except Exception as e:
-                logger.exception(f"Failed to add tag to contact {contact_id}: {e}")
+            tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
+            tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
+            tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
+            tag_r.raise_for_status()
+            logger.info(f"Added verified tag to Systeme.io contact {contact_id}")
         
         return contact_id
     except Exception as e:
@@ -310,7 +309,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
 
@@ -346,60 +345,48 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Error in start_handler: %s", e)
 
 # Callback query for main inline buttons
+# Menu callback handler (for inline buttons) - DM ONLY
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         query = update.callback_query
         if not query:
             return
-            await query.answer()
         
-        if query.data == "verify_now":
-            # Start verify conversation by asking for name
-            await query.message.reply_text("Enter your full name:")
-            return VERIFY_NAME
-            
-        if query.data == "submit":
-            if update.effective_chat.type != ChatType.PRIVATE:
-                await query.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-                return
-            # Check if verified
+        # Only work in DM
+        if update.effective_chat.type != ChatType.PRIVATE:
+            await query.answer("This feature only works in DM. Use /ask in group to ask questions.")
+            return
+        
+        await query.answer()
+        
+        data = query.data
+        if data == "submit":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-            return
-            await query.message.reply_text("Which module? (1-12)")
+                return
+            await query.message.reply_text("Which module? (1-12):")
             return SUBMIT_MODULE
             
-        if query.data == "share_win":
-            if update.effective_chat.type != ChatType.PRIVATE:
-                await query.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-                return
-            # Check if verified
+        elif data == "share_win":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
                 return
-            await query.message.reply_text("What type of win? Choose:", reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Text", callback_data="win_text"),
-                 InlineKeyboardButton("Image", callback_data="win_image"),
-                 InlineKeyboardButton("Video", callback_data="win_video")]
-            ]))
-            return WIN_TYPE
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Text", callback_data="win_text")],
+                [InlineKeyboardButton("Image", callback_data="win_image")],
+                [InlineKeyboardButton("Video", callback_data="win_video")]
+            ])
+            await query.message.reply_text("How would you like to share your win?", reply_markup=keyboard)
+            return WIN_UPLOAD
             
-        if query.data == "status":
-            if update.effective_chat.type != ChatType.PRIVATE:
-                await query.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-                return
-            # Check if verified
+        elif data == "status":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
                 return
             await check_status_handler(update, context)
             return
             
-        if query.data == "ask":
-            if update.effective_chat.type != ChatType.PRIVATE:
-                await query.message.reply_text("To ask a question in group, please type /ask")
-                return
-            # Check if verified
+        elif data == "ask":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
                 return
@@ -417,6 +404,22 @@ async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     await query.message.reply_text("Enter your full name:")
     return VERIFY_NAME
+
+# Cancel command handler
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel any ongoing conversation and return to main menu"""
+    context.user_data.clear()
+    
+    if update.effective_chat.type == ChatType.PRIVATE:
+        # Check if user is verified
+        if await user_verified_by_telegram_id(update.effective_user.id):
+            await update.message.reply_text("✅ Cancelled! Back to main menu.", reply_markup=get_main_menu_keyboard())
+        else:
+            await update.message.reply_text("✅ Cancelled! Use /start to begin verification.")
+    else:
+        await update.message.reply_text("✅ Cancelled!")
+    
+    return ConversationHandler.END
 
 # Reply keyboard button handlers
 async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -655,26 +658,6 @@ async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.exception("Sheets update failed")
     
     await update.message.reply_text(f"Student {name} ({t_id}) removed. They must re-verify to regain access.")
-
-# Cancel command - resets conversations
-async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel current conversation and return to main menu"""
-    # Clear user data
-    context.user_data.clear()
-    
-    # Check if user is verified
-    if await user_verified_by_telegram_id(update.effective_user.id):
-        await update.message.reply_text(
-            "❌ Conversation cancelled. You're back to the main menu.",
-            reply_markup=get_main_menu_keyboard()
-        )
-    else:
-        await update.message.reply_text(
-            "❌ Conversation cancelled. Use /start to begin verification.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
-        )
-    
-    return ConversationHandler.END
 
 # Admin get submission /get_submission [submission_id]
 async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -992,7 +975,7 @@ async def comment_type_callback(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['grading_expected'] = 'comment'
     context.user_data['comment_type'] = comment_type
     await query.message.reply_text("Send the comment (text/audio/video). It will be sent to student and stored.")
-    return
+    return ConversationHandler.END
 
 # For simplicity, treat next admin message as comment and store it
 async def grading_comment_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1123,7 +1106,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         if len(context.args) < 1:
             await update.message.reply_text("Usage: /ask <question>")
-        return
+            return
         question_text = " ".join(context.args).strip()
         if not question_text:
             await update.message.reply_text("Please provide a question.")
@@ -1144,22 +1127,18 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db_conn.commit()
         
         # Forward to questions group with Answer button
-        if QUESTIONS_GROUP_ID:
-            kb = InlineKeyboardMarkup([[InlineKeyboardButton("Answer", callback_data=f"answer_{qid}")]])
-            try:
-                await telegram_app.bot.send_message(chat_id=QUESTIONS_GROUP_ID, text=f"Question from {update.effective_user.full_name}: {question_text}", reply_markup=kb)
-            except Exception:
-                logger.exception("Failed to forward question to questions group")
-        
-        await update.message.reply_text("Question sent! We'll get back to you.")
-        return
+        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Answer", callback_data=f"answer_{qid}")]])
+        await telegram_app.bot.send_message(QUESTIONS_GROUP_ID, f"❓ Question from @{update.effective_user.username or update.effective_user.full_name}:\n\n{question_text}", reply_markup=keyboard)
+        await update.message.reply_text("✅ Question sent to support team!")
+        return ConversationHandler.END
     
-    # DM flow
-    if not await user_verified_by_telegram_id(update.effective_user.id):
-        await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-        return
-    await update.message.reply_text("What's your question?")
-    return ASK_QUESTION
+    # If in DM, start conversation
+    else:
+        if not await user_verified_by_telegram_id(update.effective_user.id):
+            await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
+            return
+        await update.message.reply_text("What's your question?")
+        return ASK_QUESTION
 
 async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text or len(update.message.text.strip()) == 0:
@@ -1256,12 +1235,21 @@ async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status = ?", (update.effective_user.id, "Graded"))
         graded_count = cur.fetchone()[0]
     
-    completed = [f"M{r[0]}: {r[1]} (score={r[2]})" for r in subs]
-    msg = f"Completed modules:\n{chr(10).join(completed) if completed else 'None'}\nWins: {wins_count}"
+    # Format submissions with comments
+    completed = []
+    for r in subs:
+        module_info = f"M{r[0]}: {r[1]} (score={r[2]})"
+        if r[3]:  # If there's a comment
+            module_info += f"\n  💬 Comment: {r[3]}"
+        completed.append(module_info)
+    
+    msg = f"📊 Your Status:\n\n"
+    msg += f"Completed modules:\n{chr(10).join(completed) if completed else 'None'}\n\n"
+    msg += f"🎉 Wins shared: {wins_count}"
     
     # Check for Achiever badge
     if wins_count >= ACHIEVER_WINS and graded_count >= ACHIEVER_MODULES:
-        msg += "\n🎉 AVAP Achiever Badge earned!"
+        msg += "\n\n🏆 AVAP Achiever Badge earned!"
     
     await update.message.reply_text(msg, reply_markup=get_main_menu_keyboard())
     return
@@ -1365,8 +1353,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-        body = await request.json()
-        update = Update.de_json(body, telegram_app.bot)
+    body = await request.json()
+    update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -1379,7 +1367,7 @@ async def telegram_webhook(token: str, request: Request):
         else:
             await telegram_app.process_update(update)
         
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1388,7 +1376,7 @@ async def telegram_webhook(token: str, request: Request):
 def register_handlers(app_obj: Application):
     # Basic handlers
     app_obj.add_handler(CommandHandler("start", start_handler))
-    app_obj.add_handler(CommandHandler("cancel", cancel_command))
+    app_obj.add_handler(CommandHandler("cancel", cancel_handler))
     
     # Admin handlers
     add_student_conv = ConversationHandler(
@@ -1398,7 +1386,7 @@ def register_handlers(app_obj: Application):
             ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
             ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False,
     )
     app_obj.add_handler(add_student_conv)
@@ -1414,7 +1402,7 @@ def register_handlers(app_obj: Application):
             VERIFY_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_phone)],
             VERIFY_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_email)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
@@ -1427,7 +1415,7 @@ def register_handlers(app_obj: Application):
             SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(video|image)$")],
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
         },
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False,
     )
     app_obj.add_handler(submit_conv)
@@ -1438,19 +1426,35 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CallbackQueryHandler(comment_choice_callback, pattern="^comment_"))
     app_obj.add_handler(CallbackQueryHandler(comment_type_callback, pattern="^comment_type_"))
 
-    # Wins
-    app_obj.add_handler(CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$"))
-    app_obj.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, win_receive), group=6)
+    # Wins conversation
+    win_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")],
+        states={
+            WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
+                        MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
+                        MessageHandler(filters.VIDEO & ~filters.COMMAND, win_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(win_conv)
 
-    # Receive grading comments as normal messages from admin (lower priority)
-    app_obj.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, grading_comment_receive), group=7)
+    # Grading comments conversation
+    grading_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(comment_type_callback, pattern="^comment_type_text$")],
+        states={
+            GRADING_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, grading_comment_receive)]
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(grading_conv)
 
-    # Ask questions
-    app_obj.add_handler(CommandHandler("ask", ask_start_cmd))
+    # Ask questions conversation
     ask_conv = ConversationHandler(
         entry_points=[CommandHandler("ask", ask_start_cmd), MessageHandler(filters.Regex("^❓ Ask a Question$"), ask_button_handler)],
         states={ASK_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_receive)]},
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False
     )
     app_obj.add_handler(ask_conv)
@@ -1459,19 +1463,19 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
     answer_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
-        states={ANSWER_QUESTION: [MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.AUDIO | filters.VOICE) & ~filters.COMMAND, answer_receive)]},
-        fallbacks=[CommandHandler("cancel", cancel_command)],
+        states={ANSWER_QUESTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, answer_receive)]},
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False
     )
     app_obj.add_handler(answer_conv)
     
-    # Menu callback handler (for other inline buttons)
+    # Menu callback handler (for other inline buttons) - DM ONLY
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
     
-    # Reply keyboard button handlers
-    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$"), submit_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$"), share_win_button_handler))
-    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$"), status_button_handler))
+    # Reply keyboard button handlers - DM ONLY
+    app_obj.add_handler(MessageHandler(filters.Regex("^📤 Submit Assignment$") & filters.ChatType.PRIVATE, submit_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler))
+    app_obj.add_handler(MessageHandler(filters.Regex("^📊 Check Status$") & filters.ChatType.PRIVATE, status_button_handler))
     
     # Check status
     app_obj.add_handler(CommandHandler("status", check_status_handler))
