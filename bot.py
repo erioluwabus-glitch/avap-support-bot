@@ -29,6 +29,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 import requests
+import aiohttp
+from aiohttp import ClientTimeout
 from fastapi import FastAPI, Request, HTTPException
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -84,6 +86,10 @@ DB_PATH = os.getenv("DB_PATH", "./bot.db")
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
 ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
+
+# Systeme.io configuration
+SYSTEME_BASE_URL = "https://api.systeme.io/api"
+AVAP_ACTIVATE_LINK = "https://bit.ly/avm-activate"
 
 # Validate required environment variables
 if not BOT_TOKEN:
@@ -245,7 +251,7 @@ def init_gsheets():
     try:
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
-                # Assume it's a JSON string
+            # Assume it's a JSON string
             creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
@@ -262,50 +268,150 @@ def init_gsheets():
         gs_client = None
         gs_sheet = None
 
-# Systeme.io helper (optional)
+# Async Systeme.io helpers with comprehensive error handling and retry logic
+async def systeme_api_request(method: str, endpoint: str, json_data: dict = None, params: dict = None, max_retries: int = 3) -> dict:
+    """Unified async API caller with retry logic and exponential backoff."""
+    if not SYSTEME_IO_API_KEY:
+        logger.warning("Systeme.io API key not set - skipping API request")
+        return None
+    
+    headers = {"X-API-Key": SYSTEME_IO_API_KEY, "Content-Type": "application/json"}
+    url = f"{SYSTEME_BASE_URL}{endpoint}"
+    timeout = ClientTimeout(total=10)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        for attempt in range(max_retries):
+            try:
+                async with session.request(method, url, headers=headers, json=json_data, params=params) as resp:
+                    if resp.status == 401:
+                        logger.error("Systeme.io API key is invalid or expired. Please check your SYSTEME_IO_API_KEY environment variable.")
+                        return None
+                    elif resp.status == 429:  # Rate limit
+                        if attempt < max_retries - 1:
+                            wait_time = 60 * (2 ** attempt)  # Exponential backoff with 1 minute base
+                            logger.warning(f"Rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        else:
+                            logger.error("Rate limit exceeded after all retries")
+                            return None
+                    
+                    resp.raise_for_status()
+                    return await resp.json()
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429 and attempt < max_retries - 1:
+                    wait_time = 60 * (2 ** attempt)
+                    logger.warning(f"Rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                    await asyncio.sleep(wait_time)
+                    continue
+                elif attempt == max_retries - 1:
+                    logger.exception(f"Systeme.io API request failed after {max_retries} attempts: {e}")
+                    return None
+                else:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"API request failed, retrying in {wait_time} seconds: {e}")
+                    await asyncio.sleep(wait_time)
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    logger.exception(f"Systeme.io API request failed after {max_retries} attempts: {e}")
+                    return None
+                else:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Unexpected error, retrying in {wait_time} seconds: {e}")
+                    await asyncio.sleep(wait_time)
+    return None
+
+async def systeme_get_contact_by_email(email: str) -> dict:
+    """Check if contact exists by email using Systeme.io filter API."""
+    params = {"email": email, "limit": 1}
+    response = await systeme_api_request("GET", "/contacts", params=params)
+    if response and response.get("items"):
+        return response["items"][0]
+    return None
+
+async def systeme_create_contact_with_retry(first_name: str, last_name: str, email: str, phone: str) -> str:
+    """Create contact async with retry logic."""
+    payload = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "email": email,
+        "phone_number": phone
+    }
+    response = await systeme_api_request("POST", "/contacts", json_data=payload)
+    return response.get("id") if response else None
+
+async def systeme_update_contact(contact_id: str, first_name: str, last_name: str, phone: str):
+    """Update contact fields if needed (PATCH)."""
+    payload = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone_number": phone
+    }
+    await systeme_api_request("PATCH", f"/contacts/{contact_id}", json_data=payload)
+
+async def systeme_add_and_verify_tag(contact_id: str) -> bool:
+    """Add tag and verify it was applied successfully."""
+    if not SYSTEME_VERIFIED_STUDENT_TAG_ID:
+        logger.warning("No verified student tag ID configured")
+        return False
+    
+    tag_id = int(SYSTEME_VERIFIED_STUDENT_TAG_ID)
+    add_payload = {"tag_id": tag_id}
+    
+    # Add the tag
+    add_response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
+    if not add_response:
+        logger.error(f"Failed to add tag {tag_id} to contact {contact_id}")
+        return False
+    
+    # Verify the tag was added
+    tags_response = await systeme_api_request("GET", f"/contacts/{contact_id}/tags")
+    if tags_response:
+        for tag in tags_response:
+            if tag.get("id") == tag_id:
+                logger.info(f"Successfully verified tag {tag_id} on contact {contact_id}")
+                return True
+    
+    logger.warning(f"Tag {tag_id} was not found on contact {contact_id} after adding")
+    return False
+
+async def notify_admin_systeme_failure(name: str, email: str, error: str, contact_id: str = None):
+    """Notify admin about Systeme.io integration failures."""
+    if not ADMIN_USER_ID:
+        return
+    
+    error_msg = f"🚨 Systeme.io Integration Failure\n\n"
+    error_msg += f"Student: {name}\n"
+    error_msg += f"Email: {email}\n"
+    error_msg += f"Contact ID: {contact_id or 'N/A'}\n"
+    error_msg += f"Error: {error}\n\n"
+    error_msg += f"Please check the Systeme.io API key and try manual verification."
+    
+    try:
+        await telegram_app.bot.send_message(chat_id=ADMIN_USER_ID, text=error_msg)
+    except Exception as e:
+        logger.exception(f"Failed to notify admin about Systeme.io failure: {e}")
+
+# Legacy sync function for backward compatibility
 def systeme_create_contact(first_name: str, last_name: str, email: str, phone: str) -> Optional[str]:
+    """Legacy sync function - calls async version."""
     if not SYSTEME_IO_API_KEY:
         logger.warning("Systeme.io API key not set - skipping contact creation")
         return None
     
     try:
-        url = "https://api.systeme.io/api/contacts"
-        payload = {"first_name": first_name, "last_name": last_name, "email": email, "phone": phone}
-        headers = {"Authorization": f"Bearer {SYSTEME_IO_API_KEY}", "Content-Type": "application/json"}
-        
-        logger.info(f"Creating Systeme.io contact for {email}")
-        r = requests.post(url, json=payload, headers=headers, timeout=15)
-        logger.info(f"Systeme.io API response status: {r.status_code}")
-        
-        if r.status_code == 401:
-            logger.error("Systeme.io API key is invalid or expired. Please check your SYSTEME_IO_API_KEY environment variable.")
-            return None
-        
-        r.raise_for_status()
-        data = r.json()
-        contact_id = str(data.get("id") or data.get("contact_id"))
-        logger.info(f"Systeme.io contact created with ID: {contact_id}")
-        
-        # Add tag if tag id provided
-        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
-            try:
-                tag_url = f"https://api.systeme.io/api/contacts/{contact_id}/tags"
-                tag_payload = {"tag_id": int(SYSTEME_VERIFIED_STUDENT_TAG_ID)}
-                logger.info(f"Adding tag {SYSTEME_VERIFIED_STUDENT_TAG_ID} to contact {contact_id}")
-                tag_r = requests.post(tag_url, json=tag_payload, headers=headers, timeout=10)
-                logger.info(f"Tag API response status: {tag_r.status_code}")
-                tag_r.raise_for_status()
-                logger.info(f"Successfully added verified tag to Systeme.io contact {contact_id}")
-            except Exception as tag_e:
-                logger.exception("Failed to add tag to Systeme.io contact: %s", tag_e)
-                # Don't fail the whole operation if tagging fails
-        
-        return contact_id
-    except requests.exceptions.RequestException as e:
-        logger.exception("Systeme.io API request failed: %s", e)
-        return None
+        # Run the async function in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            contact_id = loop.run_until_complete(systeme_create_contact_with_retry(first_name, last_name, email, phone))
+            if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+                loop.run_until_complete(systeme_add_and_verify_tag(contact_id))
+            return contact_id
+        finally:
+            loop.close()
     except Exception as e:
-        logger.exception("Systeme.io contact creation failed: %s", e)
+        logger.exception("Legacy Systeme.io contact creation failed: %s", e)
         return None
 
 # Utilities
@@ -334,7 +440,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
 
@@ -457,7 +563,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.answer("This feature only works in DM. Use /ask in group to ask questions.")
             return
         
-        await query.answer()
+            await query.answer()
         
         data = query.data
         if data == "submit":
@@ -470,7 +576,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "share_win":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+            return
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("Text", callback_data="win_text")],
                 [InlineKeyboardButton("Image", callback_data="win_image")],
@@ -693,23 +799,44 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception:
         logger.exception("Failed to sync manual verification to sheets.")
     
-    # Systeme.io sync
+    # Enhanced Systeme.io sync with async helpers
+    systeme_success = False
+    contact_id = None
     try:
         parts = name.split()
         first = parts[0]
         last = " ".join(parts[1:]) if len(parts) > 1 else ""
-        contact_id = systeme_create_contact(first, last, email, phone)
+
+        # Check if contact exists first
+        existing_contact = await systeme_get_contact_by_email(email)
+        if existing_contact:
+            contact_id = existing_contact['id']
+            logger.info(f"Existing Systeme.io contact found: {contact_id}")
+            # Update fields if needed
+            await systeme_update_contact(contact_id, first, last, phone)
+        else:
+            contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
+
         if contact_id:
+            # Add and verify tag
+            tagging_success = await systeme_add_and_verify_tag(contact_id)
+            if tagging_success:
+                systeme_success = True
+                logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            else:
+                logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
+
             # Update the verified_users table with systeme contact ID
             async with db_lock:
                 cur = db_conn.cursor()
                 cur.execute("UPDATE verified_users SET systeme_contact_id = ? WHERE email = ?", (contact_id, email))
                 db_conn.commit()
-            logger.info(f"Systeme.io contact created with ID: {contact_id}")
         else:
-            logger.warning("Systeme.io contact creation failed or API key not set")
-    except Exception:
-        logger.exception("Failed to sync to Systeme.io (non-fatal).")
+            raise ValueError("Contact creation failed")
+
+    except Exception as e:
+        logger.exception(f"Systeme.io integration failed: {e}")
+        await notify_admin_systeme_failure(name, email, str(e), contact_id)
     
     await update.message.reply_text(f"Student with email {email} verified successfully!")
 
@@ -830,7 +957,7 @@ async def verify_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return VERIFY_EMAIL
 
 async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    email = (update.message.text or "").strip()
+    email = (update.message.text or "").strip().lower()  # Sanitize
     if not EMAIL_RE.match(email):
         await update.message.reply_text("Invalid email. Try again.")
         return VERIFY_EMAIL
@@ -872,26 +999,67 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Sheets sync failed")
     
-    # Systeme.io
+    # Enhanced Systeme.io integration with async helpers
+    systeme_success = False
+    contact_id = None
     try:
         parts = name.split()
         first = parts[0]
         last = " ".join(parts[1:]) if len(parts) > 1 else ""
-        contact_id = systeme_create_contact(first, last, email, phone)
+
+        # Check if contact exists first
+        existing_contact = await systeme_get_contact_by_email(email)
+        if existing_contact:
+            contact_id = existing_contact['id']
+            logger.info(f"Existing Systeme.io contact found: {contact_id}")
+            # Update fields if needed
+            await systeme_update_contact(contact_id, first, last, phone)
+        else:
+            contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
+
         if contact_id:
-            # Update the verified_users table with systeme contact ID
+            # Add and verify tag
+            tagging_success = await systeme_add_and_verify_tag(contact_id)
+            if tagging_success:
+                systeme_success = True
+                logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            else:
+                logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
+
+            # Update DB with contact ID
             async with db_lock:
                 cur = db_conn.cursor()
-                cur.execute("UPDATE verified_users SET systeme_contact_id = ? WHERE telegram_id = ?", (contact_id, update.effective_user.id))
+                cur.execute("UPDATE verified_users SET systeme_contact_id = ? WHERE telegram_id = ?", 
+                           (contact_id, update.effective_user.id))
                 db_conn.commit()
-            logger.info(f"Systeme.io contact created with ID: {contact_id}")
         else:
-            logger.warning("Systeme.io contact creation failed or API key not set")
-    except Exception:
-        logger.exception("Systeme sync error")
+            raise ValueError("Contact creation failed")
+
+    except Exception as e:
+        logger.exception(f"Systeme.io integration failed: {e}")
+        await notify_admin_systeme_failure(name, email, str(e), contact_id)
+
+    # Send web link to student immediately after verification
+    try:
+        await update.message.reply_text(
+            f"🎉 Welcome to AVAP! Your verification is complete.\n\n"
+            f"📚 Access your course materials here: {AVAP_ACTIVATE_LINK}\n\n"
+            f"This link contains all instructions on how to access your course.",
+            reply_markup=get_main_menu_keyboard()
+        )
+    except Exception as e:
+        logger.exception(f"Failed to send web link to student: {e}")
+        # Fallback message without link
+        await update.message.reply_text("✅ Verified! Welcome to AVAP!", reply_markup=get_main_menu_keyboard())
+
+    # User feedback based on Systeme.io success
+    if systeme_success:
+        logger.info(f"Student {name} ({email}) verified successfully with full Systeme.io integration")
+    else:
+        logger.warning(f"Student {name} ({email}) verified in bot but Systeme.io sync had issues")
     
-    # Welcome and main menu
-    await update.message.reply_text("✅ Verified! Welcome to AVAP!", reply_markup=get_main_menu_keyboard())
+    # Clean up and end conversation
+    context.user_data.clear()
     return ConversationHandler.END
 
 # Assignment submission handlers
@@ -1131,7 +1299,7 @@ async def grading_comment_receive_text(update: Update, context: ContextTypes.DEF
     if context.user_data.get('comment_type') != 'text':
         return
     
-    comment_text = update.message.text
+        comment_text = update.message.text
     logger.info(f"Received text comment: {comment_text}")
     
     await finalize_grading(update, context, comment=comment_text)
@@ -1294,7 +1462,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
             return
         await update.message.reply_text("What's your question?")
-    return ASK_QUESTION
+        return ASK_QUESTION
 
 async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text or len(update.message.text.strip()) == 0:
