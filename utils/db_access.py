@@ -12,8 +12,8 @@ import difflib
 
 logger = logging.getLogger(__name__)
 
-# Database path from environment
-DB_PATH = os.getenv("DB_PATH", "./bot.db")
+# Database path from environment (unified to persistent /data by default)
+DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
 
 # Global database connection and lock
 db_conn = None

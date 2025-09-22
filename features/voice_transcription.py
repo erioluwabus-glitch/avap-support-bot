@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, MessageHandler, filters, Application
 from utils.openai_client import download_and_transcribe_voice
 from utils.db_access import init_database
+from bot import user_verified_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +22,10 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         return
     
-    # Check if user is verified (you might want to add this check)
-    # For now, we'll process all voice messages in private chats
+    # Require verification
+    if not await user_verified_by_telegram_id(update.effective_user.id):
+        await update.message.reply_text("Please verify first!")
+        return
     
     voice = update.message.voice
     if not voice:

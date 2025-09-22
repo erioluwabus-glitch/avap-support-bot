@@ -135,6 +135,7 @@ base_url = RENDER_EXTERNAL_URL.strip('/')
 if not base_url.startswith('https://'):
     base_url = f"https://{base_url}"
 webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
+masked_token = (BOT_TOKEN[:6] + '…') if BOT_TOKEN and len(BOT_TOKEN) > 6 else '***'
 
 # Conversation states
 (
@@ -284,7 +285,11 @@ def init_db():
         )"""
     )
     
-    # Add removed_at column to verified_users if it doesn't exist
+    # Add language & removed_at columns to verified_users if missing
+    try:
+        cur.execute("ALTER TABLE verified_users ADD COLUMN language TEXT DEFAULT 'en'")
+    except sqlite3.OperationalError:
+        pass
     try:
         cur.execute("ALTER TABLE verified_users ADD COLUMN removed_at DATETIME NULL")
     except sqlite3.OperationalError:
@@ -811,13 +816,11 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         if not query:
             return
-        
+        await query.answer()
         # Only work in DM
         if update.effective_chat.type != ChatType.PRIVATE:
             await query.answer("This feature only works in DM. Use /ask in group to ask questions.")
             return
-        
-            await query.answer()
         
         data = query.data
         if data == "submit":
@@ -874,17 +877,6 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Operation cancelled.", reply_markup=get_main_menu_keyboard())
     except Exception:
         pass
-    return ConversationHandler.END
-    
-    if update.effective_chat.type == ChatType.PRIVATE:
-        # Check if user is verified
-        if await user_verified_by_telegram_id(update.effective_user.id):
-            await update.message.reply_text("✅ Cancelled! Back to main menu.", reply_markup=get_main_menu_keyboard())
-        else:
-            await update.message.reply_text("✅ Cancelled! Use /start to begin verification.")
-    else:
-        await update.message.reply_text("✅ Cancelled!")
-    
     return ConversationHandler.END
 
 # Reply keyboard button handlers
@@ -1099,37 +1091,33 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Enhanced remove student functionality
 async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, name, or telegram ID with partial matching."""
+    identifier = (identifier or "").strip()
     async with db_lock:
         cur = db_conn.cursor()
-        
-    # Try exact email match first (strip and lower)
-    identifier = identifier.strip()
-    if "@" in identifier:
-        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE email = ? AND removed_at IS NULL", (identifier,))
-        row = cur.fetchone()
-        if row:
+        # Email exact (case-insensitive)
+        if "@" in identifier:
+            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(email) = LOWER(?) AND removed_at IS NULL", (identifier,))
+            row = cur.fetchone()
+            if row:
+                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        # Telegram ID
+        try:
+            t_id = int(identifier)
+            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
+            row = cur.fetchone()
+            if row:
+                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        except ValueError:
+            pass
+        # Partial name (case-insensitive)
+        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL", (f"%{identifier.lower()}%",))
+        rows = cur.fetchall()
+        if len(rows) == 1:
+            row = rows[0]
             return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-    
-    # Try telegram ID
-    try:
-        t_id = int(identifier)
-        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
-        row = cur.fetchone()
-        if row:
-            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-    except ValueError:
-        pass
-        
-    # Try partial name match (case-insensitive)
-    cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL", (f"%{identifier.lower()}%",))
-    rows = cur.fetchall()
-    if len(rows) == 1:
-        row = rows[0]
-        return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-    elif len(rows) > 1:
-        return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
-    
-    return None
+        elif len(rows) > 1:
+            return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+        return None
 
 async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Enhanced remove student command with batch support and confirmation."""
