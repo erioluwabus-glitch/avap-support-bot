@@ -328,17 +328,31 @@ db_lock = asyncio.Lock()  # guard sqlite usage from async handlers
 # Google Sheets helper (optional)
 def init_gsheets():
     global gs_client, gs_sheet
-    if not GSPREAD_AVAILABLE or not GOOGLE_CREDENTIALS_JSON or not GOOGLE_SHEET_ID:
-        logger.info("Google Sheets not configured or gspread not installed; skipping.")
+    if not GSPREAD_AVAILABLE:
+        logger.info("Google Sheets library not installed; skipping Sheets integration.")
+        return
+    if not GOOGLE_SHEET_ID:
+        logger.warning("Google Sheets not configured - missing GOOGLE_SHEET_ID; skipping sync")
+        return
+    if not GOOGLE_CREDENTIALS_JSON:
+        logger.warning("Google Sheets not configured - missing GOOGLE_CREDENTIALS_JSON; skipping sync")
         return
     try:
         # Write credentials to file if provided as JSON string
-        if GOOGLE_CREDENTIALS_JSON.startswith('{'):
-            # Assume it's a JSON string
-            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds_value = GOOGLE_CREDENTIALS_JSON
+        # Support base64-encoded JSON
+        try:
+            if not creds_value.strip().startswith('{'):
+                import base64
+                decoded = base64.b64decode(creds_value).decode('utf-8')
+                creds_value = decoded
+        except Exception:
+            pass
+        if creds_value.strip().startswith('{'):
+            creds_dict = json.loads(creds_value)
         else:
             # Assume it's a file path
-            with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
+            with open(creds_value, 'r') as f:
                 creds_dict = json.load(f)
         
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
@@ -404,7 +418,10 @@ async def systeme_api_request(method: str, endpoint: str, json_data: dict = None
         logger.warning("Systeme.io API key not set - skipping API request")
         return None
     
-    headers = {"X-API-Key": SYSTEME_IO_API_KEY, "Content-Type": "application/json"}
+    headers = {"X-API-Key": SYSTEME_IO_API_KEY}
+    # Only set JSON content type for methods that send a body
+    if method.upper() in {"POST", "PUT", "PATCH"}:
+        headers["Content-Type"] = "application/json"
     url = f"{SYSTEME_BASE_URL}{endpoint}"
     timeout = ClientTimeout(total=10)
 
@@ -499,13 +516,13 @@ async def systeme_create_contact_with_retry(first_name: str, last_name: str, ema
     return response.get("id") if response else None
 
 async def systeme_update_contact(contact_id: str, first_name: str, last_name: str, phone: str):
-    """Update contact fields if needed (PATCH)."""
+    """Update contact fields if needed (PUT to avoid 415 on some endpoints)."""
     payload = {
         "first_name": first_name,
         "last_name": last_name,
         "phone_number": phone
     }
-    await systeme_api_request("PATCH", f"/contacts/{contact_id}", json_data=payload)
+    await systeme_api_request("PUT", f"/contacts/{contact_id}", json_data=payload)
 
 async def systeme_add_and_verify_tag(contact_id: str) -> bool:
     """Add tag and verify it was applied successfully."""
@@ -516,8 +533,8 @@ async def systeme_add_and_verify_tag(contact_id: str) -> bool:
     tag_id = int(SYSTEME_VERIFIED_STUDENT_TAG_ID)
     add_payload = {"tag_id": tag_id}
     
-    # Add the tag
-    add_response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
+    # Add the tag (some APIs require PUT)
+    add_response = await systeme_api_request("PUT", f"/contacts/{contact_id}/tags", json_data=add_payload)
     if not add_response:
         logger.error(f"Failed to add tag {tag_id} to contact {contact_id}")
         return False

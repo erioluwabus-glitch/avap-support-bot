@@ -96,6 +96,10 @@ async def transcribe_audio(file_path: str) -> Optional[str]:
             return None
         return text
     except Exception as e:
+        # Graceful handling for rate limits/insufficient_quota (429)
+        if "insufficient_quota" in str(e) or "429" in str(e):
+            logger.error(f"OpenAI quota/rate limit error during transcription: {e}")
+            return None
         logger.exception(f"Failed to transcribe audio file {file_path}: {e}")
         return None
 
