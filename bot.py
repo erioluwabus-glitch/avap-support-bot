@@ -346,6 +346,52 @@ def init_gsheets():
         gs_client = None
         gs_sheet = None
 
+# Unified Google Sheets sync helper
+async def sync_to_sheets(worksheet_name: str, action: str, data: dict, search_col: int = 1, update_cols: list = None, row_data: list = None) -> bool:
+    """Unified Sheets sync: append or upsert by search_col.
+    - action: "append" or "update"
+    - data: for update requires data['search_value'] to match in column search_col
+    - update_cols: list of (col_idx, value) pairs to update in the found row(s)
+    - row_data: optional explicit row values for append
+    """
+    try:
+        if not gs_sheet:
+            logger.warning("Google Sheets not configured - skipping sync")
+            return False
+        try:
+            sheet = gs_sheet.worksheet(worksheet_name)
+        except Exception:
+            # Create sheet if it does not exist; headers will be the caller's responsibility
+            sheet = gs_sheet.add_worksheet(worksheet_name, rows=200, cols=20)
+
+        if action == "append":
+            if row_data is None:
+                # Best-effort generic append from a dict
+                row_data = [data.get(k, '') for k in ['name', 'email', 'phone', 'telegram_id', 'status', 'hash', 'created_at']]
+            sheet.append_row(row_data)
+            return True
+        elif action == "update":
+            search_value = data.get('search_value')
+            if not search_value:
+                logger.warning("sync_to_sheets update called without search_value")
+                return False
+            cells = sheet.findall(str(search_value)) if search_col is None else sheet.findall(str(search_value), in_column=search_col)
+            if not cells:
+                logger.warning(f"No row found in {worksheet_name} for {search_value}")
+                return False
+            for cell in cells:
+                row_idx = cell.row
+                if update_cols:
+                    for col_idx, value in update_cols:
+                        sheet.update_cell(row_idx, col_idx, value)
+            return True
+        else:
+            logger.warning(f"Unknown action for sync_to_sheets: {action}")
+            return False
+    except Exception as e:
+        logger.exception(f"Sheets sync failed for {worksheet_name}: {e}")
+        return False
+
 # Async Systeme.io helpers with comprehensive error handling and retry logic
 async def systeme_api_request(method: str, endpoint: str, json_data: dict = None, params: dict = None, max_retries: int = 3) -> dict:
     """Unified async API caller with retry logic and exponential backoff."""
@@ -363,6 +409,18 @@ async def systeme_api_request(method: str, endpoint: str, json_data: dict = None
                 async with session.request(method, url, headers=headers, json=json_data, params=params) as resp:
                     if resp.status == 401:
                         logger.error("Systeme.io API key is invalid or expired. Please check your SYSTEME_IO_API_KEY environment variable.")
+                        return None
+                    elif resp.status == 422:
+                        # Validation or filter errors; log and retry with backoff a few times
+                        try:
+                            err_text = await resp.text()
+                        except Exception:
+                            err_text = ""
+                        logger.warning(f"422 Validation error for {endpoint}: {err_text}")
+                        if attempt < max_retries - 1:
+                            wait_time = 2 ** attempt
+                            await asyncio.sleep(wait_time)
+                            continue
                         return None
                     elif resp.status == 429:  # Rate limit
                         if attempt < max_retries - 1:
@@ -678,36 +736,33 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             except Exception as e:
                 logger.exception("Failed to notify student: %s", e)
         
-        # Sheets: update grading info
+        # Sheets: update grading info via unified helper
         try:
-            if gs_sheet:
-                try:
-                    sheet = gs_sheet.worksheet("Submissions")
-                except Exception:
-                    sheet = gs_sheet.add_worksheet("Submissions", rows=100, cols=12)
-                    sheet.append_row(["submission_id","username","telegram_id","module","status","media_type","file_id","created_at","score","comment"])
-                cells = sheet.findall(uuid)
-                if cells:
-                    row_idx = cells[0].row
-                    try:
-                        sheet.update_cell(row_idx, 5, "Graded")
-                        sheet.update_cell(row_idx, 9, int(score))
-                        sheet.update_cell(row_idx, 10, comment or "")
-                    except Exception:
-                        logger.exception("Failed to update grading cells in Sheets")
-                else:
-                    sheet.append_row([uuid, username or "", student_tg if row else "", "", "Graded", "", "", "", int(score), comment or ""]) 
+            updated = await sync_to_sheets(
+                "Submissions",
+                "update",
+                {"search_value": uuid},
+                search_col=1,
+                update_cols=[(5, "Graded"), (9, int(score)), (10, comment or "")]
+            )
+            if not updated:
+                await sync_to_sheets(
+                    "Submissions",
+                    "append",
+                    {},
+                    row_data=[uuid, username or "", student_tg if row else "", "", "Graded", "", "", "", int(score), comment or ""]
+                )
         except Exception:
             logger.exception("Failed to update grading info in Sheets")
-        
+
         # Cleanup
         context.user_data.pop('grading_uuid', None)
         context.user_data.pop('grading_score', None)
         context.user_data.pop('comment_type', None)
         context.user_data.pop('grading_expected', None)
-        
+
         logger.info(f"Grading finalized for submission {uuid} with score {score}")
-        
+
     except Exception as e:
         logger.exception("Error in finalize_grading: %s", e)
 
@@ -943,15 +998,14 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("A pending student with this email already exists.")
             return ConversationHandler.END
     
-    # Also append to Google Sheets if configured
+    # Also append to Google Sheets if configured via unified helper
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("Verifications")
-            except Exception:
-                sheet = gs_sheet.add_worksheet("Verifications", rows=100, cols=10)
-                sheet.append_row(["name", "email", "phone", "telegram_id", "status", "hash", "created_at"])
-            sheet.append_row([name, email, phone, 0, "Pending", h, created_at])
+        await sync_to_sheets(
+            "Verifications",
+            "append",
+            {"name": name, "email": email, "phone": phone, "telegram_id": 0, "status": "Pending", "hash": h, "created_at": created_at},
+            row_data=[name, email, phone, 0, "Pending", h, created_at]
+        )
     except Exception:
         logger.exception("Failed to append to Google Sheets (non-fatal).")
     
@@ -989,18 +1043,15 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         cur.execute("UPDATE pending_verifications SET status = ? WHERE email = ?", ("Verified", email))
         db_conn.commit()
     
-    # Update Google Sheets
+    # Update Google Sheets via unified helper
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("Verifications")
-                cells = sheet.findall(email)
-                for c in cells:
-                    row_idx = c.row
-                    sheet.update_cell(row_idx, 5, "Verified")  # status column
-                    sheet.update_cell(row_idx, 4, 0)  # telegram_id
-            except Exception:
-                pass
+        await sync_to_sheets(
+            "Verifications",
+            "update",
+            {"search_value": email},
+            search_col=2,
+            update_cols=[(5, "Verified"), (4, 0)]
+        )
     except Exception:
         logger.exception("Failed to sync manual verification to sheets.")
     
@@ -1397,18 +1448,15 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute("UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?", (update.effective_user.id, "Verified", pending_id))
         db_conn.commit()
     
-    # Update Google Sheets
+    # Update Google Sheets via unified helper
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("Verifications")
-                cells = sheet.findall(email)
-                for c in cells:
-                    row_idx = c.row
-                    sheet.update_cell(row_idx, 4, update.effective_user.id)
-                    sheet.update_cell(row_idx, 5, "Verified")
-            except Exception:
-                pass
+        await sync_to_sheets(
+            "Verifications",
+            "update",
+            {"search_value": email},
+            search_col=2,
+            update_cols=[(4, update.effective_user.id), (5, "Verified")]
+        )
     except Exception:
         logger.exception("Sheets sync failed")
     
@@ -1539,15 +1587,14 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp))
         db_conn.commit()
-    # Sheets: log submission
+    # Sheets: log submission via unified helper
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("Submissions")
-            except Exception:
-                sheet = gs_sheet.add_worksheet("Submissions", rows=100, cols=12)
-                sheet.append_row(["submission_id","username","telegram_id","module","status","media_type","file_id","created_at"])
-            sheet.append_row([submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp])
+        await sync_to_sheets(
+            "Submissions",
+            "append",
+            {},
+            row_data=[submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp]
+        )
     except Exception:
         logger.exception("Failed to append submission to Sheets")
     
@@ -1851,15 +1898,14 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute("INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp))
         db_conn.commit()
-    # Sheets: log win
+    # Sheets: log win via unified helper
     try:
-        if gs_sheet:
-            try:
-                sheet = gs_sheet.worksheet("Wins")
-            except Exception:
-                sheet = gs_sheet.add_worksheet("Wins", rows=100, cols=8)
-                sheet.append_row(["win_id","username","telegram_id","type","content","created_at"])
-            sheet.append_row([win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp])
+        await sync_to_sheets(
+            "Wins",
+            "append",
+            {},
+            row_data=[win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp]
+        )
     except Exception:
         logger.exception("Failed to append win to Sheets")
     
