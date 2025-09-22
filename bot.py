@@ -2165,7 +2165,7 @@ def register_handlers(app_obj: Application):
     remove_conv = ConversationHandler(
         entry_points=[CommandHandler("remove_student", remove_student_start)],
         states={
-            REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm_callback, pattern="^(confirm_remove|cancel_remove|remove_specific_)")],
+            REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm_callback, pattern="^(confirm_remove|cancel_remove|remove_specific_.+)$")],
             REMOVE_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_reason)],
         },
         fallbacks=[CommandHandler("cancel", cancel_handler)],
@@ -2181,7 +2181,7 @@ def register_handlers(app_obj: Application):
         ],
         states={
             SUBMIT_MODULE: [MessageHandler(filters.Regex(r"^[1-9]$|^1[0-2]$") & ~filters.COMMAND, submit_module_handler)],
-            SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(video|image)$")],
+            SUBMIT_MEDIA_TYPE: [CallbackQueryHandler(submit_media_type_callback, pattern="^media_(text|audio|video|image)$")],
             SUBMIT_MEDIA_UPLOAD: [MessageHandler((filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, submit_media_upload)],
         },
         fallbacks=[CommandHandler("cancel", cancel_handler)],
