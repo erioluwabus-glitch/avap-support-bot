@@ -8,6 +8,7 @@ import logging
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 import os
+import difflib
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,16 @@ def create_tables():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             telegram_id INTEGER UNIQUE,
             username TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Create FAQ history table for similarity/reuse
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS faq_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -216,3 +227,56 @@ async def send_with_backoff(bot, chat_id: int, text: str, max_retries: int = 3) 
                 logger.exception(f"Failed to send message to {chat_id}: {e}")
                 return False
     return False
+
+# FAQ history helpers for similarity and reuse
+async def add_faq_history(question: str, answer: str) -> bool:
+    """Store answered FAQ for future reuse."""
+    conn, lock = init_database()
+    async with lock:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO faq_history (question, answer) VALUES (?, ?)",
+                (question.strip(), answer.strip()),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to add FAQ history: {e}")
+            return False
+
+async def get_recent_faqs(limit: int = 200) -> List[Dict[str, Any]]:
+    """Fetch recent FAQs for similarity search."""
+    conn, lock = init_database()
+    async with lock:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT question, answer, created_at FROM faq_history ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        return [
+            {"question": r[0], "answer": r[1], "created_at": r[2]}
+            for r in rows
+        ]
+
+async def find_similar_faq(question: str, threshold: float = 0.82) -> Optional[Dict[str, Any]]:
+    """Find most similar previously answered FAQ using difflib ratio."""
+    try:
+        corpus = await get_recent_faqs()
+        q = (question or "").strip().lower()
+        best = None
+        best_ratio = 0.0
+        for item in corpus:
+            ratio = difflib.SequenceMatcher(None, q, item["question"].strip().lower()).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best = item
+        if best and best_ratio >= threshold:
+            best_copy = dict(best)
+            best_copy["similarity"] = best_ratio
+            return best_copy
+        return None
+    except Exception as e:
+        logger.exception(f"find_similar_faq failed: {e}")
+        return None

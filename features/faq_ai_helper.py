@@ -8,7 +8,7 @@ import uuid
 from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, Application
-from utils.db_access import add_question, mark_question_answered, get_unanswered_questions
+from utils.db_access import add_question, mark_question_answered, get_unanswered_questions, find_similar_faq, add_faq_history
 from utils.openai_client import suggest_answer
 from utils.translator import translate
 
@@ -98,8 +98,18 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Failed to mark question as answered.")
         return
     
-    # Send answer back to student (this would need to be implemented based on your existing system)
-    await update.message.reply_text("✅ Answer recorded and sent to student!")
+    # Archive in FAQ history for future reuse
+    try:
+        # We don't have the original question text here; reuse the message replied to if available
+        original_question = None
+        if update.message and update.message.reply_to_message:
+            original_question = update.message.reply_to_message.text
+        await add_faq_history(original_question or "", answer_text)
+    except Exception:
+        logger.exception("Failed to archive FAQ history")
+
+    # Send confirmation
+    await update.message.reply_text("✅ Answer recorded!")
     
     # Clear the question ID from context
     context.user_data.pop('answering_question_id', None)
@@ -115,8 +125,14 @@ async def check_unanswered_questions(application: Application):
             telegram_id = question['telegram_id']
             username = question['username']
             
-            # Generate AI suggestion
-            suggestion = await suggest_answer(question_text)
+            # Try to reuse similar previous FAQ first
+            suggestion = None
+            similar = await find_similar_faq(question_text)
+            if similar:
+                suggestion = similar.get("answer")
+            else:
+                # Generate AI suggestion
+                suggestion = await suggest_answer(question_text)
             if not suggestion:
                 continue
             
