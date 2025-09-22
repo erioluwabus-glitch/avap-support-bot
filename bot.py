@@ -55,6 +55,16 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode, ChatType
 
+# Import new features
+from features import (
+    daily_tips,
+    faq_ai_helper,
+    broadcast,
+    multilanguage,
+    voice_transcription,
+    group_matching
+)
+
 # Optional Google Sheets
 try:
     import gspread
@@ -86,6 +96,16 @@ DB_PATH = os.getenv("DB_PATH", "./bot.db")
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
 ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
+
+# New feature environment variables
+ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+WHISPER_ENDPOINT = os.getenv("WHISPER_ENDPOINT")
+UNANSWER_TIMEOUT_HOURS = int(os.getenv("UNANSWER_TIMEOUT_HOURS", "6"))
+DAILY_TIP_HOUR = int(os.getenv("DAILY_TIP_HOUR", "8"))
+DEFAULT_LANGUAGE = os.getenv("DEFAULT_LANGUAGE", "en")
+DAILY_TIPS_TO_DMS = os.getenv("DAILY_TIPS_TO_DMS", "false").lower() == "true"
+MATCH_SIZE = int(os.getenv("MATCH_SIZE", "2"))
 
 # Systeme.io configuration
 SYSTEME_BASE_URL = "https://api.systeme.io/api"
@@ -286,7 +306,7 @@ def init_gsheets():
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             # Assume it's a JSON string
-            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
@@ -514,9 +534,9 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         asyncio.set_event_loop(loop)
         try:
             contact_id = loop.run_until_complete(systeme_create_contact_with_retry(first_name, last_name, email, phone))
-            if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
                 loop.run_until_complete(systeme_add_and_verify_tag(contact_id))
-            return contact_id
+        return contact_id
         finally:
             loop.close()
     except Exception as e:
@@ -1089,27 +1109,27 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     for student in students_to_remove:
         try:
             # Soft delete in database
-            async with db_lock:
-                cur = db_conn.cursor()
+    async with db_lock:
+        cur = db_conn.cursor()
                 cur.execute("UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?", 
                            (datetime.utcnow().isoformat(), student['telegram_id']))
                 cur.execute("UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?", 
                            ("Removed", 0, student['email']))
                 cur.execute("INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
                            (student['telegram_id'], update.effective_user.id, reason))
-                db_conn.commit()
+        db_conn.commit()
             
             # Update Google Sheets
-            try:
-                if gs_sheet:
-                    sheet = gs_sheet.worksheet("Verifications")
+    try:
+        if gs_sheet:
+                sheet = gs_sheet.worksheet("Verifications")
                     cells = sheet.findall(student['email'])
-                    for c in cells:
-                        row_idx = c.row
-                        sheet.update_cell(row_idx, 5, "Removed")
-                        sheet.update_cell(row_idx, 4, "")
-            except Exception:
-                logger.exception("Sheets update failed")
+                for c in cells:
+                    row_idx = c.row
+                    sheet.update_cell(row_idx, 5, "Removed")
+                    sheet.update_cell(row_idx, 4, "")
+    except Exception:
+        logger.exception("Sheets update failed")
             
             # Remove from Systeme.io
             if student.get('systeme_contact_id'):
@@ -1138,7 +1158,7 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     msg += f"Reason: {reason}"
     
     await update.message.reply_text(msg)
-    return ConversationHandler.END
+        return ConversationHandler.END
 
 # Legacy remove student command for backward compatibility
 async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2140,7 +2160,7 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
-    
+
     # Remove student conversation
     remove_conv = ConversationHandler(
         entry_points=[CommandHandler("remove_student", remove_student_start)],
@@ -2250,6 +2270,14 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("status", check_status_handler))
     app_obj.add_handler(CallbackQueryHandler(check_status_handler, pattern="^status$"))
     
+    # Register new feature handlers
+    daily_tips.register_handlers(app_obj)
+    faq_ai_helper.register_handlers(app_obj)
+    broadcast.register_handlers(app_obj)
+    multilanguage.register_handlers(app_obj)
+    voice_transcription.register_handlers(app_obj)
+    group_matching.register_handlers(app_obj)
+    
     # Chat join request handler - handle in main update processing
     # PTB 22.4 handles this differently, we'll process it in the webhook
 
@@ -2280,6 +2308,22 @@ async def on_startup():
         logger.info("Scheduler started")
     except Exception as e:
         logger.exception("Failed to start scheduler: %s", e)
+    
+    # Initialize new features
+    try:
+        # Initialize database for new features
+        from utils.db_access import init_database
+        init_database()
+        
+        # Schedule daily tips job
+        daily_tips.schedule_daily_job(telegram_app)
+        
+        # Schedule FAQ check job
+        faq_ai_helper.schedule_faq_check(telegram_app)
+        
+        logger.info("New features initialized successfully")
+    except Exception as e:
+        logger.exception("Failed to initialize new features: %s", e)
     
     # Skip webhook setup during startup - we'll set it manually via endpoint
     logger.info("Skipping webhook setup during startup - will set manually via endpoint")
