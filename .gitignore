@@ -1,29 +1,23 @@
-# Virtual environments
-venv/
-.venv/
+# Virtual env
 ven/
-
-# Python
+.venv/
+env/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.pdb
-
-# Env files / secrets
+.Python
+# Secrets
 .env
-.env.*
 google-credentials.json
-credentials.json
-
-# Databases (optional to ignore)
-# if you want to persist DB across deploys don't ignore bot.db; otherwise:
-# bot.db
-data/
-
+# System
+.DS_Store
+Thumbs.db
 # IDE
 .vscode/
 .idea/
-
-# Others
+# Logs
 *.log
+# Database
+bot.db
+data/
