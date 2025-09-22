@@ -369,7 +369,16 @@ async def systeme_api_request(method: str, endpoint: str, json_data: dict = None
                             return None
                     
                     resp.raise_for_status()
-                    return await resp.json()
+                    # Safely handle non-JSON responses (e.g., 204 No Content or empty body)
+                    content_type = (resp.headers.get("Content-Type") or "").lower()
+                    if "application/json" in content_type:
+                        return await resp.json()
+                    try:
+                        text = await resp.text()
+                        return {"ok": True, "status": resp.status, "text": text}
+                    except Exception:
+                        # For DELETE 204 and similar, return a simple success indicator
+                        return {"ok": True, "status": resp.status}
             except aiohttp.ClientResponseError as e:
                 if e.status == 429 and attempt < max_retries - 1:
                     wait_time = 60 * (2 ** attempt)
@@ -395,10 +404,18 @@ async def systeme_api_request(method: str, endpoint: str, json_data: dict = None
 
 async def systeme_get_contact_by_email(email: str) -> dict:
     """Check if contact exists by email using Systeme.io filter API."""
-    params = {"email": email, "limit": 1}
+    params = {"email": email}
     response = await systeme_api_request("GET", "/contacts", params=params)
-    if response and response.get("items"):
-        return response["items"][0]
+    # Some Systeme.io responses may return a list under 'items' or top-level list
+    if not response:
+        return None
+    items = None
+    if isinstance(response, dict):
+        items = response.get("items") or response.get("data")
+    elif isinstance(response, list):
+        items = response
+    if items and len(items) > 0:
+        return items[0]
     return None
 
 async def systeme_create_contact_with_retry(first_name: str, last_name: str, email: str, phone: str) -> str:
@@ -769,6 +786,12 @@ async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel any ongoing conversation and return to main menu"""
     context.user_data.clear()
+    try:
+        if update and update.message:
+            await update.message.reply_text("Operation cancelled.", reply_markup=get_main_menu_keyboard())
+    except Exception:
+        pass
+    return ConversationHandler.END
     
     if update.effective_chat.type == ChatType.PRIVATE:
         # Check if user is verified
@@ -1000,33 +1023,34 @@ async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]
     async with db_lock:
         cur = db_conn.cursor()
         
-        # Try exact email match first
-        if "@" in identifier:
-            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE email = ? AND removed_at IS NULL", (identifier,))
-            row = cur.fetchone()
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        
-        # Try telegram ID
-        try:
-            t_id = int(identifier)
-            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
-            row = cur.fetchone()
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        except ValueError:
-            pass
-        
-        # Try partial name match
-        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE name LIKE ? AND removed_at IS NULL", (f"%{identifier}%",))
-        rows = cur.fetchall()
-        if len(rows) == 1:
-            row = rows[0]
+    # Try exact email match first (strip and lower)
+    identifier = identifier.strip()
+    if "@" in identifier:
+        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE email = ? AND removed_at IS NULL", (identifier,))
+        row = cur.fetchone()
+        if row:
             return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        elif len(rows) > 1:
-            return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+    
+    # Try telegram ID
+    try:
+        t_id = int(identifier)
+        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
+        row = cur.fetchone()
+        if row:
+            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    except ValueError:
+        pass
         
-        return None
+    # Try partial name match (case-insensitive)
+    cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL", (f"%{identifier.lower()}%",))
+    rows = cur.fetchall()
+    if len(rows) == 1:
+        row = rows[0]
+        return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    elif len(rows) > 1:
+        return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+    
+    return None
 
 async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Enhanced remove student command with batch support and confirmation."""
@@ -1672,8 +1696,14 @@ async def grading_comment_receive_text(update: Update, context: ContextTypes.DEF
     """Handle text comment in grading conversation"""
     if context.user_data.get('comment_type') != 'text':
         return
-    
-        comment_text = update.message.text
+    if not update.message or not update.message.text:
+        if update.message:
+            await update.message.reply_text("Please send a text comment.")
+        return GradingStates.GRADING_COMMENT
+    comment_text = (update.message.text or "").strip()
+    if not comment_text:
+        await update.message.reply_text("Empty comment. Try again.")
+        return GradingStates.GRADING_COMMENT
     logger.info(f"Received text comment: {comment_text}")
     
     await finalize_grading(update, context, comment=comment_text)
@@ -2311,6 +2341,7 @@ def register_handlers(app_obj: Application):
             CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")
         ],
         states={
+            WIN_TYPE: [CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")],
             WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
                         MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
                         MessageHandler(filters.VIDEO & ~filters.COMMAND, win_receive)]
