@@ -7,7 +7,7 @@ import os
 import asyncio
 from typing import List
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram.ext import ContextTypes, CommandHandler, Application
 from utils.db_access import get_verified_users, send_with_backoff
 from utils.translator import translate
 

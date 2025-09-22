@@ -7,7 +7,7 @@ import os
 import uuid
 from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, Application
 from utils.db_access import add_question, mark_question_answered, get_unanswered_questions
 from utils.openai_client import suggest_answer
 from utils.translator import translate

@@ -5,7 +5,7 @@ Transcribes voice messages from students using OpenAI Whisper API.
 import logging
 import os
 from telegram import Update
-from telegram.ext import ContextTypes, MessageHandler, filters
+from telegram.ext import ContextTypes, MessageHandler, filters, Application
 from utils.openai_client import download_and_transcribe_voice
 from utils.db_access import init_database
 

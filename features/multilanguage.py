@@ -5,7 +5,7 @@ Allows users to set language preferences and translates outgoing messages.
 import logging
 import os
 from telegram import Update
-from telegram.ext import ContextTypes, CommandHandler
+from telegram.ext import ContextTypes, CommandHandler, Application
 from utils.db_access import set_user_language, get_user_language
 from utils.translator import get_supported_languages, translate
 
