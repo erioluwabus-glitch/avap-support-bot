@@ -1209,27 +1209,54 @@ async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Legacy remove student command - redirects to enhanced version."""
     return await remove_student_start(update, context)
 
-# Admin get submission /get_submission [submission_id]
+# Admin get submission /get_submission [submission_id] or /get_submission @username M#
 async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update.effective_user.id):
         await update.message.reply_text("You are not authorized to perform this action.")
         return
     
     if len(context.args) < 1:
-        await update.message.reply_text("Usage: /get_submission [submission_id]")
+        await update.message.reply_text("Usage: /get_submission <submission_id> OR /get_submission @username M#")
         return
     
-    sub_id = context.args[0]
+    arg0 = context.args[0]
+    lookup_by_username = arg0.startswith("@") and len(context.args) >= 2
     
     async with db_lock:
         cur = db_conn.cursor()
-        cur.execute("SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?", (sub_id,))
-        row = cur.fetchone()
-        if not row:
-            await update.message.reply_text(f"No submission found with ID {sub_id}.")
-            return
-        
-        module, content_type, content, score, comment, created_at, telegram_id = row
+        if lookup_by_username:
+            username = arg0.lstrip("@")
+            module_token = context.args[1]
+            module_num = None
+            if module_token.lower().startswith("m") and module_token[1:].isdigit():
+                module_num = int(module_token[1:])
+            elif module_token.isdigit():
+                module_num = int(module_token)
+            if not module_num:
+                await update.message.reply_text("Invalid module. Use M1/M2/M3 or a number.")
+                return
+            cur.execute(
+                "SELECT submission_id, module, media_type, media_file_id, score, comment, created_at, telegram_id FROM submissions WHERE username = ? AND module = ? ORDER BY created_at DESC LIMIT 1",
+                (username, module_num),
+            )
+            row = cur.fetchone()
+            if not row:
+                await update.message.reply_text(f"No submission found for @{username} module {module_num}.")
+                return
+            sub_id, module, media_type, media_file_id, score, comment, created_at, telegram_id = row
+        else:
+            sub_id = arg0
+            cur.execute(
+                "SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?",
+                (sub_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                await update.message.reply_text(f"No submission found with ID {sub_id}.")
+                return
+            module, content_type, content, score, comment, created_at, telegram_id = row
+            media_type = content_type or "text"
+            media_file_id = content or ""
         
         # Get student info
         cur.execute("SELECT name, email FROM verified_users WHERE telegram_id = ?", (telegram_id,))
@@ -1242,21 +1269,21 @@ async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     msg += f"ID: {sub_id}\n"
     msg += f"Student: {student_name} ({student_email})\n"
     msg += f"Module: {module}\n"
-    msg += f"Type: {content_type}\n"
+    msg += f"Type: {media_type}\n"
     msg += f"Created: {created_at}\n"
-    msg += f"Score: {score if score else 'Not graded'}\n"
+    msg += f"Score: {score if score is not None else 'Not graded'}\n"
     if comment:
         msg += f"Comment: {comment}\n"
     
     await update.message.reply_text(msg)
     
     # Send the actual content if it's media
-    if content_type in ['image', 'video'] and content:
+    if media_type in ['image', 'video'] and media_file_id:
         try:
-            if content_type == 'image':
-                await update.message.reply_photo(photo=content, caption=f"Module {module} submission")
-            elif content_type == 'video':
-                await update.message.reply_video(video=content, caption=f"Module {module} submission")
+            if media_type == 'image':
+                await update.message.reply_photo(photo=media_file_id, caption=f"Module {module} submission")
+            elif media_type == 'video':
+                await update.message.reply_video(video=media_file_id, caption=f"Module {module} submission")
         except Exception as e:
             await update.message.reply_text(f"Could not send media: {str(e)}")
 

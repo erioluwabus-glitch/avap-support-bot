@@ -90,9 +90,11 @@ async def transcribe_audio(file_path: str) -> Optional[str]:
                 file=audio_file,
                 response_format="text"
             )
-        
-        return transcript.strip()
-        
+        text = transcript.strip() if isinstance(transcript, str) else str(transcript)
+        if not text:
+            logger.warning("Whisper returned empty transcription")
+            return None
+        return text
     except Exception as e:
         logger.exception(f"Failed to transcribe audio file {file_path}: {e}")
         return None

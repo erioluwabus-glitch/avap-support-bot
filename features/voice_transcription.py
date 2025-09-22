@@ -42,8 +42,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send transcription back to user
         await processing_msg.edit_text(f"📝 Transcription:\n\n{transcription}")
         
-        # Save to appropriate Google Sheet based on context
-        # This would need to be implemented based on your existing Google Sheets integration
+        # Save to Google Sheets if configured
         await save_transcription_to_sheets(update, transcription)
         
     except Exception as e:
@@ -51,20 +50,22 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing_msg.edit_text("❌ An error occurred while processing your voice message.")
 
 async def save_transcription_to_sheets(update: Update, transcription: str):
-    """Save transcription to appropriate Google Sheet."""
+    """Save transcription to Google Sheets if gs_sheet is available."""
     try:
-        # This is a placeholder - you would integrate with your existing Google Sheets code
-        # The transcription could be saved to Questions or Wins sheet based on context
-        
+        from bot import gs_sheet  # reuse initialized sheet client if present
+    except Exception:
+        gs_sheet = None
+    if not gs_sheet:
+        return
+    try:
         user = update.effective_user
         username = user.username or user.full_name or "Unknown"
-        
-        # For now, just log the transcription
-        logger.info(f"Voice transcription from {username}: {transcription}")
-        
-        # You could add logic here to determine which sheet to save to
-        # and integrate with your existing Google Sheets code
-        
+        sheet_name = "VoiceTranscriptions"
+        try:
+            sheet = gs_sheet.worksheet(sheet_name)
+        except Exception:
+            sheet = gs_sheet.add_worksheet(title=sheet_name, rows=1000, cols=6)
+        sheet.append_row([username, str(user.id), transcription], value_input_option="RAW")
     except Exception as e:
         logger.exception(f"Failed to save transcription to sheets: {e}")
 
