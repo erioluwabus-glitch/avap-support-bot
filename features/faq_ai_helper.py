@@ -34,6 +34,17 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or user.full_name or "Unknown"
     telegram_id = user.id
     
+    # Before storing, try immediate reuse from history
+    try:
+        from utils.db_access import find_similar_faq
+        similar = await find_similar_faq(question_text)
+        if similar:
+            answer = similar.get("answer")
+            await update.message.reply_text(f"🤖 This looks similar to a previous question. Here's an answer that might help:\n\n{answer}")
+            # Still proceed to store and forward so admins can refine
+    except Exception:
+        pass
+
     # Add question to database
     success = await add_question(question_id, telegram_id, username, question_text)
     if not success:

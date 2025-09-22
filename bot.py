@@ -96,7 +96,7 @@ SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0")) if os.getenv("SUPPORT
 ASSIGNMENTS_GROUP_ID = int(os.getenv("ASSIGNMENTS_GROUP_ID", "0")) if os.getenv("ASSIGNMENTS_GROUP_ID") else None
 QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0")) if os.getenv("QUESTIONS_GROUP_ID") else None
 VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0")) if os.getenv("VERIFICATION_GROUP_ID") else None
-DB_PATH = os.getenv("DB_PATH", "./bot.db")
+DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
 ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
@@ -184,6 +184,12 @@ gs_sheet = None
 
 # Initialize or connect DB
 def init_db():
+    # Ensure persistent directory exists (Render persistent disk mounts at /data)
+    try:
+        db_dir = os.path.dirname(DB_PATH) or "."
+        os.makedirs(db_dir, exist_ok=True)
+    except Exception:
+        pass
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cur = conn.cursor()
     
@@ -671,6 +677,28 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
                 await telegram_app.bot.send_message(chat_id=student_tg, text=msg)
             except Exception as e:
                 logger.exception("Failed to notify student: %s", e)
+        
+        # Sheets: update grading info
+        try:
+            if gs_sheet:
+                try:
+                    sheet = gs_sheet.worksheet("Submissions")
+                except Exception:
+                    sheet = gs_sheet.add_worksheet("Submissions", rows=100, cols=12)
+                    sheet.append_row(["submission_id","username","telegram_id","module","status","media_type","file_id","created_at","score","comment"])
+                cells = sheet.findall(uuid)
+                if cells:
+                    row_idx = cells[0].row
+                    try:
+                        sheet.update_cell(row_idx, 5, "Graded")
+                        sheet.update_cell(row_idx, 9, int(score))
+                        sheet.update_cell(row_idx, 10, comment or "")
+                    except Exception:
+                        logger.exception("Failed to update grading cells in Sheets")
+                else:
+                    sheet.append_row([uuid, username or "", student_tg if row else "", "", "Graded", "", "", "", int(score), comment or ""]) 
+        except Exception:
+            logger.exception("Failed to update grading info in Sheets")
         
         # Cleanup
         context.user_data.pop('grading_uuid', None)
@@ -1511,6 +1539,17 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp))
         db_conn.commit()
+    # Sheets: log submission
+    try:
+        if gs_sheet:
+            try:
+                sheet = gs_sheet.worksheet("Submissions")
+            except Exception:
+                sheet = gs_sheet.add_worksheet("Submissions", rows=100, cols=12)
+                sheet.append_row(["submission_id","username","telegram_id","module","status","media_type","file_id","created_at"])
+            sheet.append_row([submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp])
+    except Exception:
+        logger.exception("Failed to append submission to Sheets")
     
     # Forward to assignments group with grade button
     if ASSIGNMENTS_GROUP_ID:
@@ -1812,6 +1851,17 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute("INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                     (win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp))
         db_conn.commit()
+    # Sheets: log win
+    try:
+        if gs_sheet:
+            try:
+                sheet = gs_sheet.worksheet("Wins")
+            except Exception:
+                sheet = gs_sheet.add_worksheet("Wins", rows=100, cols=8)
+                sheet.append_row(["win_id","username","telegram_id","type","content","created_at"])
+            sheet.append_row([win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp])
+    except Exception:
+        logger.exception("Failed to append win to Sheets")
     
     # Forward to support group
     if SUPPORT_GROUP_ID:
