@@ -65,6 +65,10 @@ from features import (
     group_matching
 )
 
+# Translation utilities
+from utils.db_access import get_user_language
+from utils.translator import translate
+
 # Optional Google Sheets
 try:
     import gspread
@@ -664,11 +668,24 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
 
 # ----- Handlers -----
 
+# Helper to send translated text based on user language
+async def reply_translated(update: Update, text: str, reply_markup=None):
+    try:
+        user_id = update.effective_user.id if update.effective_user else 0
+        target_lang = await get_user_language(user_id)
+    except Exception:
+        target_lang = DEFAULT_LANGUAGE
+    try:
+        out_text = translate(text, target_lang)
+    except Exception:
+        out_text = text
+    await update.message.reply_text(out_text, reply_markup=reply_markup)
+
 # /start handler - only in DM. If verified -> show main menu. If not -> start verification.
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if update.effective_chat.type != ChatType.PRIVATE:
-            await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+            await reply_translated(update, "Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
             return
         
         user = update.effective_user
@@ -678,18 +695,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         vid = await user_verified_by_telegram_id(user.id)
         if vid:
             # Verified -> show main menu
-            await update.message.reply_text(
-                "✅ You're verified! Welcome to AVAP!",
-                reply_markup=get_main_menu_keyboard()
-            )
+            await reply_translated(update, "✅ You're verified! Welcome to AVAP!", reply_markup=get_main_menu_keyboard())
             return
         
         # Not verified -> invite to verify
         verify_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
-        await update.message.reply_text(
-            "Welcome! To use AVAP features you must verify your details.\nClick Verify Now to begin.",
-            reply_markup=verify_btn
-        )
+        await reply_translated(update, "Welcome! To use AVAP features you must verify your details.\nClick Verify Now to begin.", reply_markup=verify_btn)
     except Exception as e:
         logger.exception("Error in start_handler: %s", e)
 
@@ -1999,12 +2010,12 @@ async def notify_badge_earned(telegram_id: int, badge_type: str):
 
 async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
-        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        await reply_translated(update, "Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
         return
     
     vid = await user_verified_by_telegram_id(update.effective_user.id)
     if not vid:
-        await update.message.reply_text("Please verify first!")
+        await reply_translated(update, "Please verify first!")
         return
     
     # Gather assignments and wins count
@@ -2044,7 +2055,7 @@ async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if remaining_wins > 0 or remaining_subs > 0:
             msg += f"\n\n🏆 Achiever Badge: {remaining_wins} wins and {remaining_subs} assignments to go!"
     
-    await update.message.reply_text(msg, reply_markup=get_main_menu_keyboard())
+    await reply_translated(update, msg, reply_markup=get_main_menu_keyboard())
     return
 
 async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
