@@ -306,7 +306,7 @@ def init_gsheets():
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             # Assume it's a JSON string
-        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
@@ -534,9 +534,9 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         asyncio.set_event_loop(loop)
         try:
             contact_id = loop.run_until_complete(systeme_create_contact_with_retry(first_name, last_name, email, phone))
-        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+            if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
                 loop.run_until_complete(systeme_add_and_verify_tag(contact_id))
-        return contact_id
+            return contact_id
         finally:
             loop.close()
     except Exception as e:
@@ -736,7 +736,7 @@ async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     if not query:
         return
-            await query.answer()
+    await query.answer()
     await query.message.reply_text("Enter your full name:")
     return VERIFY_NAME
 
@@ -760,7 +760,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-                return
+        return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
@@ -790,24 +790,24 @@ async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT
 async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-            return
+        return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+        return
     
-            await check_status_handler(update, context)
+    await check_status_handler(update, context)
 
 async def ask_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("To ask a question in group, please type /ask")
-            return
+        return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-                return
+        return
     
     await update.message.reply_text("What's your question?")
     return ASK_QUESTION
@@ -1109,27 +1109,27 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     for student in students_to_remove:
         try:
             # Soft delete in database
-    async with db_lock:
-        cur = db_conn.cursor()
+            async with db_lock:
+                cur = db_conn.cursor()
                 cur.execute("UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?", 
                            (datetime.utcnow().isoformat(), student['telegram_id']))
                 cur.execute("UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?", 
                            ("Removed", 0, student['email']))
                 cur.execute("INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
                            (student['telegram_id'], update.effective_user.id, reason))
-        db_conn.commit()
+                db_conn.commit()
             
             # Update Google Sheets
-    try:
-        if gs_sheet:
-                sheet = gs_sheet.worksheet("Verifications")
+            try:
+                if gs_sheet:
+                    sheet = gs_sheet.worksheet("Verifications")
                     cells = sheet.findall(student['email'])
-                for c in cells:
-                    row_idx = c.row
-                    sheet.update_cell(row_idx, 5, "Removed")
-                    sheet.update_cell(row_idx, 4, "")
-    except Exception:
-        logger.exception("Sheets update failed")
+                    for c in cells:
+                        row_idx = c.row
+                        sheet.update_cell(row_idx, 5, "Removed")
+                        sheet.update_cell(row_idx, 4, "")
+            except Exception:
+                logger.exception("Sheets update failed")
             
             # Remove from Systeme.io
             if student.get('systeme_contact_id'):
@@ -1158,7 +1158,7 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     msg += f"Reason: {reason}"
     
     await update.message.reply_text(msg)
-        return ConversationHandler.END
+    return ConversationHandler.END
 
 # Legacy remove student command for backward compatibility
 async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1483,7 +1483,7 @@ async def score_selected_callback(update: Update, context: ContextTypes.DEFAULT_
     
     _, score_str, sub_id = parts
     try:
-    score = int(score_str)
+        score = int(score_str)
     except ValueError:
         logger.warning(f"Invalid score value: {score_str}")
         await query.answer("Invalid score value")
@@ -1632,7 +1632,7 @@ async def grading_comment_receive_video(update: Update, context: ContextTypes.DE
     elif update.message.video_note:
         file_id = update.message.video_note.file_id
         comment_text = f"[video_note:{file_id}]"
-            else:
+    else:
         await update.message.reply_text("Please send a video file.")
         return
     
@@ -1742,7 +1742,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Check if verified
-    if not await user_verified_by_telegram_id(update.effective_user.id):
+        if not await user_verified_by_telegram_id(update.effective_user.id):
             await update.message.reply_text("Please verify first! DM the bot to verify.")
             return
         
@@ -2106,8 +2106,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-    body = await request.json()
-    update = Update.de_json(body, telegram_app.bot)
+        body = await request.json()
+        update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -2118,9 +2118,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-        await telegram_app.process_update(update)
+            await telegram_app.process_update(update)
         
-    return {"ok": True}
+        return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
