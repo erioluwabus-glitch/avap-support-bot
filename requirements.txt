@@ -13,5 +13,6 @@ openai==1.0.0
 pydantic==2.11.9
 uvicorn==0.30.0
 fastapi==0.111.0
-sqlalchemy==2.1.0
+# SQLAlchemy pin compatible with Python 3.13 on Render
+sqlalchemy==2.0.43
 aiohttp==3.9.5
