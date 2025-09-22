@@ -25,17 +25,12 @@ import logging
 import hashlib
 import sqlite3
 import asyncio
-import difflib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 
 import requests
 import aiohttp
 from aiohttp import ClientTimeout
-import numpy as np
-from scipy.sparse import csr_matrix
 from fastapi import FastAPI, Request, HTTPException
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -95,8 +90,6 @@ TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 # Systeme.io configuration
 SYSTEME_BASE_URL = "https://api.systeme.io/api"
 AVAP_ACTIVATE_LINK = "https://bit.ly/avm-activate"
-SYSTEME_PENDING_STUDENT_TAG_ID = os.getenv("SYSTEME_PENDING_STUDENT_TAG_ID")
-SYSTEME_SHARED_WIN_TAG_ID = os.getenv("SYSTEME_SHARED_WIN_TAG_ID")
 
 # Validate required environment variables
 if not BOT_TOKEN:
@@ -136,10 +129,6 @@ webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
     GRADE_MODULE,
     GRADING_COMMENT,
 ) = range(100, 116)
-
-# Additional states for enhanced features
-WIN_TYPE = 1
-WIN_UPLOAD = 2
 
 # Grading conversation states (separate from main conversation states)
 class GradingStates:
@@ -263,7 +252,7 @@ def init_gsheets():
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             # Assume it's a JSON string
-            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
@@ -403,124 +392,6 @@ async def notify_admin_systeme_failure(name: str, email: str, error: str, contac
     except Exception as e:
         logger.exception(f"Failed to notify admin about Systeme.io failure: {e}")
 
-# Enhanced FAQ similarity checking with cosine similarity
-async def check_faq_for_similar_question(question_text: str, similarity_threshold: float = 0.7, high_conf_threshold: float = 0.9) -> Optional[Dict[str, str]]:
-    """Check for similar questions in FAQ using cosine similarity."""
-    try:
-        if not gs_sheet:
-            return None
-
-        def get_faq_records_sync():
-            try:
-                sheet = gs_sheet.worksheet("FAQ")
-                return sheet.get_all_records()
-            except Exception:
-                return []
-
-        with ThreadPoolExecutor() as executor:
-            faq_records = await asyncio.get_event_loop().run_in_executor(executor, get_faq_records_sync)
-
-        if not faq_records:
-            return None
-
-        question_lower = question_text.lower()
-
-        # Build TF-IDF like vectors (simple bag-of-words with idf weighting)
-        all_questions = [rec.get('question', '').lower() for rec in faq_records if 'question' in rec]
-        all_questions.append(question_lower)  # Include query for consistent vocab
-        vocab = set(word for q in all_questions for word in q.split())
-        vocab = list(vocab)
-        word_to_idx = {w: i for i, w in enumerate(vocab)}
-
-        def text_to_vector(text):
-            words = text.split()
-            counter = Counter(words)
-            vec = np.zeros(len(vocab))
-            for word, count in counter.items():
-                if word in word_to_idx:
-                    vec[word_to_idx[word]] = count  # TF
-            # Simple IDF: log(total_docs / (1 + docs_with_term))
-            idf = np.log(len(all_questions) / (1 + np.sum([1 for q in all_questions if word in q.split()])))
-            return vec * idf
-
-        query_vec = text_to_vector(question_lower)
-        faq_vecs = [text_to_vector(q) for q in all_questions[:-1]]  # Exclude query
-
-        # Cosine similarity
-        similarities = []
-        for faq_vec in faq_vecs:
-            dot = np.dot(query_vec, faq_vec)
-            norm_q = np.linalg.norm(query_vec)
-            norm_f = np.linalg.norm(faq_vec)
-            sim = dot / (norm_q * norm_f) if norm_q and norm_f else 0.0
-            similarities.append(sim)
-
-        # Find best match
-        best_idx = np.argmax(similarities)
-        best_sim = similarities[best_idx]
-
-        # Fallback to fuzzy if low sim
-        if best_sim < similarity_threshold:
-            fuzzy_sims = [difflib.SequenceMatcher(None, question_lower, all_questions[i]).ratio() for i in range(len(all_questions)-1)]
-            best_fuzzy_idx = np.argmax(fuzzy_sims)
-            best_fuzzy_sim = fuzzy_sims[best_fuzzy_idx]
-            if best_fuzzy_sim >= similarity_threshold:
-                best_idx = best_fuzzy_idx
-                best_sim = best_fuzzy_sim
-
-        if best_sim >= similarity_threshold:
-            record = faq_records[best_idx]
-            logger.info(f"Found similar FAQ: {record['question']} (similarity: {best_sim})")
-            return {
-                'question': record['question'],
-                'answer': record['answer'],
-                'similarity': best_sim,
-                'high_conf': best_sim >= high_conf_threshold,
-                'index': best_idx
-            }
-        return None
-    except Exception as e:
-        logger.exception("Error checking FAQ: %s", e)
-        return None
-
-# Systeme.io tag management helpers
-async def systeme_add_tag(contact_id: str, tag_id: str) -> bool:
-    """Add a tag to a Systeme.io contact."""
-    if not tag_id:
-        return False
-    
-    try:
-        add_payload = {"tag_id": int(tag_id)}
-        response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
-        return response is not None
-    except Exception as e:
-        logger.exception(f"Failed to add tag {tag_id} to contact {contact_id}: {e}")
-        return False
-
-async def systeme_remove_tag(contact_id: str, tag_id: str) -> bool:
-    """Remove a tag from a Systeme.io contact."""
-    if not tag_id:
-        return False
-    
-    try:
-        response = await systeme_api_request("DELETE", f"/contacts/{contact_id}/tags/{tag_id}")
-        return response is not None
-    except Exception as e:
-        logger.exception(f"Failed to remove tag {tag_id} from contact {contact_id}: {e}")
-        return False
-
-async def update_systeme_tags(contact_id: str):
-    """Update Systeme.io tags: remove pending, add verified."""
-    if not contact_id:
-        return
-    
-    try:
-        if SYSTEME_PENDING_STUDENT_TAG_ID:
-            await systeme_remove_tag(contact_id, SYSTEME_PENDING_STUDENT_TAG_ID)
-        await systeme_add_and_verify_tag(contact_id)
-    except Exception as e:
-        logger.exception(f"Failed to update tags for contact {contact_id}: {e}")
-
 # Legacy sync function for backward compatibility
 def systeme_create_contact(first_name: str, last_name: str, email: str, phone: str) -> Optional[str]:
     """Legacy sync function - calls async version."""
@@ -534,9 +405,9 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         asyncio.set_event_loop(loop)
         try:
             contact_id = loop.run_until_complete(systeme_create_contact_with_retry(first_name, last_name, email, phone))
-            if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
                 loop.run_until_complete(systeme_add_and_verify_tag(contact_id))
-            return contact_id
+        return contact_id
         finally:
             loop.close()
     except Exception as e:
@@ -736,7 +607,7 @@ async def verify_now_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     query = update.callback_query
     if not query:
         return
-    await query.answer()
+            await query.answer()
     await query.message.reply_text("Enter your full name:")
     return VERIFY_NAME
 
@@ -760,7 +631,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-        return
+                return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
@@ -790,24 +661,24 @@ async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT
 async def status_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-        return
+            return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-        return
+                return
     
-    await check_status_handler(update, context)
+            await check_status_handler(update, context)
 
 async def ask_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("To ask a question in group, please type /ask")
-        return
+            return
     
     # Check if verified
     if not await user_verified_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-        return
+                return
     
     await update.message.reply_text("What's your question?")
     return ASK_QUESTION
@@ -845,7 +716,7 @@ async def add_student_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ADD_STUDENT_EMAIL
 
 async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    email = (update.message.text or "").strip().lower()
+    email = (update.message.text or "").strip()
     if not EMAIL_RE.match(email):
         await update.message.reply_text("Invalid email. Try again:")
         return ADD_STUDENT_EMAIL
@@ -855,51 +726,6 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = make_hash(name, email, phone)
     created_at = datetime.utcnow().isoformat()
     
-    # Check for duplicates first
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT id FROM pending_verifications WHERE email = ?", (email,))
-        if cur.fetchone():
-            await update.message.reply_text("A pending student with this email already exists.")
-            return ConversationHandler.END
-        
-        cur.execute("SELECT id FROM verified_users WHERE email = ?", (email,))
-        if cur.fetchone():
-            await update.message.reply_text("A verified student with this email already exists.")
-            return ConversationHandler.END
-    
-    # Enhanced Systeme.io integration with async helpers
-    systeme_success = False
-    contact_id = None
-    try:
-        parts = name.split()
-        first = parts[0]
-        last = " ".join(parts[1:]) if len(parts) > 1 else ""
-
-        # Check if contact exists first
-        existing_contact = await systeme_get_contact_by_email(email)
-        if existing_contact:
-            contact_id = existing_contact['id']
-            logger.info(f"Existing Systeme.io contact found: {contact_id}")
-            # Add pending tag
-            if SYSTEME_PENDING_STUDENT_TAG_ID:
-                await systeme_add_tag(contact_id, SYSTEME_PENDING_STUDENT_TAG_ID)
-        else:
-            # Create new contact
-            contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
-            if contact_id and SYSTEME_PENDING_STUDENT_TAG_ID:
-                await systeme_add_tag(contact_id, SYSTEME_PENDING_STUDENT_TAG_ID)
-                logger.info(f"Created Systeme.io contact {contact_id} with pending tag")
-
-        if contact_id:
-            systeme_success = True
-            logger.info(f"Systeme.io contact {contact_id} created/updated successfully")
-
-    except Exception as e:
-        logger.exception(f"Systeme.io integration failed: {e}")
-        await notify_admin_systeme_failure(name, email, str(e), contact_id)
-    
-    # Store in database
     async with db_lock:
         cur = db_conn.cursor()
         try:
@@ -924,12 +750,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to append to Google Sheets (non-fatal).")
     
-    # User feedback based on Systeme.io success
-    if systeme_success:
-        await update.message.reply_text(f"Student {name} added successfully with Systeme.io integration! They can verify with these details. Admins can manually verify with /verify_student [email].")
-    else:
-        await update.message.reply_text(f"Student {name} added (Systeme.io sync in progress). They can verify with these details. Admins can manually verify with /verify_student [email].")
-    
+    await update.message.reply_text(f"Student {name} added. They can verify with these details. Admins can manually verify with /verify_student [email].")
     return ConversationHandler.END
 
 # Admin manual verification: /verify_student [email]
@@ -997,10 +818,13 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
             contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
 
         if contact_id:
-            # Update tags: remove pending, add verified
-            await update_systeme_tags(contact_id)
-            systeme_success = True
-            logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            # Add and verify tag
+            tagging_success = await systeme_add_and_verify_tag(contact_id)
+            if tagging_success:
+                systeme_success = True
+                logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            else:
+                logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
 
             # Update the verified_users table with systeme contact ID
             async with db_lock:
@@ -1194,10 +1018,13 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
 
         if contact_id:
-            # Update tags: remove pending, add verified
-            await update_systeme_tags(contact_id)
-            systeme_success = True
-            logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            # Add and verify tag
+            tagging_success = await systeme_add_and_verify_tag(contact_id)
+            if tagging_success:
+                systeme_success = True
+                logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            else:
+                logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
 
             # Update DB with contact ID
             async with db_lock:
@@ -1364,7 +1191,7 @@ async def score_selected_callback(update: Update, context: ContextTypes.DEFAULT_
     
     _, score_str, sub_id = parts
     try:
-        score = int(score_str)
+    score = int(score_str)
     except ValueError:
         logger.warning(f"Invalid score value: {score_str}")
         await query.answer("Invalid score value")
@@ -1513,7 +1340,7 @@ async def grading_comment_receive_video(update: Update, context: ContextTypes.DE
     elif update.message.video_note:
         file_id = update.message.video_note.file_id
         comment_text = f"[video_note:{file_id}]"
-    else:
+            else:
         await update.message.reply_text("Please send a video file.")
         return
     
@@ -1524,7 +1351,7 @@ async def grading_comment_receive_video(update: Update, context: ContextTypes.DE
     
     return ConversationHandler.END
 
-# Enhanced Share Win flow with unified states
+# Share small win flow
 async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
@@ -1542,63 +1369,40 @@ async def win_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.message.reply_text(f"Send your {typ} now:")
     return WIN_UPLOAD
 
-async def win_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle text win upload."""
-    if context.user_data.get('win_type') != 'text':
-        return WIN_UPLOAD  # Ignore mismatch
+async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only process if we're in the win conversation state
+    if context.user_data.get('win_type') is None:
+        return
     
-    content = update.message.text.strip()
-    if not content:
-        await update.message.reply_text("Empty text. Try again.")
-        return WIN_UPLOAD
-    
-    await process_win(update, context, 'text', content)
-    return ConversationHandler.END
-
-async def win_receive_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle image win upload."""
-    if context.user_data.get('win_type') != 'image':
-        return WIN_UPLOAD
-    
-    photo = update.message.photo[-1]
-    if photo.file_size and photo.file_size > 20 * 1024 * 1024:  # 20MB limit
-        await update.message.reply_text("Image too large. Max 20MB.")
-        return WIN_UPLOAD
-    
-    content = photo.file_id
-    caption = update.message.caption or ""
-    await process_win(update, context, 'image', content, caption)
-    return ConversationHandler.END
-
-async def win_receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle video win upload."""
-    if context.user_data.get('win_type') != 'video':
-        return WIN_UPLOAD
-    
-    video = update.message.video
-    if video.file_size and video.file_size > 50 * 1024 * 1024:  # 50MB for videos
-        await update.message.reply_text("Video too large. Max 50MB.")
-        return WIN_UPLOAD
-    
-    content = video.file_id
-    caption = update.message.caption or ""
-    await process_win(update, context, 'video', content, caption)
-    return ConversationHandler.END
-
-async def process_win(update: Update, context: ContextTypes.DEFAULT_TYPE, typ: str, content: str, caption: str = ""):
-    """Process and store win, forward to support, and update Systeme.io."""
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
-        return
+        return ConversationHandler.END
     
     if not await user_verified_by_telegram_id(update.effective_user.id):
         await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-        return
+        return ConversationHandler.END
+    
+    typ = context.user_data.get('win_type')
+    content = None
+    if typ == "text":
+        content = update.message.text
+        if not content or len(content.strip()) == 0:
+            await update.message.reply_text("Empty text. Try again.")
+            return WIN_UPLOAD
+    elif typ == "image":
+        if not update.message.photo:
+            await update.message.reply_text("Please send a photo.")
+            return WIN_UPLOAD
+        content = update.message.photo[-1].file_id
+    elif typ == "video":
+        if not update.message.video:
+            await update.message.reply_text("Please send a video.")
+            return WIN_UPLOAD
+        content = update.message.video.file_id
     
     win_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
-    # Store in database
     async with db_lock:
         cur = db_conn.cursor()
         cur.execute("INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1611,46 +1415,14 @@ async def process_win(update: Update, context: ContextTypes.DEFAULT_TYPE, typ: s
             if typ == "text":
                 await telegram_app.bot.send_message(chat_id=SUPPORT_GROUP_ID, text=f"Win from {update.effective_user.full_name}: {content}")
             elif typ == "image":
-                caption_text = f"Win from {update.effective_user.full_name}"
-                if caption:
-                    caption_text += f"\n{caption}"
-                await telegram_app.bot.send_photo(chat_id=SUPPORT_GROUP_ID, photo=content, caption=caption_text)
-            else:  # video
-                caption_text = f"Win from {update.effective_user.full_name}"
-                if caption:
-                    caption_text += f"\n{caption}"
-                await telegram_app.bot.send_video(chat_id=SUPPORT_GROUP_ID, video=content, caption=caption_text)
+                await telegram_app.bot.send_photo(chat_id=SUPPORT_GROUP_ID, photo=content, caption=f"Win from {update.effective_user.full_name}")
+            else:
+                await telegram_app.bot.send_video(chat_id=SUPPORT_GROUP_ID, video=content, caption=f"Win from {update.effective_user.full_name}")
         except Exception:
             logger.exception("Failed to forward win to support group")
     
-    # Systeme.io: Add shared win tag
-    try:
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ?", (update.effective_user.id,))
-            row = cur.fetchone()
-            if row and row[0] and SYSTEME_SHARED_WIN_TAG_ID:
-                await systeme_add_tag(row[0], SYSTEME_SHARED_WIN_TAG_ID)
-                logger.info(f"Added shared win tag to contact {row[0]}")
-    except Exception as e:
-        logger.exception(f"Failed to add shared win tag: {e}")
-    
     await update.message.reply_text("Awesome win shared!", reply_markup=get_main_menu_keyboard())
-    context.user_data.clear()
     return ConversationHandler.END
-
-# Legacy function for backward compatibility
-async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Legacy win receive function - redirects to appropriate handler."""
-    if update.message.text:
-        return await win_receive_text(update, context)
-    elif update.message.photo:
-        return await win_receive_image(update, context)
-    elif update.message.video:
-        return await win_receive_video(update, context)
-    else:
-        await update.message.reply_text("Please send text, image, or video.")
-        return WIN_UPLOAD
 
 # Ask question flow (students)
 async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1665,7 +1437,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         # Check if verified
-        if not await user_verified_by_telegram_id(update.effective_user.id):
+    if not await user_verified_by_telegram_id(update.effective_user.id):
             await update.message.reply_text("Please verify first! DM the bot to verify.")
             return
         
@@ -1701,40 +1473,6 @@ async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     qid = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
-    # Check for similar FAQ first
-    similar = await check_faq_for_similar_question(question_text)
-    if similar:
-        if similar['high_conf']:
-            # Auto-respond with high confidence match
-            await update.message.reply_text(
-                f"Here's a similar answer:\n\n"
-                f"Q: {similar['question']}\n"
-                f"A: {similar['answer']}", 
-                reply_markup=get_main_menu_keyboard()
-            )
-            return ConversationHandler.END
-        else:
-            # Forward to admin with suggestion button
-            if QUESTIONS_GROUP_ID:
-                kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Use as Auto-Response", callback_data=f"suggest_faq_{qid}_{similar['index']}")],
-                    [InlineKeyboardButton("Answer Manually", callback_data=f"answer_{qid}")]
-                ])
-                try:
-                    await telegram_app.bot.send_message(
-                        chat_id=QUESTIONS_GROUP_ID, 
-                        text=f"Similar FAQ found for '{question_text}':\n\n"
-                             f"Q: {similar['question']}\n"
-                             f"A: {similar['answer']}\n\n"
-                             f"Similarity: {similar['similarity']:.2f}",
-                        reply_markup=kb
-                    )
-                except Exception:
-                    logger.exception("Failed to forward FAQ suggestion to questions group")
-            await update.message.reply_text("Question sent! Checking for similar answers.", reply_markup=get_main_menu_keyboard())
-            return ConversationHandler.END
-    
-    # Store question in database
     async with db_lock:
         cur = db_conn.cursor()
         cur.execute("INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1768,82 +1506,6 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await query.message.reply_text("Send your answer (Text, Audio, Video). It will be forwarded to the student.")
     return ANSWER_QUESTION
-
-async def suggest_faq_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle FAQ suggestion approval from admin."""
-    query = update.callback_query
-    if not query:
-        return
-    
-    if not await is_admin(query.from_user.id):
-        await query.answer("You are not authorized to perform this action.", show_alert=True)
-        return
-    
-    data = query.data
-    if not data.startswith("suggest_faq_"):
-        return
-    
-    # Parse: suggest_faq_{qid}_{faq_index}
-    parts = data.split("_")
-    if len(parts) != 4:
-        await query.answer("Invalid suggestion data")
-        return
-    
-    qid = parts[2]
-    faq_index = int(parts[3])
-    
-    try:
-        # Get FAQ data
-        if not gs_sheet:
-            await query.answer("Google Sheets not available")
-            return
-        
-        def get_faq_records_sync():
-            try:
-                sheet = gs_sheet.worksheet("FAQ")
-                return sheet.get_all_records()
-            except Exception:
-                return []
-        
-        with ThreadPoolExecutor() as executor:
-            faq_records = await asyncio.get_event_loop().run_in_executor(executor, get_faq_records_sync)
-        
-        if faq_index >= len(faq_records):
-            await query.answer("FAQ record not found")
-            return
-        
-        faq_record = faq_records[faq_index]
-        answer_text = faq_record['answer']
-        
-        # Get question info and send to student
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT telegram_id, question FROM questions WHERE question_id = ?", (qid,))
-            row = cur.fetchone()
-            if not row:
-                await query.answer("Question not found")
-                return
-            student_tg, question_text = row
-            
-            # Mark as answered
-            cur.execute("UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?", 
-                       (answer_text, query.from_user.id, datetime.utcnow().isoformat(), "Answered", qid))
-            db_conn.commit()
-        
-        # Send answer to student
-        try:
-            await telegram_app.bot.send_message(
-                chat_id=student_tg, 
-                text=f"Answer to your question:\n\n{answer_text}"
-            )
-        except Exception:
-            logger.exception("Failed to send answer to student")
-        
-        await query.edit_message_text(f"✅ FAQ auto-response sent to student!\n\nQ: {faq_record['question']}\nA: {answer_text}")
-        
-    except Exception as e:
-        logger.exception(f"Error processing FAQ suggestion: {e}")
-        await query.answer("Error processing suggestion")
 
 async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     qid = context.user_data.get('answer_question_id')
@@ -2028,8 +1690,8 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-        body = await request.json()
-        update = Update.de_json(body, telegram_app.bot)
+    body = await request.json()
+    update = Update.de_json(body, telegram_app.bot)
         
         # Ensure application is initialized
         if not telegram_app:
@@ -2040,9 +1702,9 @@ async def telegram_webhook(token: str, request: Request):
         if update.chat_join_request:
             await chat_join_request_handler(update, None)
         else:
-            await telegram_app.process_update(update)
+        await telegram_app.process_update(update)
         
-        return {"ok": True}
+    return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -2130,18 +1792,16 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(grading_conv)
 
-    # Enhanced Wins conversation with unified states
+    # Wins conversation
     win_conv = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler)
+            MessageHandler(filters.Regex("^🎉 Share Small Win$") & filters.ChatType.PRIVATE, share_win_button_handler),
+            CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")
         ],
         states={
-            WIN_TYPE: [CallbackQueryHandler(win_type_callback, pattern="^win_(text|image|video)$")],
-            WIN_UPLOAD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive_text),
-                MessageHandler(filters.PHOTO, win_receive_image),
-                MessageHandler(filters.VIDEO, win_receive_video)
-            ]
+            WIN_UPLOAD: [MessageHandler(filters.TEXT & ~filters.COMMAND, win_receive), 
+                        MessageHandler(filters.PHOTO & ~filters.COMMAND, win_receive),
+                        MessageHandler(filters.VIDEO & ~filters.COMMAND, win_receive)]
         },
         fallbacks=[CommandHandler("cancel", cancel_handler)],
         per_message=False,
@@ -2168,9 +1828,6 @@ def register_handlers(app_obj: Application):
         per_message=False
     )
     app_obj.add_handler(answer_conv)
-    
-    # FAQ suggestion callback handler
-    app_obj.add_handler(CallbackQueryHandler(suggest_faq_callback, pattern="^suggest_faq_"))
     
     # Menu callback handler (for other inline buttons) - DM ONLY
     app_obj.add_handler(CallbackQueryHandler(menu_callback, pattern="^(submit|share_win|status|ask)$"))
