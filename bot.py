@@ -835,7 +835,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Reply keyboard button handlers
 async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
-        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        await reply_translated(update, "Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
         return
     
     # Check if verified
@@ -848,7 +848,7 @@ async def submit_button_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def share_win_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
-        await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
+        await reply_translated(update, "Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
         return
     
     # Check if verified
@@ -891,7 +891,7 @@ async def ask_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # Admin: /add_student conversation
 async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update.effective_user.id):
-        await update.message.reply_text("You are not authorized to perform this action.")
+        await reply_translated(update, "You are not authorized to perform this action.")
         return ConversationHandler.END
     
     # Must be in VERIFICATION_GROUP_ID
@@ -955,7 +955,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         logger.exception("Failed to append to Google Sheets (non-fatal).")
     
-    await update.message.reply_text(f"Student {name} added. They can verify with these details. Admins can manually verify with /verify_student [email].")
+    await reply_translated(update, f"Student {name} added. They can verify with these details. Admins can manually verify with /verify_student [email].")
     return ConversationHandler.END
 
 # Admin manual verification: /verify_student [email]
@@ -965,12 +965,12 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     
     if len(context.args) < 1:
-        await update.message.reply_text("Usage: /verify_student [email]")
+        await reply_translated(update, "Usage: /verify_student [email]")
         return
     
     email = context.args[0].strip()
     if not EMAIL_RE.match(email):
-        await update.message.reply_text("Invalid email.")
+        await reply_translated(update, "Invalid email.")
         return
     
     async with db_lock:
@@ -978,7 +978,7 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         cur.execute("SELECT name, phone, hash FROM pending_verifications WHERE email = ? AND status = ?", (email, "Pending"))
         row = cur.fetchone()
         if not row:
-            await update.message.reply_text("No pending student found with that email. Add with /add_student first.")
+            await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
             return
         
         name, phone, h = row

@@ -1,93 +1,186 @@
 # FINAL FIX - AVAP Support Bot
 
-## Summary
-This document consolidates the final fixes applied to ensure the bot operates reliably across verification, removal, grading, wins, FAQ reuse, multi-language, and persistence. It includes issues, root causes, actions taken, environment/setup notes, and how to test each item end-to-end.
+## Overview
+This document details the issues, expected flows, root causes, problematic code areas, final fixes, and testing/debugging steps for the key features. It reflects the latest code on `main` and should be used as the single source of truth.
 
-## Environment and Setup
-- Python: 3.11.x (Render uses runtime.txt)
-- Persistent DB: SQLite at `/data/bot.db` (set by default; override with `DB_PATH`)
-- Core env vars:
-  - Telegram: `BOT_TOKEN`
-  - Admins/Groups: `ADMIN_IDS`, `ASSIGNMENTS_GROUP_ID`, `QUESTIONS_GROUP_ID`
-  - Systeme.io: `SYSTEME_API_KEY` (aka SYSTEME_IO_API_KEY in code), `SYSTEME_VERIFIED_STUDENT_TAG_ID`, `SYSTEME_ACHIEVER_TAG_ID`, `SYSTEME_KEEP_CONTACT_ON_REMOVE`
-  - Google Sheets: `GOOGLE_CREDENTIALS_JSON` and `GOOGLE_SHEET_ID`
-  - OpenAI: `OPENAI_API_KEY`
-  - I18n: `DEFAULT_LANGUAGE`
-- Scheduling: APScheduler is enabled for Daily Tips and FAQ checks
+---
 
-## Final Fixes
+## 1) Verify Student + Systeme.io + Sheets
 
-### 1) Google Sheets updates
-- Added Submissions sheet logging on submission
-- Added grading updates (status, score, comment) on finalize
-- Added Wins sheet logging on shared win
-- Verified existing Verifications sheet updates for add/verify/remove
+### Issue Description
+- Sheets not updated during add student and verify flows.
+- Systeme.io contact creation/tagging intermittently fails (422, non-JSON responses).
 
-How to test:
-- Submit an assignment: new row in `Submissions`
-- Grade it: row updated with `Graded`, `score`, `comment`
-- Share win: new row in `Wins`
-- Add/verify student: rows in `Verifications` are created/updated
+### Expected Flow
+1. Admin adds student (name, email, phone) → row added to `Verifications` with status `Pending`.
+2. Student verifies via DM → `verified_users` updated; `Verifications` row set to `Verified` with `telegram_id`.
+3. Systeme.io: contact created/updated; verified tag applied and verified; admin notified on failures.
 
-### 2) Systeme.io integration robustness
-- Unified client handles non-JSON responses (e.g., empty 204) and retries
-- Contact lookup more tolerant; proceeds to creation if search fails
-- Tag verification errors do not crash; admin notified when needed
+### Root Cause Analysis
+- Sheets: inserts/upserts existed for some paths, but inconsistent and missing in others.
+- Systeme.io: client expected JSON for all responses; GET /contacts sometimes returns 422; tags GET may return non-JSON.
 
-How to test:
-- Verify a student; check contact created/updated and tagged
-- Simulate 422/429 via bad params/rate limit; bot should not crash and should notify admin
+### Primary Issue
+- Inconsistent Sheets writes and brittle Systeme.io client.
 
-### 3) Remove Student flow reliability
-- Confirmation handlers and states verified
-- Identifier lookup normalized (email/ID/name, case-insensitive name)
-- Systeme.io deprovision uses robust client
+### Problematic Code (before)
+```python
+# Sheets writes missing in some flows; systeme_api_request assumed JSON always
+return await resp.json()
+```
 
-How to test:
-- `/remove_student email,name,id` → confirm → enter reason → DB/Sheets/Systeme updated; student notified
+### Final Fixes
+- Sheets:
+  - Add row on add student to `Verifications`.
+  - On student verify/admin verify, find rows by email and update status and telegram_id.
+- Systeme.io client:
+  - Safely handle non-JSON response; return ok with status/text when content-type isn’t JSON.
+  - Tolerant contact search; proceed to creation if search fails.
 
-### 4) Grading flow stability
-- Resolved UnboundLocalError for text comments with guards
-- Single ConversationHandler with well-defined states
+### Technical Details
+- File: `bot.py`
+  - `systeme_api_request` handles content-type check; returns dict or ok/status.
+  - Verify flows update Sheets in `Verifications` worksheet.
 
-How to test:
-- Grade submission → choose comment text → send message → saved and student notified; Sheets updated
+### Testing Steps
+- Add student → check `Verifications` row added.
+- Student verify → `Verifications` row updated with `Verified` and telegram_id.
+- Simulate 422/429 → no crash; admin notified.
 
-### 5) Share Win states
-- Added `WIN_TYPE` state in ConversationHandler, ensuring buttons respond
+### Debugging Info
+- Logs: look for `Systeme.io API request failed` and `Sheets sync failed` messages.
 
-How to test:
-- Tap Text/Image/Video then send content; stored, forwarded, Sheets `Wins` row created
+---
 
-### 6) FAQ reuse improvements
-- Immediate reuse suggestion in `/ask` based on `faq_history` similarity
-- Hourly job still drafts AI answers when unanswered
+## 2) Submission + Grading + Sheets
 
-How to test:
-- Ask a previously answered/similar question; bot replies with suggested prior answer immediately, still forwards to support
+### Issue Description
+- Sheets not updated after submission and grading.
 
-### 7) Multi-language application
-- `reply_translated` used for key DM messages; language fetched from DB
-- Ensure you set language via `/setlang` (in `features/multilanguage.py`)
+### Expected Flow
+1. Student submits → `Submissions` row appended.
+2. Grading → row updated to `Graded`, score/comment populated.
 
-How to test:
-- `/setlang es` then `/start`, `/status` – messages appear in Spanish
+### Root Cause Analysis
+- Missing append/update in some handlers.
 
-### 8) DB persistence on redeploy
-- DB path defaults to `/data/bot.db`; directory is created on startup
+### Final Fixes
+- On submission: append to `Submissions` with core fields.
+- On finalize grading: update row status/score/comment (search by `submission_id`), or append if not found.
 
-How to test:
-- Verify students; redeploy; data remains intact
+### Technical Details
+- File: `bot.py` → `submit_media_upload`, `finalize_grading`.
 
-## Known Requirements
-- Ensure Google Sheets credentials and sheet ID are valid for full logging
-- Ensure Systeme.io API key and tag IDs are correct
+### Testing Steps
+- Submit; confirm row in `Submissions`.
+- Grade; confirm row updated.
 
-## Smoke Checklist
-- Verify student: activation flow + Systeme.io tag
-- Remove student: confirmation + deprovision
-- Submit & grade: Sheets row add + update
-- Share win: Sheets row add
-- FAQ reuse: immediate suggestion on `/ask`
-- I18n: `/setlang` affects `/start` and `/status`
-- Persistence: data persists across redeploys
+### Debugging Info
+- Logs prefix: `Failed to append submission to Sheets`, `Failed to update grading info in Sheets`.
+
+---
+
+## 3) Share Win + Sheets
+
+### Issue Description
+- Sheets not updated after shared win.
+
+### Expected Flow
+- Share win → `Wins` row appended.
+
+### Final Fixes
+- Append to `Wins` sheet with `win_id`, `username`, `telegram_id`, `type`, `content`, `created_at`.
+
+### Technical Details
+- File: `bot.py` → in `win_receive` after DB commit.
+
+### Testing Steps
+- Share each type (text/image/video where applicable) and confirm row in `Wins`.
+
+---
+
+## 4) FAQ Immediate Reuse
+
+### Issue Description
+- Repeat questions require manual re-answering.
+
+### Expected Flow
+- On `/ask`, if similar question exists in `faq_history`, suggest answer to user immediately; still forward to group.
+
+### Final Fixes
+- Added immediate reuse via `find_similar_faq` in `features/faq_ai_helper.py` before storing question.
+
+### Technical Details
+- Files: `utils/db_access.py` (faq_history, similarity), `features/faq_ai_helper.py` (immediate reuse).
+
+### Testing Steps
+- Ask a question similar to a previous one; bot shows the suggested answer instantly.
+
+---
+
+## 5) Remove Student
+
+### Issue Description
+- Confirm removal not working reliably; identifier matching flaky.
+
+### Expected Flow
+- `/remove_student` → selection/confirmation → reason → soft-delete; Sheets updated; Systeme.io deprovision; student notified.
+
+### Final Fixes
+- Fixed callback/state mapping; normalized identifier lookup (case-insensitive name); robust Systeme.io client usage.
+
+### Technical Details
+- File: `bot.py` → `remove_student_*`, `find_student_by_identifier`, `remove_systeme_contact`.
+
+### Testing Steps
+- Remove by email/name/ID; confirm deprovision and Sheets updated.
+
+---
+
+## 6) Multi-language (i18n)
+
+### Issue Description
+- Set language feature not reflected; bot replies in English.
+
+### Expected Flow
+- `/setlang <code>` stores language; subsequent key messages are translated.
+
+### Final Fixes
+- Use `reply_translated` for key messages (start, status, auth errors, usage hints, submit/status prompts, etc.).
+- Confirm language is read from DB; `features/multilanguage.py` manages setting/reading.
+
+### Technical Details
+- Files: `bot.py` (extensive use of `reply_translated`), `features/multilanguage.py` (set/get language).
+
+### Testing Steps
+- `/setlang es`; run `/start` and `/status`; confirm messages in Spanish.
+
+---
+
+## 7) Persistence on Redeploy
+
+### Issue Description
+- Verified students wiped on redeploy.
+
+### Expected Flow
+- Data persists across redeploys.
+
+### Final Fixes
+- Default DB path to `/data/bot.db`; ensure directory exists on startup.
+
+### Technical Details
+- File: `bot.py` → `DB_PATH`, `init_db()`.
+
+### Testing Steps
+- Verify students; redeploy; confirm data is intact.
+
+---
+
+## Appendix: Problematic Code Summary (Before vs After)
+- `systeme_api_request`: from strict `await resp.json()` to content-type aware handling.
+- Missing Sheets appends/updates → now appended/updated across Submissions/Grading/Wins.
+- i18n: switch to `reply_translated` in core flows.
+
+## Appendix: Debugging Tips
+- Enable Render logs; search for WARNING/ERROR lines included above.
+- Toggle env vars carefully (Systeme.io tags/keys, Sheets credentials, default language).
