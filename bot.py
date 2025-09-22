@@ -90,6 +90,8 @@ TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 # Systeme.io configuration
 SYSTEME_BASE_URL = "https://api.systeme.io/api"
 AVAP_ACTIVATE_LINK = "https://bit.ly/avm-activate"
+SYSTEME_KEEP_CONTACT_ON_REMOVE = os.getenv("SYSTEME_KEEP_CONTACT_ON_REMOVE", "False") == "True"
+SYSTEME_ACHIEVER_TAG_ID = os.getenv("SYSTEME_ACHIEVER_TAG_ID")
 
 # Validate required environment variables
 if not BOT_TOKEN:
@@ -128,7 +130,9 @@ webhook_url = f"{base_url}/webhook/{BOT_TOKEN}"
     GRADE_USERNAME,
     GRADE_MODULE,
     GRADING_COMMENT,
-) = range(100, 116)
+    REMOVE_CONFIRM,
+    REMOVE_REASON,
+) = range(100, 118)
 
 # Grading conversation states (separate from main conversation states)
 class GradingStates:
@@ -236,6 +240,36 @@ def init_db():
         )"""
     )
     
+    # Add removed_at column to verified_users if it doesn't exist
+    try:
+        cur.execute("ALTER TABLE verified_users ADD COLUMN removed_at DATETIME NULL")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    # removals log table
+    cur.execute(
+        """CREATE TABLE IF NOT EXISTS removals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            admin_id INTEGER NOT NULL,
+            reason TEXT,
+            removed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    
+    # student badges table
+    cur.execute(
+        """CREATE TABLE IF NOT EXISTS student_badges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER NOT NULL,
+            badge_type TEXT NOT NULL,
+            earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            notified BOOLEAN DEFAULT FALSE,
+            systeme_tagged BOOLEAN DEFAULT FALSE,
+            UNIQUE(telegram_id, badge_type)
+        )"""
+    )
+    
     conn.commit()
     return conn
 
@@ -252,7 +286,7 @@ def init_gsheets():
         # Write credentials to file if provided as JSON string
         if GOOGLE_CREDENTIALS_JSON.startswith('{'):
             # Assume it's a JSON string
-        creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
+            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
         else:
             # Assume it's a file path
             with open(GOOGLE_CREDENTIALS_JSON, 'r') as f:
@@ -392,6 +426,81 @@ async def notify_admin_systeme_failure(name: str, email: str, error: str, contac
     except Exception as e:
         logger.exception(f"Failed to notify admin about Systeme.io failure: {e}")
 
+async def remove_systeme_contact(contact_id: str) -> bool:
+    """Remove Systeme.io contact with tags and handle free plan limitations."""
+    if not contact_id or not SYSTEME_IO_API_KEY:
+        return True
+    
+    try:
+        # Remove all tags first
+        tags_response = await systeme_api_request("GET", f"/contacts/{contact_id}/tags")
+        if tags_response:
+            for tag in tags_response:
+                tag_id = tag.get("id")
+                if tag_id:
+                    await systeme_api_request("DELETE", f"/contacts/{contact_id}/tags/{tag_id}")
+                    logger.info(f"Removed tag {tag_id} from contact {contact_id}")
+        
+        if SYSTEME_KEEP_CONTACT_ON_REMOVE:
+            # Keep contact but notify admin for manual dismissal
+            await notify_admin_manual_dismiss(contact_id)
+            return True
+        else:
+            # Delete the contact entirely
+            delete_response = await systeme_api_request("DELETE", f"/contacts/{contact_id}")
+            return delete_response is not None
+            
+    except Exception as e:
+        logger.exception(f"Failed to remove Systeme.io contact {contact_id}: {e}")
+        return False
+
+async def notify_admin_manual_dismiss(contact_id: str):
+    """Notify admin that manual dismissal is needed in Systeme.io."""
+    if not ADMIN_USER_ID:
+        return
+    
+    message = f"⚠️ Manual Action Needed\n\n"
+    message += f"Contact ID: {contact_id}\n"
+    message += f"Action: Dismiss enrollment in Systeme.io dashboard\n"
+    message += f"Reason: Contact kept due to SYSTEME_KEEP_CONTACT_ON_REMOVE setting"
+    
+    try:
+        await telegram_app.bot.send_message(chat_id=ADMIN_USER_ID, text=message)
+    except Exception as e:
+        logger.exception(f"Failed to notify admin about manual dismissal: {e}")
+
+async def tag_achiever_in_systeme(telegram_id: int) -> bool:
+    """Tag student as achiever in Systeme.io."""
+    if not SYSTEME_ACHIEVER_TAG_ID or not SYSTEME_IO_API_KEY:
+        return True
+    
+    try:
+        # Get contact ID from verified_users
+        async with db_lock:
+            cur = db_conn.cursor()
+            cur.execute("SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (telegram_id,))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                logger.warning(f"No Systeme.io contact ID found for telegram_id {telegram_id}")
+                return False
+            contact_id = row[0]
+        
+        # Add achiever tag
+        tag_id = int(SYSTEME_ACHIEVER_TAG_ID)
+        add_payload = {"tag_id": tag_id}
+        response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
+        
+        if response:
+            logger.info(f"Successfully added achiever tag to contact {contact_id}")
+            return True
+        else:
+            logger.warning(f"Failed to add achiever tag to contact {contact_id}")
+            return False
+            
+    except Exception as e:
+        logger.exception(f"Failed to tag achiever in Systeme.io: {e}")
+        return False
+
 # Legacy sync function for backward compatibility
 def systeme_create_contact(first_name: str, last_name: str, email: str, phone: str) -> Optional[str]:
     """Legacy sync function - calls async version."""
@@ -405,9 +514,9 @@ def systeme_create_contact(first_name: str, last_name: str, email: str, phone: s
         asyncio.set_event_loop(loop)
         try:
             contact_id = loop.run_until_complete(systeme_create_contact_with_retry(first_name, last_name, email, phone))
-        if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
+            if contact_id and SYSTEME_VERIFIED_STUDENT_TAG_ID:
                 loop.run_until_complete(systeme_add_and_verify_tag(contact_id))
-        return contact_id
+            return contact_id
         finally:
             loop.close()
     except Exception as e:
@@ -840,51 +949,201 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(f"Student with email {email} verified successfully!")
 
-# Admin remove student /remove_student [telegram_id]
-async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_admin(update.effective_user.id):
-        await update.message.reply_text("You are not authorized to perform this action.")
-        return
-    
-    if len(context.args) < 1:
-        await update.message.reply_text("Usage: /remove_student [telegram_id]")
-        return
-    
-    try:
-        t_id = int(context.args[0])
-    except Exception:
-        await update.message.reply_text("Invalid telegram_id.")
-        return
-    
+# Enhanced remove student functionality
+async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
+    """Find student by email, name, or telegram ID with partial matching."""
     async with db_lock:
         cur = db_conn.cursor()
-        cur.execute("SELECT email, name FROM verified_users WHERE telegram_id = ?", (t_id,))
-        row = cur.fetchone()
-        if not row:
-            await update.message.reply_text(f"No verified student found with Telegram ID {t_id}.")
-            return
         
-        email, name = row
-        cur.execute("DELETE FROM verified_users WHERE telegram_id = ?", (t_id,))
-        cur.execute("UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?", ("Removed", 0, email))
-        db_conn.commit()
+        # Try exact email match first
+        if "@" in identifier:
+            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE email = ? AND removed_at IS NULL", (identifier,))
+            row = cur.fetchone()
+            if row:
+                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        
+        # Try telegram ID
+        try:
+            t_id = int(identifier)
+            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
+            row = cur.fetchone()
+            if row:
+                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        except ValueError:
+            pass
+        
+        # Try partial name match
+        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE name LIKE ? AND removed_at IS NULL", (f"%{identifier}%",))
+        rows = cur.fetchall()
+        if len(rows) == 1:
+            row = rows[0]
+            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        elif len(rows) > 1:
+            return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+        
+        return None
+
+async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Enhanced remove student command with batch support and confirmation."""
+    if not await is_admin(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return ConversationHandler.END
     
-    # Update Google Sheets
-    try:
-        if gs_sheet:
+    if len(context.args) < 1:
+        await update.message.reply_text("Usage: /remove_student [identifier1,identifier2,...]\n\nIdentifiers: email, name, or telegram ID")
+        return ConversationHandler.END
+    
+    # Parse identifiers (comma-separated)
+    identifiers = [id.strip() for id in " ".join(context.args).split(",")]
+    students_to_remove = []
+    multiple_matches = []
+    
+    for identifier in identifiers:
+        result = await find_student_by_identifier(identifier)
+        if result and "multiple_matches" in result:
+            multiple_matches.append((identifier, result["multiple_matches"]))
+        elif result:
+            students_to_remove.append(result)
+        else:
+            await update.message.reply_text(f"❌ No student found for identifier: {identifier}")
+    
+    if not students_to_remove and not multiple_matches:
+        await update.message.reply_text("❌ No students found to remove.")
+        return ConversationHandler.END
+    
+    # Handle multiple matches
+    if multiple_matches:
+        for identifier, matches in multiple_matches:
+            buttons = []
+            for t_id, name, email in matches:
+                buttons.append([InlineKeyboardButton(f"{name} ({email})", callback_data=f"remove_specific_{t_id}")])
+            buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel_remove")])
+            
+            await update.message.reply_text(
+                f"Multiple matches found for '{identifier}':",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            return REMOVE_CONFIRM
+    
+    # Store students to remove and show confirmation
+    context.user_data['students_to_remove'] = students_to_remove
+    
+    # Create confirmation message
+    msg = "⚠️ Confirm Student Removal\n\n"
+    for student in students_to_remove:
+        msg += f"• {student['name']} ({student['email']})\n"
+    
+    msg += f"\nThis will:\n"
+    msg += f"• Remove access to all bot features\n"
+    msg += f"• Revoke Systeme.io course access\n"
+    msg += f"• Log the removal with reason\n\n"
+    msg += f"Are you sure?"
+    
+    buttons = [
+        [InlineKeyboardButton("✅ Confirm Removal", callback_data="confirm_remove")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_remove")]
+    ]
+    
+    await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(buttons))
+    return REMOVE_CONFIRM
+
+async def remove_student_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle remove student confirmation."""
+    query = update.callback_query
+    if not query:
+        return
+    
+    await query.answer()
+    
+    if query.data == "cancel_remove":
+        await query.edit_message_text("❌ Removal cancelled.")
+        return ConversationHandler.END
+    
+    if query.data == "confirm_remove":
+        await query.edit_message_text("Please provide a reason for removal (optional but recommended):")
+        return REMOVE_REASON
+    
+    if query.data.startswith("remove_specific_"):
+        t_id = int(query.data.split("_", 2)[2])
+        # Find the specific student and add to removal list
+        result = await find_student_by_identifier(str(t_id))
+        if result:
+            context.user_data['students_to_remove'] = [result]
+            await query.edit_message_text("Please provide a reason for removal (optional but recommended):")
+            return REMOVE_REASON
+    
+    return ConversationHandler.END
+
+async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Process student removal with reason."""
+    reason = update.message.text.strip() if update.message.text else "No reason provided"
+    students_to_remove = context.user_data.get('students_to_remove', [])
+    
+    if not students_to_remove:
+        await update.message.reply_text("❌ No students to remove.")
+        return ConversationHandler.END
+    
+    removed_count = 0
+    failed_count = 0
+    
+    for student in students_to_remove:
+        try:
+            # Soft delete in database
+            async with db_lock:
+                cur = db_conn.cursor()
+                cur.execute("UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?", 
+                           (datetime.utcnow().isoformat(), student['telegram_id']))
+                cur.execute("UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?", 
+                           ("Removed", 0, student['email']))
+                cur.execute("INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
+                           (student['telegram_id'], update.effective_user.id, reason))
+                db_conn.commit()
+            
+            # Update Google Sheets
             try:
-                sheet = gs_sheet.worksheet("Verifications")
-                cells = sheet.findall(email)
-                for c in cells:
-                    row_idx = c.row
-                    sheet.update_cell(row_idx, 5, "Removed")
-                    sheet.update_cell(row_idx, 4, "")
+                if gs_sheet:
+                    sheet = gs_sheet.worksheet("Verifications")
+                    cells = sheet.findall(student['email'])
+                    for c in cells:
+                        row_idx = c.row
+                        sheet.update_cell(row_idx, 5, "Removed")
+                        sheet.update_cell(row_idx, 4, "")
             except Exception:
-                pass
-    except Exception:
-        logger.exception("Sheets update failed")
+                logger.exception("Sheets update failed")
+            
+            # Remove from Systeme.io
+            if student.get('systeme_contact_id'):
+                await remove_systeme_contact(student['systeme_contact_id'])
+            
+            # Notify student
+            try:
+                await telegram_app.bot.send_message(
+                    chat_id=student['telegram_id'],
+                    text=f"🚫 Your access to AVAP has been revoked.\n\nReason: {reason}\n\nContact support if you believe this is an error."
+                )
+            except Exception:
+                logger.exception(f"Failed to notify student {student['telegram_id']}")
+            
+            removed_count += 1
+            
+        except Exception as e:
+            logger.exception(f"Failed to remove student {student['name']}: {e}")
+            failed_count += 1
     
-    await update.message.reply_text(f"Student {name} ({t_id}) removed. They must re-verify to regain access.")
+    # Send summary
+    msg = f"✅ Removal Complete\n\n"
+    msg += f"Removed: {removed_count}\n"
+    if failed_count > 0:
+        msg += f"Failed: {failed_count}\n"
+    msg += f"Reason: {reason}"
+    
+    await update.message.reply_text(msg)
+    return ConversationHandler.END
+
+# Legacy remove student command for backward compatibility
+async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Legacy remove student command - redirects to enhanced version."""
+    return await remove_student_start(update, context)
 
 # Admin get submission /get_submission [submission_id]
 async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1139,6 +1398,19 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await telegram_app.bot.send_video(chat_id=ASSIGNMENTS_GROUP_ID, video=file_id, caption=f"From {username} - Module {module}")
         except Exception:
             logger.exception("Failed to forward submission to assignments group")
+    
+    # Check for achiever badge after submission
+    try:
+        async with db_lock:
+            cur = db_conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
+            wins_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
+            submitted_count = cur.fetchone()[0]
+        
+        await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
+    except Exception as e:
+        logger.exception(f"Failed to check badge after submission: {e}")
     
     await update.message.reply_text("Boom! Submission received!", reply_markup=get_main_menu_keyboard())
     return ConversationHandler.END
@@ -1421,6 +1693,19 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             logger.exception("Failed to forward win to support group")
     
+    # Check for achiever badge after sharing win
+    try:
+        async with db_lock:
+            cur = db_conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
+            wins_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
+            submitted_count = cur.fetchone()[0]
+        
+        await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
+    except Exception as e:
+        logger.exception(f"Failed to check badge after win: {e}")
+    
     await update.message.reply_text("Awesome win shared!", reply_markup=get_main_menu_keyboard())
     return ConversationHandler.END
 
@@ -1552,6 +1837,75 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # Check status
+async def check_and_award_achiever_badge(telegram_id: int, wins_count: int, submitted_count: int) -> bool:
+    """Check and award achiever badge if criteria met."""
+    try:
+        # Check if already has badge
+        async with db_lock:
+            cur = db_conn.cursor()
+            cur.execute("SELECT notified, systeme_tagged FROM student_badges WHERE telegram_id = ? AND badge_type = ?", 
+                       (telegram_id, "achiever"))
+            row = cur.fetchone()
+            
+            if row:
+                # Already has badge, check if we need to complete notifications/tagging
+                notified, systeme_tagged = row
+                if not notified:
+                    await notify_badge_earned(telegram_id, "achiever")
+                    cur.execute("UPDATE student_badges SET notified = TRUE WHERE telegram_id = ? AND badge_type = ?", 
+                               (telegram_id, "achiever"))
+                    db_conn.commit()
+                
+                if not systeme_tagged:
+                    await tag_achiever_in_systeme(telegram_id)
+                    cur.execute("UPDATE student_badges SET systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?", 
+                               (telegram_id, "achiever"))
+                    db_conn.commit()
+                
+                return True
+        
+        # Check if criteria met
+        if wins_count >= ACHIEVER_WINS and submitted_count >= ACHIEVER_MODULES:
+            # Award badge
+            async with db_lock:
+                cur = db_conn.cursor()
+                cur.execute("INSERT OR IGNORE INTO student_badges (telegram_id, badge_type) VALUES (?, ?)", 
+                           (telegram_id, "achiever"))
+                db_conn.commit()
+            
+            # Notify and tag
+            await notify_badge_earned(telegram_id, "achiever")
+            await tag_achiever_in_systeme(telegram_id)
+            
+            # Update tracking flags
+            async with db_lock:
+                cur = db_conn.cursor()
+                cur.execute("UPDATE student_badges SET notified = TRUE, systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?", 
+                           (telegram_id, "achiever"))
+                db_conn.commit()
+            
+            return True
+        
+        return False
+        
+    except Exception as e:
+        logger.exception(f"Failed to check/award achiever badge for {telegram_id}: {e}")
+        return False
+
+async def notify_badge_earned(telegram_id: int, badge_type: str):
+    """Notify student about earning a badge."""
+    try:
+        if badge_type == "achiever":
+            message = f"🏆 Congratulations! You've earned the AVAP Achiever Badge!\n\n"
+            message += f"You've shared {ACHIEVER_WINS} wins and submitted {ACHIEVER_MODULES} assignments.\n"
+            message += f"Keep up the great work! 🎉"
+        else:
+            message = f"🏆 Congratulations! You've earned the {badge_type} badge!"
+        
+        await telegram_app.bot.send_message(chat_id=telegram_id, text=message)
+    except Exception as e:
+        logger.exception(f"Failed to notify badge earned for {telegram_id}: {e}")
+
 async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         await update.message.reply_text("Please DM me to use this feature. Use /ask in group to ask a question to the support team.")
@@ -1569,8 +1923,13 @@ async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         subs = cur.fetchall()
         cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
         wins_count = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
+        submitted_count = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status = ?", (update.effective_user.id, "Graded"))
         graded_count = cur.fetchone()[0]
+    
+    # Check and award achiever badge
+    has_achiever_badge = await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
     
     # Format submissions with comments
     completed = []
@@ -1582,14 +1941,51 @@ async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     msg = f"📊 Your Status:\n\n"
     msg += f"Completed modules:\n{chr(10).join(completed) if completed else 'None'}\n\n"
-    msg += f"🎉 Wins shared: {wins_count}"
+    msg += f"🎉 Wins shared: {wins_count}\n"
+    msg += f"📝 Assignments submitted: {submitted_count}"
     
-    # Check for Achiever badge
-    if wins_count >= ACHIEVER_WINS and graded_count >= ACHIEVER_MODULES:
+    # Show achiever badge status
+    if has_achiever_badge:
         msg += "\n\n🏆 AVAP Achiever Badge earned!"
+    else:
+        remaining_wins = max(0, ACHIEVER_WINS - wins_count)
+        remaining_subs = max(0, ACHIEVER_MODULES - submitted_count)
+        if remaining_wins > 0 or remaining_subs > 0:
+            msg += f"\n\n🏆 Achiever Badge: {remaining_wins} wins and {remaining_subs} assignments to go!"
     
     await update.message.reply_text(msg, reply_markup=get_main_menu_keyboard())
     return
+
+async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all students who have earned the achiever badge."""
+    if not await is_admin(update.effective_user.id):
+        await update.message.reply_text("You are not authorized to perform this action.")
+        return
+    
+    async with db_lock:
+        cur = db_conn.cursor()
+        cur.execute("""
+            SELECT vu.name, vu.email, vu.telegram_id, sb.earned_at, 
+                   (SELECT COUNT(*) FROM wins WHERE telegram_id = vu.telegram_id) as wins_count,
+                   (SELECT COUNT(*) FROM submissions WHERE telegram_id = vu.telegram_id AND status IN ('Submitted', 'Graded')) as subs_count
+            FROM student_badges sb
+            JOIN verified_users vu ON sb.telegram_id = vu.telegram_id
+            WHERE sb.badge_type = 'achiever' AND vu.removed_at IS NULL
+            ORDER BY sb.earned_at DESC
+        """)
+        achievers = cur.fetchall()
+    
+    if not achievers:
+        await update.message.reply_text("No achievers found.")
+        return
+    
+    msg = f"🏆 AVAP Achievers ({len(achievers)} total)\n\n"
+    for name, email, tg_id, earned_at, wins, subs in achievers:
+        msg += f"• {name} ({email})\n"
+        msg += f"  Wins: {wins}, Submissions: {subs}\n"
+        msg += f"  Earned: {earned_at}\n\n"
+    
+    await update.message.reply_text(msg)
 
 # Join request handling
 async def chat_join_request_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1730,6 +2126,7 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
     app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
     app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
+    app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
@@ -1743,6 +2140,18 @@ def register_handlers(app_obj: Application):
         per_message=False,
     )
     app_obj.add_handler(verify_conv)
+    
+    # Remove student conversation
+    remove_conv = ConversationHandler(
+        entry_points=[CommandHandler("remove_student", remove_student_start)],
+        states={
+            REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm_callback, pattern="^(confirm_remove|cancel_remove|remove_specific_)")],
+            REMOVE_REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_reason)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(remove_conv)
 
     # Submission conversation
     submit_conv = ConversationHandler(
