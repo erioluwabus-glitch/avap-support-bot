@@ -243,6 +243,20 @@ def init_db():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )"""
     )
+
+    # ---- Lightweight schema migrations ----
+    # Some older code paths expect columns `content_type` and `content` on `submissions`.
+    # We'll add them safely if missing to prevent runtime errors.
+    try:
+        cur.execute("PRAGMA table_info(submissions)")
+        existing_columns = {row[1] for row in cur.fetchall()}
+        if "content_type" not in existing_columns:
+            cur.execute("ALTER TABLE submissions ADD COLUMN content_type TEXT NULL")
+        if "content" not in existing_columns:
+            cur.execute("ALTER TABLE submissions ADD COLUMN content TEXT NULL")
+        conn.commit()
+    except Exception:
+        logger.exception("Failed running submissions table migrations")
     
     # questions table
     cur.execute(
@@ -1159,6 +1173,36 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     
     await update.message.reply_text(msg)
     return ConversationHandler.END
+
+# Admin-only help command: lists all features and commands
+async def admin_help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id if update.effective_user else 0
+    if (ADMIN_IDS and user_id in ADMIN_IDS) or (await is_admin(user_id)):
+        help_text = (
+            "Admin Help - AVAP Bot\n\n"
+            "Core Commands:\n"
+            "- /start - Start menu (DM only)\n"
+            "- /status - Check student status (DM)\n\n"
+            "Admin Commands:\n"
+            "- /add_student - Add a student (flow)\n"
+            "- /remove_student <email|name> - Remove student (flow)\n"
+            "- /verify_student <email> - Manually verify student\n"
+            "- /get_submission <submission_id> - View submission\n"
+            "- /list_achievers - List badge earners\n"
+            "- /broadcast <message> - DM all verified users\n"
+            "- /add_tip <text> - Add Daily Tip\n"
+            "- /match - Join matching queue (student)\n"
+            "- /match_status - View/Manage matching queue (admin)\n\n"
+            "Student Commands:\n"
+            "- /ask [question] - Ask a question (group/DM)\n"
+            "- /setlang <code> - Set language (e.g., en, fr, es)\n\n"
+            "Notes:\n"
+            "- Assignment and Win flows use on-screen buttons in DM.\n"
+            "- Daily Tips auto-post 08:00 WAT.\n"
+        )
+        await update.message.reply_text(help_text)
+    else:
+        await update.message.reply_text("This command is for admins only.")
 
 # Legacy remove student command for backward compatibility
 async def remove_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2130,6 +2174,7 @@ def register_handlers(app_obj: Application):
     # Basic handlers
     app_obj.add_handler(CommandHandler("start", start_handler))
     app_obj.add_handler(CommandHandler("cancel", cancel_handler))
+    app_obj.add_handler(CommandHandler("help", admin_help_handler))
     
     # Admin handlers
     add_student_conv = ConversationHandler(
