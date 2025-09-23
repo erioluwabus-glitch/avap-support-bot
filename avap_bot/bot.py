@@ -1258,42 +1258,42 @@ async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     arg0 = context.args[0]
     lookup_by_username = arg0.startswith("@") and len(context.args) >= 2
     
-        if lookup_by_username:
-            username = arg0.lstrip("@")
-            module_token = context.args[1]
-            module_num = None
-            if module_token.lower().startswith("m") and module_token[1:].isdigit():
-                module_num = int(module_token[1:])
-            elif module_token.isdigit():
-                module_num = int(module_token)
-            if not module_num:
-                await update.message.reply_text("Invalid module. Use M1/M2/M3 or a number.")
-                return
+    if lookup_by_username:
+        username = arg0.lstrip("@")
+        module_token = context.args[1]
+        module_num = None
+        if module_token.lower().startswith("m") and module_token[1:].isdigit():
+            module_num = int(module_token[1:])
+        elif module_token.isdigit():
+            module_num = int(module_token)
+        if not module_num:
+            await update.message.reply_text("Invalid module. Use M1/M2/M3 or a number.")
+            return
         row = await db_fetchone(
-                "SELECT submission_id, module, media_type, media_file_id, score, comment, created_at, telegram_id FROM submissions WHERE username = ? AND module = ? ORDER BY created_at DESC LIMIT 1",
+            "SELECT submission_id, module, media_type, media_file_id, score, comment, created_at, telegram_id FROM submissions WHERE username = ? AND module = ? ORDER BY created_at DESC LIMIT 1",
             (username, module_num)
-            )
-            if not row:
-                await update.message.reply_text(f"No submission found for @{username} module {module_num}.")
-                return
-            sub_id, module, media_type, media_file_id, score, comment, created_at, telegram_id = row
-        else:
-            sub_id = arg0
+        )
+        if not row:
+            await update.message.reply_text(f"No submission found for @{username} module {module_num}.")
+            return
+        sub_id, module, media_type, media_file_id, score, comment, created_at, telegram_id = row
+    else:
+        sub_id = arg0
         row = await db_fetchone(
-                "SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?",
+            "SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?",
             (sub_id,)
-            )
-            if not row:
-                await update.message.reply_text(f"No submission found with ID {sub_id}.")
-                return
-            module, content_type, content, score, comment, created_at, telegram_id = row
-            media_type = content_type or "text"
-            media_file_id = content or ""
-        
-        # Get student info
+        )
+        if not row:
+            await update.message.reply_text(f"No submission found with ID {sub_id}.")
+            return
+        module, content_type, content, score, comment, created_at, telegram_id = row
+        media_type = content_type or "text"
+        media_file_id = content or ""
+    
+    # Get student info
     student_info = await db_fetchone("SELECT name, email FROM verified_users WHERE telegram_id = ?", (telegram_id,))
-        student_name = student_info[0] if student_info else "Unknown"
-        student_email = student_info[1] if student_info else "Unknown"
+    student_name = student_info[0] if student_info else "Unknown"
+    student_email = student_info[1] if student_info else "Unknown"
     
     # Format submission info
     msg = f"📋 Submission Details:\n"
@@ -1351,23 +1351,23 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?",
         (h,)
     )
-        if not row:
-            await update.message.reply_text("Details not found. Contact an admin or try again.")
-            # Offer Verify Now
-            verify_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
-            await update.message.reply_text("Try again or contact admin.", reply_markup=verify_btn)
-            return ConversationHandler.END
-        
-        # Match found -> mark verified
-        pending_id = row[0]
-        await db_execute(
-            "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, telegram_id = EXCLUDED.telegram_id, status = EXCLUDED.status",
-            (name, email, phone, update.effective_user.id, "Verified", datetime.utcnow().isoformat())
-        )
-        await db_execute(
-            "UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?",
-            (update.effective_user.id, "Verified", pending_id)
-        )
+    if not row:
+        await update.message.reply_text("Details not found. Contact an admin or try again.")
+        # Offer Verify Now
+        verify_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
+        await update.message.reply_text("Try again or contact admin.", reply_markup=verify_btn)
+        return ConversationHandler.END
+    
+    # Match found -> mark verified
+    pending_id = row[0]
+    await db_execute(
+        "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, telegram_id = EXCLUDED.telegram_id, status = EXCLUDED.status",
+        (name, email, phone, update.effective_user.id, "Verified", datetime.utcnow().isoformat())
+    )
+    await db_execute(
+        "UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?",
+        (update.effective_user.id, "Verified", pending_id)
+    )
     
     # Update Google Sheets via unified helper
     try:
@@ -1934,12 +1934,12 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Get question info
     row = await db_fetchone("SELECT telegram_id, question FROM questions WHERE question_id = ?", (qid,))
-        if not row:
-            await update.message.reply_text("Question not found.")
-            return ConversationHandler.END
-        student_tg, question_text = row
-        # Save answer as text for simplicity
-        ans = update.message.text or "[non-text answer]"
+    if not row:
+        await update.message.reply_text("Question not found.")
+        return ConversationHandler.END
+    student_tg, question_text = row
+    # Save answer as text for simplicity
+    ans = update.message.text or "[non-text answer]"
     await db_execute(
         "UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?",
         (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid)
