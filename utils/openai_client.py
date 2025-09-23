@@ -6,7 +6,6 @@ import os
 import logging
 import tempfile
 from typing import Optional
-import openai
 from openai import OpenAI
 
 logger = logging.getLogger(__name__)
@@ -71,18 +70,25 @@ async def suggest_answer(question: str) -> Optional[str]:
 
 async def transcribe_audio(file_path: str) -> Optional[str]:
     """
-    Transcribe audio file using OpenAI Whisper API.
-    
-    Args:
-        file_path: Path to the audio file
-    
-    Returns:
-        Transcribed text or None if transcription fails
+    Transcribe audio using faster-whisper (offline) if available; fallback to OpenAI Whisper.
     """
+    # Try faster-whisper first
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+        model_size = os.getenv("FASTER_WHISPER_MODEL", "medium")
+        compute_type = os.getenv("FASTER_WHISPER_COMPUTE", "int8")
+        model = WhisperModel(model_size, device="cpu", compute_type=compute_type)
+        segments, _ = model.transcribe(file_path, beam_size=5)
+        text = " ".join([s.text for s in segments]).strip()
+        if text:
+            return text
+    except Exception:
+        # Fall back to OpenAI if local model not available
+        pass
+
     openai_client = get_client()
     if not openai_client:
         return None
-    
     try:
         with open(file_path, "rb") as audio_file:
             transcript = openai_client.audio.transcriptions.create(
@@ -91,12 +97,8 @@ async def transcribe_audio(file_path: str) -> Optional[str]:
                 response_format="text"
             )
         text = transcript.strip() if isinstance(transcript, str) else str(transcript)
-        if not text:
-            logger.warning("Whisper returned empty transcription")
-            return None
-        return text
+        return text if text else None
     except Exception as e:
-        # Graceful handling for rate limits/insufficient_quota (429)
         if "insufficient_quota" in str(e) or "429" in str(e):
             logger.error(f"OpenAI quota/rate limit error during transcription: {e}")
             return None

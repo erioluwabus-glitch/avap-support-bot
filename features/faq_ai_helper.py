@@ -9,6 +9,7 @@ from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, Application
 from utils.db_access import add_question, mark_question_answered, get_unanswered_questions, find_similar_faq, add_faq_history
+from utils.faq_semantic import semantic_find, add_to_index
 from utils.openai_client import suggest_answer
 from utils.translator import translate
 
@@ -34,14 +35,18 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username or user.full_name or "Unknown"
     telegram_id = user.id
     
-    # Before storing, try immediate reuse from history
+    # Before storing, try immediate reuse from history or semantic index
     try:
-        from utils.db_access import find_similar_faq
+        answer = None
+        # Semantic match (if available)
+        answer = semantic_find(question_text) or answer
+        # Fallback to difflib-based match from DB
         similar = await find_similar_faq(question_text)
-        if similar:
+        if not answer and similar:
             answer = similar.get("answer")
+        if answer:
             await update.message.reply_text(f"🤖 This looks similar to a previous question. Here's an answer that might help:\n\n{answer}")
-            # Still proceed to store and forward so admins can refine
+        # Still proceed to store and forward so admins can refine
     except Exception:
         pass
 
@@ -109,13 +114,18 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Failed to mark question as answered.")
         return
     
-    # Archive in FAQ history for future reuse
+    # Archive in FAQ history for future reuse and update semantic index
     try:
         # We don't have the original question text here; reuse the message replied to if available
         original_question = None
         if update.message and update.message.reply_to_message:
             original_question = update.message.reply_to_message.text
-        await add_faq_history(original_question or "", answer_text)
+        q_text = original_question or ""
+        await add_faq_history(q_text, answer_text)
+        try:
+            add_to_index(q_text, answer_text)
+        except Exception:
+            pass
     except Exception:
         logger.exception("Failed to archive FAQ history")
 
