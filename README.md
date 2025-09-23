@@ -1,3 +1,19 @@
+## Deployment
+- Create free PostgreSQL on Render and set `DATABASE_URL`.
+- Use external free cron (e.g., cron-job.org) to ping `/health` every 10 min (`*/10 * * * *`).
+- Optional: Set up DB backup with Discord/Google Drive webhook; use `/backup` command.
+- Troubleshoot: Check logs for "Webhook set", DB errors, or external cron failures.
+
+## Backups
+- Use `/backup` in Telegram as admin to trigger manual backup.
+- For automated backups, set external cron to GET `https://yourbot.onrender.com/trigger_backup` daily (e.g., `0 0 * * *`).
+- Configure `GOOGLE_DRIVE_CREDENTIALS_JSON` (base64-encoded service account JSON) or `DISCORD_WEBHOOK_URL` in env vars.
+- To set up Google Drive:
+  1. Go to `console.cloud.google.com`, create project
+  2. Enable Drive API
+  3. Create service account, download JSON key
+  4. Base64 encode JSON and set as env var
+  5. Share a Drive folder with the service account email
 # AVAP Support Telegram Bot
 
 This is a comprehensive Telegram bot for AVAP, designed to manage student interactions, submissions, and administrative tasks. The bot is built with `python-telegram-bot`, `FastAPI`, and `SQLite`. It supports webhook-based deployment for production (e.g., on Render) and polling for local development.

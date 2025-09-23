@@ -36,6 +36,7 @@ from fastapi.responses import JSONResponse, Response
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from sqlalchemy import text
 
 from telegram import (
     Update,
@@ -70,6 +71,15 @@ from features import (
 from utils.db_access import get_user_language
 from utils.translator import translate
 from utils.db_async import init_async_db, close_async_db
+# Backup dependencies
+import base64
+from io import BytesIO
+try:
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseUpload
+except Exception:
+    build = None
+    MediaIoBaseUpload = None
 
 # Optional Google Sheets
 try:
@@ -2418,6 +2428,81 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
     app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
+    app_obj.add_handler(CommandHandler("backup", admin_backup))
+# Admin: /backup → JSON dump to Discord webhook or Google Drive (service account)
+async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update or not update.effective_user:
+        return
+    if not ADMIN_USER_ID or int(update.effective_user.id) != int(ADMIN_USER_ID):
+        if update.message:
+            await update.message.reply_text("You are not authorized to run backups.")
+        return
+    try:
+        # Query verifications table (adapt to your schema)
+        from utils.db_access import get_db
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM verified_users")
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
+        data = [dict(zip(cols, r)) for r in rows]
+        backup_str = json.dumps(data, default=str)
+        logger.info({"event": "backup_started", "rows": len(data)})
+
+        discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
+        drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
+
+        if discord_webhook:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    truncated = backup_str[:2000]
+                    resp = await session.post(discord_webhook, json={"content": f"Backup (JSON): {truncated}..."})
+                    if resp.status in (200, 201, 204):
+                        await update.message.reply_text("Backup sent to Discord!")
+                    else:
+                        await update.message.reply_text(f"Discord upload failed: {resp.status}")
+            except Exception as e:
+                logger.exception(f"Discord upload failed: {e}")
+                await update.message.reply_text("Discord upload failed.")
+            return
+
+        if drive_creds_b64:
+            if not build or not MediaIoBaseUpload:
+                await update.message.reply_text("Google Drive client not available on server.")
+                return
+            try:
+                creds_json = base64.b64decode(drive_creds_b64).decode('utf-8')
+                creds_dict = json.loads(creds_json)
+                creds = Credentials.from_service_account_info(
+                    creds_dict,
+                    scopes=['https://www.googleapis.com/auth/drive']
+                )
+                service = build('drive', 'v3', credentials=creds)
+                file_metadata = {
+                    'name': f'verifications_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+                }
+                media = MediaIoBaseUpload(BytesIO(backup_str.encode('utf-8')), mimetype='application/json')
+                file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+                file_id = file.get('id')
+                logger.info({"event": "drive_upload_success", "file_id": file_id})
+                await update.message.reply_text(f"Backup uploaded to Google Drive: https://drive.google.com/file/d/{file_id}")
+                return
+            except json.JSONDecodeError as e:
+                logger.error({"event": "drive_creds_error", "message": f"Invalid JSON in GOOGLE_DRIVE_CREDENTIALS_JSON: {e}"})
+                await update.message.reply_text("Invalid Google credentials JSON.")
+                return
+            except Exception as e:
+                logger.error({"event": "drive_upload_error", "message": str(e)})
+                await update.message.reply_text(f"Google Drive upload failed: {str(e)}")
+                return
+
+        # Fallback: show truncated JSON in chat
+        await update.message.reply_text(f"Backup data (JSON): {backup_str[:2000]}... (Set Discord or Drive envs for full upload)")
+    except Exception as e:
+        logger.exception(f"Backup failed: {e}")
+        if update.message:
+            await update.message.reply_text("Unexpected error during backup.")
+
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
@@ -2624,6 +2709,38 @@ async def on_shutdown():
             await telegram_app.shutdown()
         except Exception as e:
             logger.exception("Error shutting down Telegram application: %s", e)
+
+@app.get("/trigger_backup")
+async def trigger_backup():
+    try:
+        from utils.db_access import get_db
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM verified_users")
+        cols = [c[0] for c in cur.description]
+        rows = cur.fetchall()
+        data = [dict(zip(cols, r)) for r in rows]
+        backup_str = json.dumps(data, default=str)
+        logger.info({"event": "triggered_backup", "rows": len(data)})
+
+        discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
+        drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
+
+        if discord_webhook:
+            async with aiohttp.ClientSession() as session:
+                await session.post(discord_webhook, json={"content": f"Automated Backup (JSON): {backup_str[:2000]}..."})
+        elif drive_creds_b64 and build and MediaIoBaseUpload:
+            creds_json = base64.b64decode(drive_creds_b64).decode('utf-8')
+            creds_dict = json.loads(creds_json)
+            creds = Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
+            service = build('drive', 'v3', credentials=creds)
+            file_metadata = {'name': f'auto_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'}
+            media = MediaIoBaseUpload(BytesIO(backup_str.encode('utf-8')), mimetype='application/json')
+            service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        return {"status": "backup_complete"}
+    except Exception as e:
+        logger.error({"event": "triggered_backup_error", "message": str(e)})
+        return {"status": "backup_failed"}
 
     # Close async DB
     try:
