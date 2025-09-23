@@ -27,4 +27,4 @@ COPY . .
 EXPOSE 10000
 
 # Start the FastAPI webhook app
-CMD ["uvicorn", "bot:app", "--host", "0.0.0.0", "--port", "10000"]
+CMD ["uvicorn", "avap_bot.bot:app", "--host", "0.0.0.0", "--port", "10000"]
