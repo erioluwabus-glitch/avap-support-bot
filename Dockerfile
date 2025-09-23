@@ -4,8 +4,8 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# System deps: FFmpeg + development headers for PyAV (faster-whisper dependency)
-# Add PostgreSQL dev libs and gcc for psycopg2-binary build fallback
+# System deps: FFmpeg + development headers for PyAV (av) and faster-whisper
+# Add PostgreSQL dev libs for asyncpg/psycopg2-binary build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libavcodec-dev \
