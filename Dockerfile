@@ -1,17 +1,31 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 # Prevent Python from writing .pyc files and enable unbuffered logs
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# System deps: PostgreSQL dev libs for asyncpg/psycopg2-binary
-# Note: FFmpeg deps removed since av/faster-whisper are not used (OpenAI handles voice)
+# Install FFmpeg 5.x (compatible with av 10.0.0) + dev headers
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    && add-apt-repository ppa:savoury1/ffmpeg5 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    ffmpeg=7:5.1.3-0ubuntu1~ppa1~22.04 \
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
     build-essential \
     pkg-config \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
+
+# Help pkg-config locate FFmpeg .pc files
+ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 
 WORKDIR /app
 
