@@ -70,22 +70,8 @@ async def suggest_answer(question: str) -> Optional[str]:
 
 async def transcribe_audio(file_path: str) -> Optional[str]:
     """
-    Transcribe audio using faster-whisper (offline) if available; fallback to OpenAI Whisper.
+    Transcribe audio using OpenAI Whisper API.
     """
-    # Try faster-whisper first
-    try:
-        from faster_whisper import WhisperModel  # type: ignore
-        model_size = os.getenv("FASTER_WHISPER_MODEL", "medium")
-        compute_type = os.getenv("FASTER_WHISPER_COMPUTE", "int8")
-        model = WhisperModel(model_size, device="cpu", compute_type=compute_type)
-        segments, _ = model.transcribe(file_path, beam_size=5)
-        text = " ".join([s.text for s in segments]).strip()
-        if text:
-            return text
-    except Exception:
-        # Fall back to OpenAI if local model not available
-        pass
-
     openai_client = get_client()
     if not openai_client:
         return None

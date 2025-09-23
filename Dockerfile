@@ -4,26 +4,14 @@ FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# System deps: FFmpeg + development headers for PyAV (av) and faster-whisper
+# System deps: PostgreSQL dev libs for asyncpg/psycopg2-binary
+# Note: FFmpeg deps removed since av/faster-whisper are not used (OpenAI handles voice)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    libavcodec-dev \
-    libavformat-dev \
-    libavdevice-dev \
-    libavutil-dev \
-    libavfilter-dev \
-    libavfilter-extra \
-    libavcodec-extra \
-    libswscale-dev \
-    libswresample-dev \
     build-essential \
     pkg-config \
     libpq-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
-
-# Help pkg-config locate FFmpeg .pc files
-ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
 
 WORKDIR /app
 
