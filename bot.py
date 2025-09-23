@@ -23,7 +23,7 @@ import json
 import uuid
 import logging
 import hashlib
-import sqlite3
+# Removed sqlite3; PostgreSQL async helpers are used via utils.db_async
 import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
@@ -70,7 +70,7 @@ from features import (
 # Translation utilities
 from utils.db_access import get_user_language
 from utils.translator import translate
-from utils.db_async import init_async_db, close_async_db
+from utils.db_async import init_async_db, close_async_db, db_execute, db_fetchone, db_fetchall
 # Backup dependencies
 import base64
 from io import BytesIO
@@ -108,7 +108,7 @@ SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0")) if os.getenv("SUPPORT
 ASSIGNMENTS_GROUP_ID = int(os.getenv("ASSIGNMENTS_GROUP_ID", "0")) if os.getenv("ASSIGNMENTS_GROUP_ID") else None
 QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0")) if os.getenv("QUESTIONS_GROUP_ID") else None
 VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0")) if os.getenv("VERIFICATION_GROUP_ID") else None
-DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
+# Removed DB_PATH; using DATABASE_URL via utils.db_async
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
 ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
@@ -208,147 +208,7 @@ scheduler = AsyncIOScheduler(timezone=TIMEZONE)
 gs_client = None
 gs_sheet = None
 
-# Initialize or connect DB
-def init_db():
-    # Ensure persistent directory exists (Render persistent disk mounts at /data)
-    try:
-        db_dir = os.path.dirname(DB_PATH) or "."
-        os.makedirs(db_dir, exist_ok=True)
-    except Exception:
-        pass
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    cur = conn.cursor()
-    
-    # pending_verifications table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS pending_verifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            telegram_id INTEGER DEFAULT 0,
-            status TEXT NOT NULL,
-            hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-    
-    # verified_users table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS verified_users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL,
-            phone TEXT NOT NULL,
-            telegram_id INTEGER UNIQUE NOT NULL,
-            status TEXT NOT NULL,
-            systeme_contact_id TEXT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-    
-    # submissions table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS submissions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            submission_id TEXT UNIQUE NOT NULL,
-            username TEXT,
-            telegram_id INTEGER,
-            module INTEGER,
-            status TEXT,
-            media_file_id TEXT,
-            media_type TEXT,
-            score INTEGER NULL,
-            grader_id INTEGER NULL,
-            comment TEXT NULL,
-            comment_type TEXT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            graded_at DATETIME NULL
-        )"""
-    )
-    
-    # wins table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS wins (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            win_id TEXT UNIQUE NOT NULL,
-            username TEXT,
-            telegram_id INTEGER,
-            content_type TEXT,
-            content TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-
-    # ---- Lightweight schema migrations ----
-    # Some older code paths expect columns `content_type` and `content` on `submissions`.
-    # We'll add them safely if missing to prevent runtime errors.
-    try:
-        cur.execute("PRAGMA table_info(submissions)")
-        existing_columns = {row[1] for row in cur.fetchall()}
-        if "content_type" not in existing_columns:
-            cur.execute("ALTER TABLE submissions ADD COLUMN content_type TEXT NULL")
-        if "content" not in existing_columns:
-            cur.execute("ALTER TABLE submissions ADD COLUMN content TEXT NULL")
-        conn.commit()
-    except Exception:
-        logger.exception("Failed running submissions table migrations")
-    
-    # questions table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS questions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            question_id TEXT UNIQUE NOT NULL,
-            username TEXT,
-            telegram_id INTEGER,
-            question TEXT,
-            status TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            answer TEXT NULL,
-            answered_by INTEGER NULL,
-            answered_at DATETIME NULL
-        )"""
-    )
-    
-    # Add language & removed_at columns to verified_users if missing
-    try:
-        cur.execute("ALTER TABLE verified_users ADD COLUMN language TEXT DEFAULT 'en'")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cur.execute("ALTER TABLE verified_users ADD COLUMN removed_at DATETIME NULL")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-    
-    # removals log table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS removals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER NOT NULL,
-            admin_id INTEGER NOT NULL,
-            reason TEXT,
-            removed_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )"""
-    )
-    
-    # student badges table
-    cur.execute(
-        """CREATE TABLE IF NOT EXISTS student_badges (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_id INTEGER NOT NULL,
-            badge_type TEXT NOT NULL,
-            earned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            notified BOOLEAN DEFAULT FALSE,
-            systeme_tagged BOOLEAN DEFAULT FALSE,
-            UNIQUE(telegram_id, badge_type)
-        )"""
-    )
-    
-    conn.commit()
-    return conn
-
-db_conn = init_db()
-db_lock = asyncio.Lock()  # guard sqlite usage from async handlers
+# Removed SQLite; using PostgreSQL via utils.db_async helpers
 
 # Google Sheets helper (optional)
 def init_gsheets():
@@ -673,10 +533,10 @@ async def tag_achiever_in_systeme(telegram_id: int) -> bool:
     
     try:
         # Get contact ID from verified_users
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (telegram_id,))
-            row = cur.fetchone()
+        row = await db_fetchone(
+            "SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
+            (telegram_id,)
+        )
             if not row or not row[0]:
                 logger.warning(f"No Systeme.io contact ID found for telegram_id {telegram_id}")
                 return False
@@ -731,10 +591,10 @@ async def is_admin(user_id: int) -> bool:
 from utils.user_utils import user_verified_by_telegram_id
 
 async def find_pending_by_hash(h: str):
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?", (h,))
-        return cur.fetchone()
+    return await db_fetchone(
+        "SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?",
+        (h,)
+    )
 
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
@@ -781,20 +641,20 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             return
         
         # Save to database
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?", 
-                       (int(score), "Graded", datetime.utcnow().isoformat(), uuid))
-            
-            if comment:
-                cur.execute("UPDATE submissions SET comment = ?, comment_type = ? WHERE submission_id = ?", 
-                           (comment, comment_type, uuid))
-            
-            db_conn.commit()
-            
-            # Get student info
-            cur.execute("SELECT telegram_id, username FROM submissions WHERE submission_id = ?", (uuid,))
-            row = cur.fetchone()
+        await db_execute(
+            "UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?",
+            (int(score), "Graded", datetime.utcnow().isoformat(), uuid)
+        )
+        if comment:
+            await db_execute(
+                "UPDATE submissions SET comment = ?, comment_type = ? WHERE submission_id = ?",
+                (comment, comment_type, uuid)
+            )
+        # Get student info
+        row = await db_fetchone(
+            "SELECT telegram_id, username FROM submissions WHERE submission_id = ?",
+            (uuid,)
+        )
         
         if row:
             student_tg, username = row
@@ -1044,17 +904,14 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = make_hash(name, email, phone)
     created_at = datetime.utcnow().isoformat()
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        try:
-            cur.execute(
-                "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (name, email, phone, "Pending", h, created_at),
-            )
-            db_conn.commit()
-        except sqlite3.IntegrityError:
-            await update.message.reply_text("A pending student with this email already exists.")
-            return ConversationHandler.END
+    try:
+        await db_execute(
+            "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, email, phone, "Pending", h, created_at),
+        )
+    except Exception:
+        await update.message.reply_text("A pending student with this email already exists.")
+        return ConversationHandler.END
     
     # Also append to Google Sheets if configured via unified helper
     try:
@@ -1085,21 +942,25 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await reply_translated(update, "Invalid email.")
         return
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT name, phone, hash FROM pending_verifications WHERE email = ? AND status = ?", (email, "Pending"))
-        row = cur.fetchone()
-        if not row:
-            await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
-            return
-        
-        name, phone, h = row
-        # Mark verified
-        verified_at = datetime.utcnow().isoformat()
-        cur.execute("INSERT OR REPLACE INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, email, phone, 0, "Verified", verified_at))
-        cur.execute("UPDATE pending_verifications SET status = ? WHERE email = ?", ("Verified", email))
-        db_conn.commit()
+    row = await db_fetchone(
+        "SELECT name, phone, hash FROM pending_verifications WHERE email = ? AND status = ?",
+        (email, "Pending")
+    )
+    if not row:
+        await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
+        return
+    
+    name, phone, h = row
+    # Mark verified
+    verified_at = datetime.utcnow().isoformat()
+    await db_execute(
+        "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, status = EXCLUDED.status",
+        (name, email, phone, 0, "Verified", verified_at)
+    )
+    await db_execute(
+        "UPDATE pending_verifications SET status = ? WHERE email = ?",
+        ("Verified", email)
+    )
     
     # Update Google Sheets via unified helper
     try:
@@ -1141,10 +1002,10 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
 
             # Update the verified_users table with systeme contact ID
-            async with db_lock:
-                cur = db_conn.cursor()
-                cur.execute("UPDATE verified_users SET systeme_contact_id = ? WHERE email = ?", (contact_id, email))
-                db_conn.commit()
+            await db_execute(
+                "UPDATE verified_users SET systeme_contact_id = ? WHERE email = ?",
+                (contact_id, email)
+            )
         else:
             raise ValueError("Contact creation failed")
 
@@ -1158,32 +1019,36 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, name, or telegram ID with partial matching."""
     identifier = (identifier or "").strip()
-    async with db_lock:
-        cur = db_conn.cursor()
-        # Email exact (case-insensitive)
-        if "@" in identifier:
-            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(email) = LOWER(?) AND removed_at IS NULL", (identifier,))
-            row = cur.fetchone()
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        # Telegram ID
-        try:
-            t_id = int(identifier)
-            cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL", (t_id,))
-            row = cur.fetchone()
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        except ValueError:
-            pass
-        # Partial name (case-insensitive)
-        cur.execute("SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL", (f"%{identifier.lower()}%",))
-        rows = cur.fetchall()
-        if len(rows) == 1:
-            row = rows[0]
+    # Email exact (case-insensitive)
+    if "@" in identifier:
+        row = await db_fetchone(
+            "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(email) = LOWER(?) AND removed_at IS NULL",
+            (identifier,)
+        )
+        if row:
             return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        elif len(rows) > 1:
-            return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
-        return None
+    # Telegram ID
+    try:
+        t_id = int(identifier)
+        row = await db_fetchone(
+            "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
+            (t_id,)
+        )
+        if row:
+            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    except ValueError:
+        pass
+    # Partial name (case-insensitive)
+    rows = await db_fetchall(
+        "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL",
+        (f"%{identifier.lower()}%",)
+    )
+    if len(rows) == 1:
+        row = rows[0]
+        return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    elif len(rows) > 1:
+        return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+    return None
 
 async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Enhanced remove student command with batch support and confirmation."""
@@ -1291,15 +1156,18 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     for student in students_to_remove:
         try:
             # Soft delete in database
-            async with db_lock:
-                cur = db_conn.cursor()
-                cur.execute("UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?", 
-                           (datetime.utcnow().isoformat(), student['telegram_id']))
-                cur.execute("UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?", 
-                           ("Removed", 0, student['email']))
-                cur.execute("INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
-                           (student['telegram_id'], update.effective_user.id, reason))
-                db_conn.commit()
+            await db_execute(
+                "UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?",
+                (datetime.utcnow().isoformat(), student['telegram_id'])
+            )
+            await db_execute(
+                "UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?",
+                ("Removed", 0, student['email'])
+            )
+            await db_execute(
+                "INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
+                (student['telegram_id'], update.effective_user.id, reason)
+            )
             
             # Update Google Sheets
             try:
@@ -1390,47 +1258,42 @@ async def get_submission_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     arg0 = context.args[0]
     lookup_by_username = arg0.startswith("@") and len(context.args) >= 2
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        if lookup_by_username:
-            username = arg0.lstrip("@")
-            module_token = context.args[1]
-            module_num = None
-            if module_token.lower().startswith("m") and module_token[1:].isdigit():
-                module_num = int(module_token[1:])
-            elif module_token.isdigit():
-                module_num = int(module_token)
-            if not module_num:
-                await update.message.reply_text("Invalid module. Use M1/M2/M3 or a number.")
-                return
-            cur.execute(
-                "SELECT submission_id, module, media_type, media_file_id, score, comment, created_at, telegram_id FROM submissions WHERE username = ? AND module = ? ORDER BY created_at DESC LIMIT 1",
-                (username, module_num),
-            )
-            row = cur.fetchone()
-            if not row:
-                await update.message.reply_text(f"No submission found for @{username} module {module_num}.")
-                return
-            sub_id, module, media_type, media_file_id, score, comment, created_at, telegram_id = row
-        else:
-            sub_id = arg0
-            cur.execute(
-                "SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?",
-                (sub_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                await update.message.reply_text(f"No submission found with ID {sub_id}.")
-                return
-            module, content_type, content, score, comment, created_at, telegram_id = row
-            media_type = content_type or "text"
-            media_file_id = content or ""
-        
-        # Get student info
-        cur.execute("SELECT name, email FROM verified_users WHERE telegram_id = ?", (telegram_id,))
-        student_info = cur.fetchone()
-        student_name = student_info[0] if student_info else "Unknown"
-        student_email = student_info[1] if student_info else "Unknown"
+    if lookup_by_username:
+        username = arg0.lstrip("@")
+        module_token = context.args[1]
+        module_num = None
+        if module_token.lower().startswith("m") and module_token[1:].isdigit():
+            module_num = int(module_token[1:])
+        elif module_token.isdigit():
+            module_num = int(module_token)
+        if not module_num:
+            await update.message.reply_text("Invalid module. Use M1/M2/M3 or a number.")
+            return
+        row = await db_fetchone(
+            "SELECT submission_id, module, media_type, media_file_id, score, comment, created_at, telegram_id FROM submissions WHERE username = ? AND module = ? ORDER BY created_at DESC LIMIT 1",
+            (username, module_num)
+        )
+        if not row:
+            await update.message.reply_text(f"No submission found for @{username} module {module_num}.")
+            return
+        sub_id, module, media_type, media_file_id, score, comment, created_at, telegram_id = row
+    else:
+        sub_id = arg0
+        row = await db_fetchone(
+            "SELECT module, content_type, content, score, comment, created_at, telegram_id FROM submissions WHERE submission_id = ?",
+            (sub_id,)
+        )
+        if not row:
+            await update.message.reply_text(f"No submission found with ID {sub_id}.")
+            return
+        module, content_type, content, score, comment, created_at, telegram_id = row
+        media_type = content_type or "text"
+        media_file_id = content or ""
+    
+    # Get student info
+    student_info = await db_fetchone("SELECT name, email FROM verified_users WHERE telegram_id = ?", (telegram_id,))
+    student_name = student_info[0] if student_info else "Unknown"
+    student_email = student_info[1] if student_info else "Unknown"
     
     # Format submission info
     msg = f"📋 Submission Details:\n"
@@ -1484,10 +1347,10 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = context.user_data.get('verify_phone')
     h = make_hash(name, email, phone)
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?", (h,))
-        row = cur.fetchone()
+    row = await db_fetchone(
+        "SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?",
+        (h,)
+    )
         if not row:
             await update.message.reply_text("Details not found. Contact an admin or try again.")
             # Offer Verify Now
@@ -1497,10 +1360,14 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Match found -> mark verified
         pending_id = row[0]
-        cur.execute("INSERT OR REPLACE INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (name, email, phone, update.effective_user.id, "Verified", datetime.utcnow().isoformat()))
-        cur.execute("UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?", (update.effective_user.id, "Verified", pending_id))
-        db_conn.commit()
+        await db_execute(
+            "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, telegram_id = EXCLUDED.telegram_id, status = EXCLUDED.status",
+            (name, email, phone, update.effective_user.id, "Verified", datetime.utcnow().isoformat())
+        )
+        await db_execute(
+            "UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?",
+            (update.effective_user.id, "Verified", pending_id)
+        )
     
     # Update Google Sheets via unified helper
     try:
@@ -1542,11 +1409,10 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
 
             # Update DB with contact ID
-            async with db_lock:
-                cur = db_conn.cursor()
-                cur.execute("UPDATE verified_users SET systeme_contact_id = ? WHERE telegram_id = ?", 
-                           (contact_id, update.effective_user.id))
-                db_conn.commit()
+            await db_execute(
+                "UPDATE verified_users SET systeme_contact_id = ? WHERE telegram_id = ?",
+                (contact_id, update.effective_user.id)
+            )
         else:
             raise ValueError("Contact creation failed")
 
@@ -1635,12 +1501,11 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     username = update.effective_user.username or update.effective_user.full_name
     timestamp = datetime.utcnow().isoformat()
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("""INSERT INTO submissions (submission_id, username, telegram_id, module, status, media_type, media_file_id, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp))
-        db_conn.commit()
+    await db_execute(
+        """INSERT INTO submissions (submission_id, username, telegram_id, module, status, media_type, media_file_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp)
+    )
     # Sheets: log submission via unified helper
     try:
         await sync_to_sheets(
@@ -1667,13 +1532,8 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Check for achiever badge after submission
     try:
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
-            wins_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
-            submitted_count = cur.fetchone()[0]
-        
+        wins_count = (await db_fetchone("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,)))[0]
+        submitted_count = (await db_fetchone("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,)))[0]
         await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
     except Exception as e:
         logger.exception(f"Failed to check badge after submission: {e}")
@@ -1947,11 +1807,10 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     win_id = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp))
-        db_conn.commit()
+    await db_execute(
+        "INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp)
+    )
     # Sheets: log win via unified helper
     try:
         await sync_to_sheets(
@@ -1977,13 +1836,8 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check for achiever badge after sharing win
     try:
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
-            wins_count = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
-            submitted_count = cur.fetchone()[0]
-        
+        wins_count = (await db_fetchone("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,)))[0]
+        submitted_count = (await db_fetchone("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,)))[0]
         await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
     except Exception as e:
         logger.exception(f"Failed to check badge after win: {e}")
@@ -2040,11 +1894,10 @@ async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     qid = str(uuid.uuid4())
     timestamp = datetime.utcnow().isoformat()
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (qid, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, question_text, "Open", timestamp))
-        db_conn.commit()
+    await db_execute(
+        "INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (qid, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, question_text, "Open", timestamp)
+    )
     
     # Forward to questions group with Answer button
     if QUESTIONS_GROUP_ID:
@@ -2081,19 +1934,17 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     
     # Get question info
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT telegram_id, question FROM questions WHERE question_id = ?", (qid,))
-        row = cur.fetchone()
-        if not row:
-            await update.message.reply_text("Question not found.")
-            return ConversationHandler.END
-        student_tg, question_text = row
-        # Save answer as text for simplicity
-        ans = update.message.text or "[non-text answer]"
-        cur.execute("UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?", 
-                   (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid))
-        db_conn.commit()
+    row = await db_fetchone("SELECT telegram_id, question FROM questions WHERE question_id = ?", (qid,))
+    if not row:
+        await update.message.reply_text("Question not found.")
+        return ConversationHandler.END
+    student_tg, question_text = row
+    # Save answer as text for simplicity
+    ans = update.message.text or "[non-text answer]"
+    await db_execute(
+        "UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?",
+        (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid)
+    )
     
     # Send answer to student
     try:
@@ -2123,48 +1974,47 @@ async def check_and_award_achiever_badge(telegram_id: int, wins_count: int, subm
     """Check and award achiever badge if criteria met."""
     try:
         # Check if already has badge
-        async with db_lock:
-            cur = db_conn.cursor()
-            cur.execute("SELECT notified, systeme_tagged FROM student_badges WHERE telegram_id = ? AND badge_type = ?", 
-                       (telegram_id, "achiever"))
-            row = cur.fetchone()
+        row = await db_fetchone(
+            "SELECT notified, systeme_tagged FROM student_badges WHERE telegram_id = ? AND badge_type = ?",
+            (telegram_id, "achiever")
+        )
             
             if row:
                 # Already has badge, check if we need to complete notifications/tagging
                 notified, systeme_tagged = row
                 if not notified:
                     await notify_badge_earned(telegram_id, "achiever")
-                    cur.execute("UPDATE student_badges SET notified = TRUE WHERE telegram_id = ? AND badge_type = ?", 
-                               (telegram_id, "achiever"))
-                    db_conn.commit()
+                    await db_execute(
+                        "UPDATE student_badges SET notified = TRUE WHERE telegram_id = ? AND badge_type = ?",
+                        (telegram_id, "achiever")
+                    )
                 
                 if not systeme_tagged:
                     await tag_achiever_in_systeme(telegram_id)
-                    cur.execute("UPDATE student_badges SET systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?", 
-                               (telegram_id, "achiever"))
-                    db_conn.commit()
+                    await db_execute(
+                        "UPDATE student_badges SET systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?",
+                        (telegram_id, "achiever")
+                    )
                 
                 return True
         
         # Check if criteria met
         if wins_count >= ACHIEVER_WINS and submitted_count >= ACHIEVER_MODULES:
             # Award badge
-            async with db_lock:
-                cur = db_conn.cursor()
-                cur.execute("INSERT OR IGNORE INTO student_badges (telegram_id, badge_type) VALUES (?, ?)", 
-                           (telegram_id, "achiever"))
-                db_conn.commit()
+            await db_execute(
+                "INSERT INTO student_badges (telegram_id, badge_type) VALUES (?, ?) ON CONFLICT (telegram_id, badge_type) DO NOTHING",
+                (telegram_id, "achiever")
+            )
             
             # Notify and tag
             await notify_badge_earned(telegram_id, "achiever")
             await tag_achiever_in_systeme(telegram_id)
             
             # Update tracking flags
-            async with db_lock:
-                cur = db_conn.cursor()
-                cur.execute("UPDATE student_badges SET notified = TRUE, systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?", 
-                           (telegram_id, "achiever"))
-                db_conn.commit()
+            await db_execute(
+                "UPDATE student_badges SET notified = TRUE, systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?",
+                (telegram_id, "achiever")
+            )
             
             return True
         
@@ -2199,16 +2049,13 @@ async def check_status_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     
     # Gather assignments and wins count
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT module, status, score, comment FROM submissions WHERE telegram_id = ?", (update.effective_user.id,))
-        subs = cur.fetchall()
-        cur.execute("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,))
-        wins_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,))
-        submitted_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status = ?", (update.effective_user.id, "Graded"))
-        graded_count = cur.fetchone()[0]
+    subs = await db_fetchall(
+        "SELECT module, status, score, comment FROM submissions WHERE telegram_id = ?",
+        (update.effective_user.id,)
+    )
+    wins_count = (await db_fetchone("SELECT COUNT(*) FROM wins WHERE telegram_id = ?", (update.effective_user.id,)))[0]
+    submitted_count = (await db_fetchone("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status IN ('Submitted', 'Graded')", (update.effective_user.id,)))[0]
+    graded_count = (await db_fetchone("SELECT COUNT(*) FROM submissions WHERE telegram_id = ? AND status = ?", (update.effective_user.id, "Graded")))[0]
     
     # Check and award achiever badge
     has_achiever_badge = await check_and_award_achiever_badge(update.effective_user.id, wins_count, submitted_count)
@@ -2244,9 +2091,8 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("You are not authorized to perform this action.")
         return
     
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("""
+    achievers = await db_fetchall(
+        """
             SELECT vu.name, vu.email, vu.telegram_id, sb.earned_at, 
                    (SELECT COUNT(*) FROM wins WHERE telegram_id = vu.telegram_id) as wins_count,
                    (SELECT COUNT(*) FROM submissions WHERE telegram_id = vu.telegram_id AND status IN ('Submitted', 'Graded')) as subs_count
@@ -2254,8 +2100,8 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
             JOIN verified_users vu ON sb.telegram_id = vu.telegram_id
             WHERE sb.badge_type = 'achiever' AND vu.removed_at IS NULL
             ORDER BY sb.earned_at DESC
-        """)
-        achievers = cur.fetchall()
+        """
+    )
     
     if not achievers:
         await update.message.reply_text("No achievers found.")
@@ -2287,11 +2133,7 @@ async def chat_join_request_handler(update: Update, context: ContextTypes.DEFAUL
 
 # Sunday reminder job
 async def sunday_reminder_job():
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT telegram_id, name FROM verified_users WHERE status = ?", ("Verified",))
-        rows = cur.fetchall()
-    
+    rows = await db_fetchall("SELECT telegram_id, name FROM verified_users WHERE status = ?", ("Verified",))
     for r in rows:
         t_id, name = r[0], r[1]
         try:
@@ -2398,6 +2240,30 @@ try:
 except Exception:
     pass
 
+# Database dump endpoint (admin-only)
+@app.get("/dbdump")
+async def dbdump():
+    try:
+        if not ADMIN_USER_ID:
+            raise HTTPException(status_code=403, detail="Admin not configured")
+        tables = {
+            "verified_users": "SELECT id, name, email, phone, telegram_id, status, systeme_contact_id, language, created_at, removed_at FROM verified_users",
+            "pending_verifications": "SELECT id, name, email, phone, telegram_id, status, hash, created_at FROM pending_verifications",
+            "submissions": "SELECT id, submission_id, username, telegram_id, module, status, media_type, media_file_id, score, grader_id, comment, comment_type, created_at, graded_at FROM submissions",
+            "wins": "SELECT id, win_id, username, telegram_id, content_type, content, created_at FROM wins",
+            "questions": "SELECT id, question_id, username, telegram_id, question, status, created_at, answer, answered_by, answered_at FROM questions",
+            "student_badges": "SELECT id, telegram_id, badge_type, earned_at, notified, systeme_tagged FROM student_badges",
+            "removals": "SELECT id, telegram_id, admin_id, reason, removed_at FROM removals",
+        }
+        payload = {}
+        for name, sql in tables.items():
+            rows = await db_fetchall(sql)
+            payload[name] = rows
+        return JSONResponse(payload)
+    except Exception as e:
+        logger.exception("DB dump failed: %s", e)
+        raise HTTPException(status_code=500, detail="DB dump failed")
+
 # Handler registration
 def register_handlers(app_obj: Application):
     # Basic handlers
@@ -2431,16 +2297,9 @@ async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("You are not authorized to run backups.")
         return
     try:
-        # Query verifications table (adapt to your schema)
-        from utils.db_access import get_db
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM verified_users")
-        cols = [c[0] for c in cur.description]
-        rows = cur.fetchall()
-        data = [dict(zip(cols, r)) for r in rows]
-        backup_str = json.dumps(data, default=str)
-        logger.info({"event": "backup_started", "rows": len(data)})
+        rows = await db_fetchall("SELECT * FROM verified_users")
+        backup_str = json.dumps(rows, default=str)
+        logger.info({"event": "backup_started", "rows": len(rows)})
 
         discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
         drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
@@ -2706,15 +2565,9 @@ async def on_shutdown():
 @app.get("/trigger_backup")
 async def trigger_backup():
     try:
-        from utils.db_access import get_db
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM verified_users")
-        cols = [c[0] for c in cur.description]
-        rows = cur.fetchall()
-        data = [dict(zip(cols, r)) for r in rows]
-        backup_str = json.dumps(data, default=str)
-        logger.info({"event": "triggered_backup", "rows": len(data)})
+        rows = await db_fetchall("SELECT * FROM verified_users")
+        backup_str = json.dumps(rows, default=str)
+        logger.info({"event": "triggered_backup", "rows": len(rows)})
 
         discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
         drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
@@ -2734,12 +2587,6 @@ async def trigger_backup():
     except Exception as e:
         logger.error({"event": "triggered_backup_error", "message": str(e)})
         return {"status": "backup_failed"}
-
-    # Close async DB
-    try:
-        await close_async_db()
-    except Exception as e:
-        logger.exception("Error closing async DB: %s", e)
 
 # Entry point for local development
 if __name__ == "__main__":
