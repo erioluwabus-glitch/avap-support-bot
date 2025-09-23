@@ -537,10 +537,10 @@ async def tag_achiever_in_systeme(telegram_id: int) -> bool:
             "SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
             (telegram_id,)
         )
-            if not row or not row[0]:
-                logger.warning(f"No Systeme.io contact ID found for telegram_id {telegram_id}")
-                return False
-            contact_id = row[0]
+        if not row or not row[0]:
+            logger.warning(f"No Systeme.io contact ID found for telegram_id {telegram_id}")
+            return False
+        contact_id = row[0]
         
         # Add achiever tag
         tag_id = int(SYSTEME_ACHIEVER_TAG_ID)
@@ -645,12 +645,12 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
             "UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?",
             (int(score), "Graded", datetime.utcnow().isoformat(), uuid)
         )
-            if comment:
+        if comment:
             await db_execute(
                 "UPDATE submissions SET comment = ?, comment_type = ? WHERE submission_id = ?",
                 (comment, comment_type, uuid)
             )
-            # Get student info
+        # Get student info
         row = await db_fetchone(
             "SELECT telegram_id, username FROM submissions WHERE submission_id = ?",
             (uuid,)
@@ -904,14 +904,14 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = make_hash(name, email, phone)
     created_at = datetime.utcnow().isoformat()
     
-        try:
+    try:
         await db_execute(
-                "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (name, email, phone, "Pending", h, created_at),
-            )
+            "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, email, phone, "Pending", h, created_at),
+        )
     except Exception:
-            await update.message.reply_text("A pending student with this email already exists.")
-            return ConversationHandler.END
+        await update.message.reply_text("A pending student with this email already exists.")
+        return ConversationHandler.END
     
     # Also append to Google Sheets if configured via unified helper
     try:
@@ -946,13 +946,13 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "SELECT name, phone, hash FROM pending_verifications WHERE email = ? AND status = ?",
         (email, "Pending")
     )
-        if not row:
-            await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
-            return
-        
-        name, phone, h = row
-        # Mark verified
-        verified_at = datetime.utcnow().isoformat()
+    if not row:
+        await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
+        return
+    
+    name, phone, h = row
+    # Mark verified
+    verified_at = datetime.utcnow().isoformat()
     await db_execute(
         "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, status = EXCLUDED.status",
         (name, email, phone, 0, "Verified", verified_at)
@@ -1019,36 +1019,36 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, name, or telegram ID with partial matching."""
     identifier = (identifier or "").strip()
-        # Email exact (case-insensitive)
-        if "@" in identifier:
+    # Email exact (case-insensitive)
+    if "@" in identifier:
         row = await db_fetchone(
             "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(email) = LOWER(?) AND removed_at IS NULL",
             (identifier,)
         )
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        # Telegram ID
-        try:
-            t_id = int(identifier)
+        if row:
+            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    # Telegram ID
+    try:
+        t_id = int(identifier)
         row = await db_fetchone(
             "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
             (t_id,)
         )
-            if row:
-                return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        except ValueError:
-            pass
-        # Partial name (case-insensitive)
+        if row:
+            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    except ValueError:
+        pass
+    # Partial name (case-insensitive)
     rows = await db_fetchall(
         "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL",
         (f"%{identifier.lower()}%",)
     )
-        if len(rows) == 1:
-            row = rows[0]
-            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-        elif len(rows) > 1:
-            return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
-        return None
+    if len(rows) == 1:
+        row = rows[0]
+        return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+    elif len(rows) > 1:
+        return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+    return None
 
 async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Enhanced remove student command with batch support and confirmation."""
