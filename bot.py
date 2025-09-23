@@ -32,6 +32,7 @@ import requests
 import aiohttp
 from aiohttp import ClientTimeout
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, Response
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -172,6 +173,19 @@ PHONE_RE = re.compile(r"^\+\d{10,15}$")
 
 # FastAPI app
 app = FastAPI()
+
+# Optional rate limiting (slowapi)
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    limiter = Limiter(key_func=get_remote_address)
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+except Exception:
+    limiter = None
 
 # Telegram Application placeholder (will be initialized on startup)
 telegram_app: Optional[Application] = None
@@ -2368,6 +2382,17 @@ async def telegram_webhook(token: str, request: Request):
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+# Optional Prometheus metrics endpoint
+try:
+    from prometheus_client import Counter, generate_latest
+    updates_counter = Counter('telegram_updates_total', 'Total Telegram updates processed')
+
+    @app.get("/metrics")
+    async def metrics():
+        return Response(content=generate_latest(), media_type="text/plain")
+except Exception:
+    pass
 
 # Handler registration
 def register_handlers(app_obj: Application):

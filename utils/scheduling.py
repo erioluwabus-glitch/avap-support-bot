@@ -5,6 +5,7 @@ Handles job scheduling for daily tips and other periodic tasks.
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from datetime import timezone, timedelta
 import os
 
@@ -13,10 +14,13 @@ logger = logging.getLogger(__name__)
 # Timezone configuration
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 DAILY_TIP_HOUR = int(os.getenv("DAILY_TIP_HOUR", "8"))
+DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
 
 def get_scheduler() -> AsyncIOScheduler:
-    """Get configured APScheduler instance."""
-    return AsyncIOScheduler(timezone=TIMEZONE)
+    """Get configured APScheduler instance with persistent SQLAlchemy job store."""
+    db_url = f"sqlite:///{DB_PATH}"
+    jobstores = {"default": SQLAlchemyJobStore(url=db_url)}
+    return AsyncIOScheduler(jobstores=jobstores, timezone=TIMEZONE)
 
 def schedule_daily_job(scheduler: AsyncIOScheduler, job_func, *args, **kwargs):
     """
@@ -36,9 +40,10 @@ def schedule_daily_job(scheduler: AsyncIOScheduler, job_func, *args, **kwargs):
             kwargs=kwargs,
             id="daily_tips",
             name="Daily Tips Job",
-            replace_existing=True
+            replace_existing=True,
+            misfire_grace_time=300
         )
-        logger.info(f"Scheduled daily tips job for {DAILY_TIP_HOUR}:00 {TIMEZONE}")
+        logger.info(f"Scheduled daily tips job for {DAILY_TIP_HOUR}:00 {TIMEZONE} with persistence")
     except Exception as e:
         logger.exception(f"Failed to schedule daily job: {e}")
 
