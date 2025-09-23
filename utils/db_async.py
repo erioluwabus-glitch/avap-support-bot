@@ -1,76 +1,95 @@
 """
-Async SQLite database utilities using aiosqlite.
-Provides a shared connection with WAL enabled and simple helpers
-for executing queries in async handlers.
+Async PostgreSQL database utilities using SQLAlchemy (async) with asyncpg.
+Maintains helper functions compatible with prior call sites by converting
+SQLite-style '?' placeholders to named parameters.
 """
 import os
 import logging
-import aiosqlite
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple, Dict
+
+from sqlalchemy import text as sa_text
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    logger.error("DATABASE_URL is not set")
+    # Avoid raising at import; some tools import this module without envs. Callers should ensure env.
 
-DB_POOL: Optional[aiosqlite.Connection] = None
+ASYNC_DATABASE_URL = None
+if DATABASE_URL:
+    # Normalize DSN to asyncpg driver
+    if DATABASE_URL.startswith("postgres://"):
+        ASYNC_DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    else:
+        ASYNC_DATABASE_URL = DATABASE_URL
+
+async_engine = create_async_engine(ASYNC_DATABASE_URL) if ASYNC_DATABASE_URL else None
+AsyncSessionLocal = sessionmaker(bind=async_engine, class_=AsyncSession, expire_on_commit=False) if async_engine else None
 
 
 async def init_async_db() -> None:
-    """Initialize a shared aiosqlite connection with WAL enabled."""
-    global DB_POOL
-    if DB_POOL is not None:
-        return
-    # Ensure directory exists
-    try:
-        db_dir = os.path.dirname(DB_PATH) or "."
-        os.makedirs(db_dir, exist_ok=True)
-    except Exception:
-        pass
-
-    DB_POOL = await aiosqlite.connect(DB_PATH)
-    # Performance pragmas
-    await DB_POOL.execute("PRAGMA journal_mode=WAL;")
-    await DB_POOL.execute("PRAGMA synchronous=NORMAL;")
-    await DB_POOL.execute("PRAGMA cache_size=-64000;")  # ~64MB cache
-    await DB_POOL.commit()
-    # Row factory for dict-like access if needed
-    DB_POOL.row_factory = aiosqlite.Row
-    logger.info("SQLite (aiosqlite) initialized with WAL for async concurrency")
+    """Placeholder for symmetry; engine/sessionmaker are module-level."""
+    if not async_engine:
+        raise RuntimeError("Async engine not initialized. Ensure DATABASE_URL is set.")
 
 
 async def close_async_db() -> None:
-    global DB_POOL
-    if DB_POOL is not None:
-        try:
-            await DB_POOL.close()
-        finally:
-            DB_POOL = None
+    if async_engine:
+        await async_engine.dispose()
+
+
+def _convert_sqlite_qmarks(query: str, params: Iterable[Any]) -> Tuple[str, Dict[str, Any]]:
+    """Convert '?' placeholders to named parameters :p0, :p1, ... for SQLAlchemy text()."""
+    if not isinstance(params, (list, tuple)):
+        # Assume mapping already
+        return query, params  # type: ignore
+    parts = query.split("?")
+    if len(parts) - 1 != len(params):
+        # Fallback: return original; execution may fail loudly for easier debugging
+        return query, {f"p{i}": v for i, v in enumerate(params)}
+    new_query = []
+    for i, segment in enumerate(parts):
+        new_query.append(segment)
+        if i < len(params):
+            new_query.append(f":p{i}")
+    named = {f"p{i}": v for i, v in enumerate(params)}
+    return "".join(new_query), named
 
 
 async def db_execute(query: str, params: Iterable[Any] = ()) -> None:
     """Execute a write statement (INSERT/UPDATE/DELETE)."""
-    if DB_POOL is None:
-        await init_async_db()
-    assert DB_POOL is not None
-    await DB_POOL.execute(query, tuple(params))
-    await DB_POOL.commit()
+    await init_async_db()
+    assert AsyncSessionLocal is not None
+    sql, bind = _convert_sqlite_qmarks(query, params)
+    async with AsyncSessionLocal() as session:
+        await session.execute(sa_text(sql), bind)
+        await session.commit()
 
 
-async def db_fetchone(query: str, params: Iterable[Any] = ()) -> Optional[aiosqlite.Row]:
-    """Execute a SELECT and return a single row."""
-    if DB_POOL is None:
-        await init_async_db()
-    assert DB_POOL is not None
-    async with DB_POOL.execute(query, tuple(params)) as cursor:
-        return await cursor.fetchone()
+async def db_fetchone(query: str, params: Iterable[Any] = ()) -> Optional[Tuple[Any, ...]]:
+    """Execute a SELECT and return a single row as a tuple (or None)."""
+    await init_async_db()
+    assert AsyncSessionLocal is not None
+    sql, bind = _convert_sqlite_qmarks(query, params)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(sa_text(sql), bind)
+        row = result.fetchone()
+        return tuple(row) if row else None
 
 
-async def db_fetchall(query: str, params: Iterable[Any] = ()) -> List[aiosqlite.Row]:
-    """Execute a SELECT and return all rows."""
-    if DB_POOL is None:
-        await init_async_db()
-    assert DB_POOL is not None
-    async with DB_POOL.execute(query, tuple(params)) as cursor:
-        return await cursor.fetchall()
+async def db_fetchall(query: str, params: Iterable[Any] = ()) -> List[Tuple[Any, ...]]:
+    """Execute a SELECT and return all rows as list of tuples."""
+    await init_async_db()
+    assert AsyncSessionLocal is not None
+    sql, bind = _convert_sqlite_qmarks(query, params)
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(sa_text(sql), bind)
+        rows = result.fetchall()
+        return [tuple(r) for r in rows]
 
 

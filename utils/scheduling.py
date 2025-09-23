@@ -14,12 +14,13 @@ logger = logging.getLogger(__name__)
 # Timezone configuration
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 DAILY_TIP_HOUR = int(os.getenv("DAILY_TIP_HOUR", "8"))
-DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_scheduler() -> AsyncIOScheduler:
-    """Get configured APScheduler instance with persistent SQLAlchemy job store."""
-    db_url = f"sqlite:///{DB_PATH}"
-    jobstores = {"default": SQLAlchemyJobStore(url=db_url)}
+    """Get configured APScheduler instance with persistent SQLAlchemy job store on PostgreSQL."""
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be set for scheduler job store")
+    jobstores = {"default": SQLAlchemyJobStore(url=DATABASE_URL)}
     return AsyncIOScheduler(jobstores=jobstores, timezone=TIMEZONE)
 
 def schedule_daily_job(scheduler: AsyncIOScheduler, job_func, *args, **kwargs):
