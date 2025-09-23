@@ -19,3 +19,4 @@ aiohttp==3.9.5
 slowapi==0.1.9
 prometheus-client==0.20.0
 apscheduler[jobstores]==3.10.4
+aiosqlite==0.20.0

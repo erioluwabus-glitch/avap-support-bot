@@ -69,6 +69,7 @@ from features import (
 # Translation utilities
 from utils.db_access import get_user_language
 from utils.translator import translate
+from utils.db_async import init_async_db, close_async_db
 
 # Optional Google Sheets
 try:
@@ -2558,6 +2559,12 @@ async def on_startup():
     global telegram_app
     logger.info("Starting up AVAP bot - webhook mode")
     
+    # Initialize async DB (aiosqlite)
+    try:
+        await init_async_db()
+    except Exception as e:
+        logger.exception("Failed to initialize async DB: %s", e)
+
     # Initialize Google Sheets
     init_gsheets()
     ensure_default_worksheets()
@@ -2617,6 +2624,12 @@ async def on_shutdown():
             await telegram_app.shutdown()
         except Exception as e:
             logger.exception("Error shutting down Telegram application: %s", e)
+
+    # Close async DB
+    try:
+        await close_async_db()
+    except Exception as e:
+        logger.exception("Error closing async DB: %s", e)
 
 # Entry point for local development
 if __name__ == "__main__":
