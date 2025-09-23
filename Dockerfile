@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavutil-dev \
     libavfilter-dev \
     libavfilter-extra \
+    libavcodec-extra \
     libswscale-dev \
     libswresample-dev \
     build-essential \
