@@ -728,14 +728,7 @@ def make_hash(name: str, email: str, phone: str) -> str:
 async def is_admin(user_id: int) -> bool:
     return ADMIN_USER_ID and int(user_id) == int(ADMIN_USER_ID)
 
-async def user_verified_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
-    async with db_lock:
-        cur = db_conn.cursor()
-        cur.execute("SELECT name, email, phone, telegram_id, status FROM verified_users WHERE telegram_id = ?", (telegram_id,))
-        r = cur.fetchone()
-        if r:
-            return {"name": r[0], "email": r[1], "phone": r[2], "telegram_id": r[3], "status": r[4]}
-    return None
+from utils.user_utils import user_verified_by_telegram_id
 
 async def find_pending_by_hash(h: str):
     async with db_lock:
