@@ -5,7 +5,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # System deps: FFmpeg + development headers for PyAV (av) and faster-whisper
-# Add PostgreSQL dev libs for asyncpg/psycopg2-binary build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libavcodec-dev \
@@ -13,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libavdevice-dev \
     libavutil-dev \
     libavfilter-dev \
+    libavfilter-extra \
     libswscale-dev \
     libswresample-dev \
     build-essential \
@@ -37,5 +37,5 @@ COPY . .
 # Expose Render default port
 EXPOSE 10000
 
-# Start the FastAPI webhook app (reads $PORT from env)
+# Start the FastAPI webhook app
 CMD ["uvicorn", "bot:app", "--host", "0.0.0.0", "--port", "10000"]
