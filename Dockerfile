@@ -1,21 +1,41 @@
-# Use official Python 3.11 slim image
-FROM python:3.11-slim
+FROM python:3.13-slim
 
-# Install system deps for psycopg2
-RUN apt-get update && apt-get install -y libpq-dev gcc && rm -rf /var/lib/apt/lists/*
+# Prevent Python from writing .pyc files and enable unbuffered logs
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Set work directory
+# System deps: FFmpeg + development headers for PyAV (faster-whisper dependency)
+# Add PostgreSQL dev libs and gcc for psycopg2-binary build fallback
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+    build-essential \
+    pkg-config \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Help pkg-config locate FFmpeg .pc files
+ENV PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
+
 WORKDIR /app
 
-# Copy requirements and install deps
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies first (leverage docker layer cache)
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy all code
+# Copy the rest of the application
 COPY . .
 
-# Expose port
-EXPOSE 8000
+# Expose Render default port
+EXPOSE 10000
 
-# Run the bot
-CMD ["uvicorn", "avap_bot.bot:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the FastAPI webhook app (reads $PORT from env)
+CMD ["uvicorn", "bot:app", "--host", "0.0.0.0", "--port", "10000"]
