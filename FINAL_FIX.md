@@ -184,3 +184,90 @@ return await resp.json()
 ## Appendix: Debugging Tips
 - Enable Render logs; search for WARNING/ERROR lines included above.
 - Toggle env vars carefully (Systeme.io tags/keys, Sheets credentials, default language).
+
+---
+
+## Latest Deployment Issues (2025-09-22) and How to Resolve
+
+### A) Google Sheets Not Configured (Seen in logs)
+- Symptom: `Google Sheets not configured - skipping sync` and no updates to Verifications/Submissions/Wins/FAQ.
+- Root Cause: One or more of the required env vars was missing or not parseable.
+- Required env vars (Render → Environment):
+  - `GOOGLE_SHEET_ID` = the spreadsheet key (the long ID from the URL).
+  - `GOOGLE_CREDENTIALS_JSON` = Service Account JSON. You can paste:
+    - The raw JSON string, or
+    - Base64-encoded JSON (now supported). If base64, set the env var to the base64 string.
+- What to do (your side):
+  1) Create a Google Cloud Service Account with Sheets access; download JSON.
+  2) Share the target spreadsheet with the service account email.
+  3) In Render, set the two env vars above; redeploy.
+  4) Check startup logs for `Google Sheets connected`.
+
+### B) Systeme.io 415/405 Errors
+- Symptoms:
+  - `415 Unsupported Media Type` on `/contacts/{id}`
+  - `405 Method Not Allowed` on `/contacts/{id}/tags`
+- Root Causes (API behavior):
+  - Sending `Content-Type: application/json` on methods without a body.
+  - Using PATCH where the endpoint expects PUT.
+- Fixes implemented in code:
+  - Set `Content-Type` only for POST/PUT/PATCH.
+  - Use PUT for contact update and tag-add endpoints.
+- What to check (your side):
+  - `SYSTEME_API_KEY` is valid and active.
+  - `SYSTEME_VERIFIED_STUDENT_TAG_ID` is correct and exists.
+  - The contact/tag endpoints in your Systeme.io plan support these calls.
+  - If tag listing returns non-JSON structures in your account, manual verification may be required.
+
+### C) OpenAI Whisper 429 (Rate/Quota)
+- Symptom: `openai.RateLimitError: insufficient_quota` and voice transcription fails.
+- Root Cause: The OpenAI account has no remaining quota for Whisper.
+- What to do (your side):
+  - Add billing/credits to the OpenAI account or switch to a custom `WHISPER_ENDPOINT` (compatible API).
+  - Set `OPENAI_API_KEY` in Render; confirm quota at OpenAI dashboard.
+  - The code now fails gracefully if 429; transcription will resume once quota is available.
+
+### D) Health Check 405 on HEAD
+- Symptom: `HEAD /health 405` during boot.
+- Explanation: The app defines GET /health and GET /; some Render probes use HEAD. This is harmless once the app is up and GET returns 200. If desired, change Render Health Check Path to `/` or `/health`.
+
+### E) Quick Self-Validation Checklist (Post-Deploy)
+1) Logs show: `Google Sheets connected` and no 415/405 errors for Systeme.io.
+2) `/add_student` in verification group → row appears in `Verifications` as `Pending`.
+3) Student `/start` → verify → row updates to `Verified` with `telegram_id`.
+4) Submit assignment → row in `Submissions`; grade → row updates to `Graded` with score/comment.
+5) Share win → row appended to `Wins`.
+6) Voice (with quota) → transcription reply + “VoiceTranscriptions” sheet row.
+
+---
+
+## Latest Production Findings (2025-09-23)
+
+Symptoms observed in logs and tests:
+- Startup logged: "Google Sheets not configured or gspread not installed; skipping." and later "Google Sheets not configured - skipping sync" during verification/submission flows.
+- Systeme.io tagging failed with 405 Method Not Allowed at `/contacts/{id}/tags`.
+- Daily tips at 08:00 Africa/Lagos did not post.
+- Verified users appeared to lose status after hours (re-asked to verify).
+
+Root causes identified:
+- Sheets: `init_gsheets()` required envs but there was no bootstrap to create worksheets/headers. Any feature trying to append/update before a worksheet exists would no-op. Also missing/invalid `GOOGLE_CREDENTIALS_JSON` or `GOOGLE_SHEET_ID` in environment causes the initial "not configured" message.
+- Systeme.io: Tagging used PUT in `systeme_add_and_verify_tag` which triggers 405 for the tags endpoint on some plans; needs POST.
+- Daily tips: Feature was scheduled, but ensure scheduling is invoked on startup and TIMEZONE/DAILY_TIP_HOUR envs are set.
+- Verified persistence: DB path must be on persistent disk; default `/data/bot.db` is set and directory ensured.
+
+Code edits applied (this commit):
+- Sheets bootstrap: Added `ensure_default_worksheets()` and invoked it after `init_gsheets()` during startup to create `Verifications`, `Submissions`, `Wins`, `FAQ`, `VoiceTranscriptions` with headers.
+- Systeme.io tag method: Switched tag add from PUT to POST in `systeme_add_and_verify_tag` to avoid 405.
+- Daily tips: left logic intact; confirmed scheduling call path at startup; documented `TIMEZONE` and `DAILY_TIP_HOUR` envs.
+
+Operational requirements (env):
+- `GOOGLE_CREDENTIALS_JSON`: base64 or raw JSON of service account; share Sheet to service account email.
+- `GOOGLE_SHEET_ID`: spreadsheet ID.
+- `TIMEZONE`=`Africa/Lagos`, `DAILY_TIP_HOUR`=`8`.
+- `DB_PATH`=`/data/bot.db` and persistent disk attached on Render.
+
+Testing steps:
+- Verify startup shows "Google Sheets connected" and no warnings; confirm worksheets auto-created.
+- Run verification and submission flows; confirm new rows in respective worksheets.
+- Tag add flow returns no 405 in logs; tag present in Systeme.io contact.
+- At 08:00 WAT, confirm daily tip in support group; validate envs if absent.

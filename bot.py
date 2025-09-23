@@ -365,6 +365,37 @@ def init_gsheets():
         gs_client = None
         gs_sheet = None
 
+# Ensure default worksheets exist with headers
+def ensure_default_worksheets():
+    try:
+        if not gs_sheet:
+            return
+        required = {
+            "Verifications": [
+                "timestamp", "telegram_id", "name", "email", "phone", "systeme_contact_id", "status"
+            ],
+            "Submissions": [
+                "timestamp", "telegram_id", "module", "content_type", "content", "status", "grade", "comment"
+            ],
+            "Wins": [
+                "timestamp", "telegram_id", "type", "content"
+            ],
+            "FAQ": [
+                "question", "answer", "created_at"
+            ],
+            "VoiceTranscriptions": [
+                "username", "telegram_id", "transcription", "created_at"
+            ]
+        }
+        for title, headers in required.items():
+            try:
+                sheet = gs_sheet.worksheet(title)
+            except Exception:
+                sheet = gs_sheet.add_worksheet(title=title, rows=1000, cols=max(10, len(headers)))
+                sheet.append_row(headers)
+    except Exception as e:
+        logger.exception(f"Failed ensuring default worksheets: {e}")
+
 # Unified Google Sheets sync helper
 async def sync_to_sheets(worksheet_name: str, action: str, data: dict, search_col: int = 1, update_cols: list = None, row_data: list = None) -> bool:
     """Unified Sheets sync: append or upsert by search_col.
@@ -533,8 +564,8 @@ async def systeme_add_and_verify_tag(contact_id: str) -> bool:
     tag_id = int(SYSTEME_VERIFIED_STUDENT_TAG_ID)
     add_payload = {"tag_id": tag_id}
     
-    # Add the tag (some APIs require PUT)
-    add_response = await systeme_api_request("PUT", f"/contacts/{contact_id}/tags", json_data=add_payload)
+    # Add the tag (use POST to avoid 405 on some Systeme.io plans)
+    add_response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
     if not add_response:
         logger.error(f"Failed to add tag {tag_id} to contact {contact_id}")
         return False
@@ -2504,6 +2535,7 @@ async def on_startup():
     
     # Initialize Google Sheets
     init_gsheets()
+    ensure_default_worksheets()
     
     # Build application
     telegram_app = Application.builder().token(BOT_TOKEN).build()
