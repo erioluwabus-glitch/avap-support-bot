@@ -2333,7 +2333,7 @@ async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Handler registration
 def register_handlers(app_obj: Application):
     # Basic handlers
-    app_obj.add_handler(CommandHandler("start", start_handler))
+    app_obj.add_handler(CommandHandler("start", start_handler, filters=filters.ChatType.PRIVATE))
     app_obj.add_handler(CommandHandler("cancel", cancel_handler))
     app_obj.add_handler(CommandHandler("help", admin_help_handler))
     
@@ -2540,9 +2540,22 @@ async def on_startup():
     except Exception as e:
         logger.exception("Failed to initialize new features: %s", e)
     
-    # Skip webhook setup during startup - we'll set it manually via endpoint
-    logger.info("Skipping webhook setup during startup - will set manually via endpoint")
-    logger.info("Webhook URL should be: %s", webhook_url)
+    # Optionally set webhook automatically when enabled
+    try:
+        if os.getenv("AUTO_SET_WEBHOOK", "false").lower() == "true":
+            base_url_env = RENDER_EXTERNAL_URL.strip('/')
+            if not base_url_env.startswith('https://'):
+                base_url_env = f"https://{base_url_env}"
+            auto_webhook_url = f"{base_url_env}/webhook/{BOT_TOKEN}"
+            await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+            await asyncio.sleep(1)
+            await telegram_app.bot.set_webhook(url=auto_webhook_url, allowed_updates=["message", "callback_query", "chat_join_request"])
+            logger.info("Webhook auto-set to: %s", auto_webhook_url)
+        else:
+            logger.info("AUTO_SET_WEBHOOK disabled; set manually via /setup-webhook or /debug-webhook")
+            logger.info("Webhook URL should be: %s", webhook_url)
+    except Exception as e:
+        logger.exception("Failed during webhook auto-setup: %s", e)
 
 @app.on_event("shutdown")
 async def on_shutdown():
