@@ -96,6 +96,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("avap_bot")
 
+# Helper to offload blocking calls in async contexts
+async def run_blocking(fn, *args, **kwargs):
+    """
+    Execute a blocking function in a background thread.
+    Usage: result = await run_blocking(fn, *args, **kwargs)
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
 # Environment variables - exact names as specified
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0")) if os.getenv("ADMIN_USER_ID") else None
@@ -2536,7 +2544,8 @@ async def on_startup():
     try:
         # Initialize database for new features
         from utils.db_access import init_database
-        init_database()
+        await run_blocking(init_database)
+        logger.info("init_database() completed (threaded).")
         
         # Schedule daily tips job
         daily_tips.schedule_daily_job(telegram_app)
@@ -2550,7 +2559,7 @@ async def on_startup():
     
     # Optionally set webhook automatically when enabled
     try:
-        if os.getenv("AUTO_SET_WEBHOOK", "false").lower() == "true":
+        if os.getenv("AUTO_SET_WEBHOOK", "false").lower() == "true" and RENDER_EXTERNAL_URL:
             base_url_env = RENDER_EXTERNAL_URL.strip('/')
             if not base_url_env.startswith('https://'):
                 base_url_env = f"https://{base_url_env}"
@@ -2560,8 +2569,9 @@ async def on_startup():
             await telegram_app.bot.set_webhook(url=auto_webhook_url, allowed_updates=["message", "callback_query", "chat_join_request"])
             logger.info("Webhook auto-set to: %s", auto_webhook_url)
         else:
-            logger.info("AUTO_SET_WEBHOOK disabled; set manually via /setup-webhook or /debug-webhook")
-            logger.info("Webhook URL should be: %s", webhook_url)
+            logger.info("AUTO_SET_WEBHOOK disabled or RENDER_EXTERNAL_URL missing; set manually via /setup-webhook or /debug-webhook")
+            if RENDER_EXTERNAL_URL:
+                logger.info("Webhook URL should be: %s/webhook/%s", RENDER_EXTERNAL_URL.rstrip('/'), BOT_TOKEN)
     except Exception as e:
         logger.exception("Failed during webhook auto-setup: %s", e)
 
@@ -2613,4 +2623,5 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "8080"))
     logger.info("Starting uvicorn for webhook on port %s", port)
     logger.info("Bot version: 1.0.1 - Fixed ASK_QUESTION state")
-    uvicorn.run("bot:app", host="0.0.0.0", port=port, log_level="info")
+    # Ensure correct module path when running locally
+    uvicorn.run("avap_bot.bot:app", host="0.0.0.0", port=port, log_level="info")
