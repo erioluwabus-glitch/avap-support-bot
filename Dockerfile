@@ -4,13 +4,10 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install FFmpeg 5.x (compatible with av 10.0.0) + dev headers
+# System deps: FFmpeg (system version) + dev headers for deps
+# Add PostgreSQL dev libs for psycopg2-binary/asyncpg fallback
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    && add-apt-repository ppa:savoury1/ffmpeg5 \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-    ffmpeg=7:5.1.3-0ubuntu1~ppa1~22.04 \
+    ffmpeg \
     libavcodec-dev \
     libavformat-dev \
     libavdevice-dev \
