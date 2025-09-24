@@ -108,6 +108,7 @@ async def run_blocking(fn, *args, **kwargs):
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0")) if os.getenv("ADMIN_USER_ID") else None
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+ADMIN_RESET_TOKEN = os.getenv("ADMIN_RESET_TOKEN")
 GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 SYSTEME_IO_API_KEY = os.getenv("SYSTEME_API_KEY")
@@ -2593,6 +2594,37 @@ async def on_shutdown():
             await telegram_app.shutdown()
         except Exception as e:
             logger.exception("Error shutting down Telegram application: %s", e)
+
+# Admin maintenance endpoints (protected by X-Admin-Reset-Token)
+@app.post("/admin/purge/pending")
+async def admin_purge_pending(request: Request):
+    token = request.headers.get("X-Admin-Reset-Token")
+    if not ADMIN_RESET_TOKEN or token != ADMIN_RESET_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        await db_execute("TRUNCATE TABLE pending_verifications;")
+        return {"status": "ok", "purged": "pending_verifications"}
+    except Exception as e:
+        logger.exception("Admin purge pending failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/purge/email")
+async def admin_purge_email(request: Request):
+    token = request.headers.get("X-Admin-Reset-Token")
+    if not ADMIN_RESET_TOKEN or token != ADMIN_RESET_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        data = await request.json()
+        email = (data.get("email") or "").strip()
+        if not email:
+            raise HTTPException(status_code=400, detail="email required")
+        await db_execute("DELETE FROM pending_verifications WHERE email = :email", {"email": email})
+        return {"status": "ok", "deleted_email": email}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Admin purge email failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/trigger_backup")
 async def trigger_backup():
