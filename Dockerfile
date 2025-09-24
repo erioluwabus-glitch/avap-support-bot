@@ -37,5 +37,6 @@ COPY . .
 # Expose Render default port
 EXPOSE 10000
 
-# Start the FastAPI webhook app
-CMD ["uvicorn", "avap_bot.bot:app", "--host", "0.0.0.0", "--port", "10000"]
+# Start the FastAPI webhook app on Render-provided PORT
+ENV PORT=10000
+CMD ["sh", "-c", "uvicorn avap_bot.bot:app --host 0.0.0.0 --port ${PORT}"]
