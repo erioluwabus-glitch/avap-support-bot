@@ -913,13 +913,22 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     h = make_hash(name, email, phone)
     created_at = datetime.now(timezone.utc).isoformat()
     
+    # Check for existing pending row to avoid generic error on insert
+    existing = await db_fetchone(
+        "SELECT id FROM pending_verifications WHERE email = ? AND status = ?",
+        (email, "Pending"),
+    )
+    if existing:
+        await update.message.reply_text("A pending student with this email already exists.")
+        return ConversationHandler.END
     try:
         await db_execute(
             "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (name, email, phone, "Pending", h, created_at),
         )
-    except Exception:
-        await update.message.reply_text("A pending student with this email already exists.")
+    except Exception as e:
+        logger.exception("Add student insert failed: %s", e)
+        await update.message.reply_text("Failed to add student. Please try again.")
         return ConversationHandler.END
     
     # Also append to Google Sheets if configured via unified helper

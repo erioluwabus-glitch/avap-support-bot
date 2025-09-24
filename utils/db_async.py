@@ -78,6 +78,18 @@ async def ensure_schema() -> None:
         )
         """
     )
+    # Prevent duplicate pending entries for same email
+    await db_execute(
+        """
+        DO $$ BEGIN
+            CREATE UNIQUE INDEX IF NOT EXISTS pending_unique_email_pending
+            ON pending_verifications (email)
+            WHERE status = 'Pending';
+        EXCEPTION WHEN others THEN
+            -- ignore
+        END $$;
+        """
+    )
     # submissions
     await db_execute(
         """
