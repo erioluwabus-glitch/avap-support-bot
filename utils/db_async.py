@@ -43,6 +43,119 @@ async def close_async_db() -> None:
         await async_engine.dispose()
 
 
+async def ensure_schema() -> None:
+    """Create required tables if they do not exist (idempotent)."""
+    await init_async_db()
+    # verified_users
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS verified_users (
+            id SERIAL PRIMARY KEY,
+            name TEXT,
+            email TEXT,
+            phone TEXT,
+            telegram_id BIGINT UNIQUE,
+            status TEXT,
+            systeme_contact_id TEXT,
+            language TEXT DEFAULT 'en',
+            created_at TIMESTAMP DEFAULT NOW(),
+            removed_at TIMESTAMP NULL
+        )
+        """
+    )
+    # pending_verifications
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_verifications (
+            id SERIAL PRIMARY KEY,
+            name TEXT,
+            email TEXT,
+            phone TEXT,
+            telegram_id BIGINT,
+            status TEXT,
+            hash TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """
+    )
+    # submissions
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS submissions (
+            id SERIAL PRIMARY KEY,
+            submission_id TEXT UNIQUE,
+            username TEXT,
+            telegram_id BIGINT,
+            module INTEGER,
+            status TEXT,
+            media_type TEXT,
+            media_file_id TEXT,
+            score INTEGER,
+            grader_id BIGINT,
+            comment TEXT,
+            comment_type TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            graded_at TIMESTAMP NULL
+        )
+        """
+    )
+    # wins
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS wins (
+            id SERIAL PRIMARY KEY,
+            win_id TEXT UNIQUE,
+            username TEXT,
+            telegram_id BIGINT,
+            content_type TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+        """
+    )
+    # questions
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS questions (
+            id SERIAL PRIMARY KEY,
+            question_id TEXT UNIQUE,
+            username TEXT,
+            telegram_id BIGINT,
+            question TEXT,
+            status TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            answer TEXT,
+            answered_by BIGINT,
+            answered_at TIMESTAMP NULL
+        )
+        """
+    )
+    # student_badges
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_badges (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT,
+            badge_type TEXT,
+            earned_at TIMESTAMP DEFAULT NOW(),
+            notified BOOLEAN DEFAULT FALSE,
+            systeme_tagged BOOLEAN DEFAULT FALSE
+        )
+        """
+    )
+    # removals
+    await db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS removals (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT,
+            admin_id BIGINT,
+            reason TEXT,
+            removed_at TIMESTAMP DEFAULT NOW()
+        )
+        """
+    )
+
 def _convert_sqlite_qmarks(query: str, params: Iterable[Any]) -> Tuple[str, Dict[str, Any]]:
     """Convert '?' placeholders to named parameters :p0, :p1, ... for SQLAlchemy text()."""
     if not isinstance(params, (list, tuple)):

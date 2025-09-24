@@ -2511,9 +2511,11 @@ async def on_startup():
     global telegram_app
     logger.info("Starting up AVAP bot - webhook mode")
     
-    # Initialize async DB (aiosqlite)
+    # Initialize async DB and ensure schema exists
     try:
         await init_async_db()
+        from utils.db_async import ensure_schema
+        await ensure_schema()
     except Exception as e:
         logger.exception("Failed to initialize async DB: %s", e)
 
