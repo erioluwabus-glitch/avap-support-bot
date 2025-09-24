@@ -5,7 +5,6 @@ Handles job scheduling for daily tips and other periodic tasks.
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from datetime import timezone, timedelta
 import os
 
@@ -17,11 +16,13 @@ DAILY_TIP_HOUR = int(os.getenv("DAILY_TIP_HOUR", "8"))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def get_scheduler() -> AsyncIOScheduler:
-    """Get configured APScheduler instance with persistent SQLAlchemy job store on PostgreSQL."""
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL must be set for scheduler job store")
-    jobstores = {"default": SQLAlchemyJobStore(url=DATABASE_URL)}
-    return AsyncIOScheduler(jobstores=jobstores, timezone=TIMEZONE)
+    """
+    Get configured APScheduler instance.
+
+    Use an in-memory scheduler to avoid pickling complex asyncio objects
+    (e.g., Telegram Application) when using persistent job stores.
+    """
+    return AsyncIOScheduler(timezone=TIMEZONE)
 
 def schedule_daily_job(scheduler: AsyncIOScheduler, job_func, *args, **kwargs):
     """
