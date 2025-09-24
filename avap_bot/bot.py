@@ -68,9 +68,9 @@ from features import (
 )
 
 # Translation utilities
-from ..utils.db_access import get_user_language
-from ..utils.translator import translate
-from ..utils.db_async import init_async_db, close_async_db, db_execute, db_fetchone, db_fetchall
+from utils.db_access import get_user_language
+from utils.translator import translate
+from utils.db_async import init_async_db, close_async_db, db_execute, db_fetchone, db_fetchall
 # Backup dependencies
 import base64
 from io import BytesIO
@@ -588,7 +588,7 @@ def make_hash(name: str, email: str, phone: str) -> str:
 async def is_admin(user_id: int) -> bool:
     return ADMIN_USER_ID and int(user_id) == int(ADMIN_USER_ID)
 
-from ..utils.user_utils import user_verified_by_telegram_id
+from utils.user_utils import user_verified_by_telegram_id
 
 async def find_pending_by_hash(h: str):
     return await db_fetchone(
@@ -599,7 +599,7 @@ async def find_pending_by_hash(h: str):
 # Main menu reply keyboard (permanently fixed below typing area)
 def get_main_menu_keyboard():
     return ReplyKeyboardMarkup([
-    [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
+        [KeyboardButton("📤 Submit Assignment"), KeyboardButton("🎉 Share Small Win")],
         [KeyboardButton("📊 Check Status"), KeyboardButton("❓ Ask a Question")]
     ], resize_keyboard=True, is_persistent=True)
 
@@ -643,7 +643,7 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
         # Save to database
         await db_execute(
             "UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?",
-            (int(score), "Graded", datetime.utcnow().isoformat(), uuid)
+            (int(score), "Graded", datetime.now(timezone.utc).isoformat(), uuid)
         )
         if comment:
             await db_execute(
@@ -902,7 +902,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = context.user_data.get('new_student_name')
     phone = context.user_data.get('new_student_phone')
     h = make_hash(name, email, phone)
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(timezone.utc).isoformat()
     
     try:
         await db_execute(
@@ -952,7 +952,7 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     name, phone, h = row
     # Mark verified
-    verified_at = datetime.utcnow().isoformat()
+    verified_at = datetime.now(timezone.utc).isoformat()
     await db_execute(
         "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, status = EXCLUDED.status",
         (name, email, phone, 0, "Verified", verified_at)
@@ -1061,7 +1061,7 @@ async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYP
         return ConversationHandler.END
     
     # Parse identifiers (comma-separated)
-    identifiers = [id.strip() for id in " ".join(context.args).split(",")]
+    identifiers = [identifier.strip() for identifier in " ".join(context.args).split(",")]
     students_to_remove = []
     multiple_matches = []
     
@@ -1158,7 +1158,7 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
             # Soft delete in database
             await db_execute(
                 "UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?",
-                (datetime.utcnow().isoformat(), student['telegram_id'])
+                (datetime.now(timezone.utc).isoformat(), student['telegram_id'])
             )
             await db_execute(
                 "UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?",
@@ -1362,7 +1362,7 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_id = row[0]
     await db_execute(
         "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, telegram_id = EXCLUDED.telegram_id, status = EXCLUDED.status",
-        (name, email, phone, update.effective_user.id, "Verified", datetime.utcnow().isoformat())
+        (name, email, phone, update.effective_user.id, "Verified", datetime.now(timezone.utc).isoformat())
     )
     await db_execute(
         "UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?",
@@ -1499,7 +1499,7 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     submission_uuid = str(uuid.uuid4())
     module = context.user_data.get('submit_module')
     username = update.effective_user.username or update.effective_user.full_name
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     await db_execute(
         """INSERT INTO submissions (submission_id, username, telegram_id, module, status, media_type, media_file_id, created_at)
@@ -1805,7 +1805,7 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         content = update.message.video.file_id
     
     win_id = str(uuid.uuid4())
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     await db_execute(
         "INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1863,7 +1863,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         qid = str(uuid.uuid4())
-        timestamp = datetime.utcnow().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
         
         await db_execute(
             "INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1891,7 +1891,7 @@ async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     question_text = update.message.text.strip()
     qid = str(uuid.uuid4())
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     
     await db_execute(
         "INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1942,7 +1942,7 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ans = update.message.text or "[non-text answer]"
     await db_execute(
         "UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?",
-        (ans, update.effective_user.id, datetime.utcnow().isoformat(), "Answered", qid)
+        (ans, update.effective_user.id, datetime.now(timezone.utc).isoformat(), "Answered", qid)
     )
     
     # Send answer to student
@@ -1959,7 +1959,7 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 sheet = gs_sheet.add_worksheet("FAQ", rows=100, cols=10)
                 sheet.append_row(["question", "answer", "created_at"])
-            sheet.append_row([question_text, ans, datetime.utcnow().isoformat()])
+            sheet.append_row([question_text, ans, datetime.now(timezone.utc).isoformat()])
             logger.info("FAQ recorded in Google Sheets")
     except Exception as e:
         logger.exception("Failed to record FAQ in Google Sheets: %s", e)
@@ -2306,7 +2306,7 @@ async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 service = build('drive', 'v3', credentials=creds)
                 file_metadata = {
-                    'name': f'verifications_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+                    'name': f'verifications_backup_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.json'
                 }
                 media = MediaIoBaseUpload(BytesIO(backup_str.encode('utf-8')), mimetype='application/json')
                 file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
@@ -2527,7 +2527,7 @@ async def on_startup():
     # Initialize new features
     try:
         # Initialize database for new features
-        from ..utils.db_access import init_database
+        from utils.db_access import init_database
         init_database()
         
         # Schedule daily tips job
@@ -2579,7 +2579,7 @@ async def trigger_backup():
             creds_dict = json.loads(creds_json)
             creds = Credentials.from_service_account_info(creds_dict, scopes=['https://www.googleapis.com/auth/drive'])
             service = build('drive', 'v3', credentials=creds)
-            file_metadata = {'name': f'auto_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'}
+            file_metadata = {'name': f'auto_backup_{datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")}.json'}
             media = MediaIoBaseUpload(BytesIO(backup_str.encode('utf-8')), mimetype='application/json')
             service.files().create(body=file_metadata, media_body=media, fields='id').execute()
         return {"status": "backup_complete"}
