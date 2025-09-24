@@ -2376,7 +2376,6 @@ def register_handlers(app_obj: Application):
     )
     app_obj.add_handler(add_student_conv)
     app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
-    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
     app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
     app_obj.add_handler(CommandHandler("backup", admin_backup))
