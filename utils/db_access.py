@@ -12,8 +12,8 @@ import difflib
 
 logger = logging.getLogger(__name__)
 
-# Database path from environment (unified to persistent /data by default)
-DB_PATH = os.getenv("DB_PATH", "/data/bot.db")
+# Database path from environment (default to writable tmp on Render)
+DB_PATH = os.getenv("DB_PATH", "/tmp/avap_bot.db")
 
 # Global database connection and lock
 db_conn = None
@@ -24,6 +24,13 @@ def init_database():
     global db_conn, db_lock
     
     if db_conn is None:
+        # Ensure parent directory exists to avoid OperationalError
+        try:
+            parent_dir = os.path.dirname(DB_PATH) or "."
+            os.makedirs(parent_dir, exist_ok=True)
+        except Exception:
+            # Best effort; continue to connect
+            pass
         db_conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         db_lock = asyncio.Lock()
         

@@ -2209,24 +2209,32 @@ async def telegram_webhook(token: str, request: Request):
         raise HTTPException(status_code=403, detail="Invalid token")
     
     try:
-        body = await request.json()
+        raw = await request.body()
+        logger.info("Webhook received: %s bytes", len(raw))
+        body = json.loads(raw.decode("utf-8")) if raw else {}
         update = Update.de_json(body, telegram_app.bot)
-        
+
         # Ensure application is initialized
         if not telegram_app:
             logger.error("Application not initialized")
             raise HTTPException(status_code=500, detail="Application not initialized")
-        
-        # Handle chat join requests directly
-        if update.chat_join_request:
-            await chat_join_request_handler(update, None)
-        else:
-            await telegram_app.process_update(update)
-        
+
+        # Process quickly: return immediately and handle update asynchronously
+        asyncio.create_task(_process_update_async(update))
         return {"ok": True}
     except Exception as e:
         logger.exception("Error processing webhook: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _process_update_async(update: Update):
+    try:
+        if update.chat_join_request:
+            await chat_join_request_handler(update, None)
+        else:
+            await telegram_app.process_update(update)
+    except Exception as e:
+        logger.exception("Async update processing failed: %s", e)
 
 # Optional Prometheus metrics endpoint
 try:
