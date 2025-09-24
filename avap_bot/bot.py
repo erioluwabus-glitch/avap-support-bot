@@ -110,7 +110,7 @@ QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0")) if os.getenv("QUE
 VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0")) if os.getenv("VERIFICATION_GROUP_ID") else None
 # Removed DB_PATH; using DATABASE_URL via utils.db_async
 ACHIEVER_MODULES = int(os.getenv("ACHIEVER_MODULES", "6"))
-ACHIEVER_WINS = int(os.getenv("ACHIEVER_WING", "3"))
+ACHIEVER_WINS = int(os.getenv("ACHIEVER_WINS", "3"))
 TIMEZONE = os.getenv("TIMEZONE", "Africa/Lagos")
 
 # New feature environment variables
@@ -759,7 +759,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif data == "share_win":
             if not await user_verified_by_telegram_id(query.from_user.id):
                 await query.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-            return
+                return
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("Text", callback_data="win_text")],
                 [InlineKeyboardButton("Image", callback_data="win_image")],
@@ -1851,7 +1851,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         if len(context.args) < 1:
             await update.message.reply_text("Usage: /ask <question>")
-        return
+            return
         question_text = " ".join(context.args).strip()
         if not question_text:
             await update.message.reply_text("Please provide a question.")
@@ -1880,9 +1880,9 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         if not await user_verified_by_telegram_id(update.effective_user.id):
             await update.message.reply_text("Please verify first!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]]))
-        return
-    await update.message.reply_text("What's your question?")
-    return ASK_QUESTION
+            return
+        await update.message.reply_text("What's your question?")
+        return ASK_QUESTION
 
 async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.text or len(update.message.text.strip()) == 0:
@@ -1977,25 +1977,25 @@ async def check_and_award_achiever_badge(telegram_id: int, wins_count: int, subm
             "SELECT notified, systeme_tagged FROM student_badges WHERE telegram_id = ? AND badge_type = ?",
             (telegram_id, "achiever")
         )
+        
+        if row:
+            # Already has badge, check if we need to complete notifications/tagging
+            notified, systeme_tagged = row
+            if not notified:
+                await notify_badge_earned(telegram_id, "achiever")
+                await db_execute(
+                    "UPDATE student_badges SET notified = TRUE WHERE telegram_id = ? AND badge_type = ?",
+                    (telegram_id, "achiever")
+                )
             
-            if row:
-                # Already has badge, check if we need to complete notifications/tagging
-                notified, systeme_tagged = row
-                if not notified:
-                    await notify_badge_earned(telegram_id, "achiever")
-                    await db_execute(
-                        "UPDATE student_badges SET notified = TRUE WHERE telegram_id = ? AND badge_type = ?",
-                        (telegram_id, "achiever")
-                    )
-                
-                if not systeme_tagged:
-                    await tag_achiever_in_systeme(telegram_id)
-                    await db_execute(
-                        "UPDATE student_badges SET systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?",
-                        (telegram_id, "achiever")
-                    )
-                
-                return True
+            if not systeme_tagged:
+                await tag_achiever_in_systeme(telegram_id)
+                await db_execute(
+                    "UPDATE student_badges SET systeme_tagged = TRUE WHERE telegram_id = ? AND badge_type = ?",
+                    (telegram_id, "achiever")
+                )
+            
+            return True
         
         # Check if criteria met
         if wins_count >= ACHIEVER_WINS and submitted_count >= ACHIEVER_MODULES:
@@ -2263,30 +2263,6 @@ async def dbdump():
         logger.exception("DB dump failed: %s", e)
         raise HTTPException(status_code=500, detail="DB dump failed")
 
-# Handler registration
-def register_handlers(app_obj: Application):
-    # Basic handlers
-    app_obj.add_handler(CommandHandler("start", start_handler))
-    app_obj.add_handler(CommandHandler("cancel", cancel_handler))
-    app_obj.add_handler(CommandHandler("help", admin_help_handler))
-    
-    # Admin handlers
-    add_student_conv = ConversationHandler(
-        entry_points=[CommandHandler("add_student", add_student_start)],
-        states={
-            ADD_STUDENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
-            ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
-            ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
-        per_message=False,
-    )
-    app_obj.add_handler(add_student_conv)
-    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
-    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
-    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
-    app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
-    app_obj.add_handler(CommandHandler("backup", admin_backup))
 # Admin: /backup → JSON dump to Discord webhook or Google Drive (service account)
 async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update or not update.effective_user:
@@ -2354,6 +2330,30 @@ async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message:
             await update.message.reply_text("Unexpected error during backup.")
 
+# Handler registration
+def register_handlers(app_obj: Application):
+    # Basic handlers
+    app_obj.add_handler(CommandHandler("start", start_handler))
+    app_obj.add_handler(CommandHandler("cancel", cancel_handler))
+    app_obj.add_handler(CommandHandler("help", admin_help_handler))
+    
+    # Admin handlers
+    add_student_conv = ConversationHandler(
+        entry_points=[CommandHandler("add_student", add_student_start)],
+        states={
+            ADD_STUDENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
+            ADD_STUDENT_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
+            ADD_STUDENT_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        per_message=False,
+    )
+    app_obj.add_handler(add_student_conv)
+    app_obj.add_handler(CommandHandler("verify_student", verify_student_cmd))
+    app_obj.add_handler(CommandHandler("remove_student", remove_student_cmd))
+    app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
+    app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
+    app_obj.add_handler(CommandHandler("backup", admin_backup))
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
