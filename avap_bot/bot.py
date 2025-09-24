@@ -2626,6 +2626,68 @@ async def admin_purge_email(request: Request):
         logger.exception("Admin purge email failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/admin/remove/verified_by_email")
+async def admin_remove_verified_by_email(request: Request):
+    token = request.headers.get("X-Admin-Reset-Token")
+    if not ADMIN_RESET_TOKEN or token != ADMIN_RESET_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        data = await request.json()
+        email = (data.get("email") or "").strip()
+        reason = (data.get("reason") or "admin_remove_by_email").strip()
+        admin_id = data.get("admin_id")
+        if not email:
+            raise HTTPException(status_code=400, detail="email required")
+        # Soft-delete: mark removed_at and record in removals table
+        await db_execute(
+            "UPDATE verified_users SET removed_at = NOW() WHERE email = :email",
+            {"email": email},
+        )
+        # Insert audit rows for all matching users
+        rows = await db_fetchall(
+            "SELECT telegram_id FROM verified_users WHERE email = :email",
+            {"email": email},
+        )
+        for r in rows:
+            tg = r[0]
+            await db_execute(
+                "INSERT INTO removals (telegram_id, admin_id, reason, removed_at) VALUES (:tg, :admin, :reason, NOW())",
+                {"tg": tg, "admin": admin_id, "reason": reason},
+            )
+        return {"status": "ok", "email": email, "soft_deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Admin remove by email failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/remove/verified_by_telegram")
+async def admin_remove_verified_by_telegram(request: Request):
+    token = request.headers.get("X-Admin-Reset-Token")
+    if not ADMIN_RESET_TOKEN or token != ADMIN_RESET_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        data = await request.json()
+        telegram_id = data.get("telegram_id")
+        reason = (data.get("reason") or "admin_remove_by_telegram").strip()
+        admin_id = data.get("admin_id")
+        if not telegram_id:
+            raise HTTPException(status_code=400, detail="telegram_id required")
+        await db_execute(
+            "UPDATE verified_users SET removed_at = NOW() WHERE telegram_id = :tg",
+            {"tg": telegram_id},
+        )
+        await db_execute(
+            "INSERT INTO removals (telegram_id, admin_id, reason, removed_at) VALUES (:tg, :admin, :reason, NOW())",
+            {"tg": telegram_id, "admin": admin_id, "reason": reason},
+        )
+        return {"status": "ok", "telegram_id": telegram_id, "soft_deleted": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Admin remove by telegram failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/trigger_backup")
 async def trigger_backup():
     try:
