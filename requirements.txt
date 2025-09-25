@@ -19,7 +19,9 @@ aiohttp==3.9.5
 slowapi==0.1.9
 prometheus-client==0.20.0
 apscheduler[jobstores]==3.10.4
-# PostgreSQL drivers
+# Supabase client for verification-only database
+supabase==2.3.4
+# Keep PostgreSQL drivers for submissions, wins, questions, etc.
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 # Logging

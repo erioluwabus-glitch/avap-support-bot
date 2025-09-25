@@ -155,6 +155,17 @@ async def ensure_schema() -> None:
         )
         """
     )
+    # Ensure uniqueness per student per badge to avoid duplicates
+    await db_execute(
+        """
+        DO $$ BEGIN
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_student_badges_unique
+            ON student_badges (telegram_id, badge_type);
+        EXCEPTION WHEN others THEN
+            -- ignore
+        END $$;
+        """
+    )
     # removals
     await db_execute(
         """

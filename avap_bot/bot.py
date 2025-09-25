@@ -70,7 +70,13 @@ from features import (
 # Translation utilities
 from utils.db_access import get_user_language
 from utils.translator import translate
-from utils.db_async import init_async_db, close_async_db, db_execute, db_fetchone, db_fetchall
+# Supabase client for verification-only operations
+from utils.supabase_client import (
+    init_supabase, get_supabase, check_verified_user, add_verified_user,
+    check_pending_verification, add_pending_verification, remove_pending_verification,
+    get_all_pending_verifications, get_all_verified_users, soft_delete_verified_user,
+    soft_delete_verified_user_by_email
+)
 # Backup dependencies
 import base64
 from io import BytesIO
@@ -536,33 +542,40 @@ async def notify_admin_manual_dismiss(contact_id: str):
         logger.exception(f"Failed to notify admin about manual dismissal: {e}")
 
 async def tag_achiever_in_systeme(telegram_id: int) -> bool:
-    """Tag student as achiever in Systeme.io."""
+    """Tag student as achiever in Systeme.io.
+
+    Uses Supabase `verified_users` for contact lookup (single source of truth).
+    """
     if not SYSTEME_ACHIEVER_TAG_ID or not SYSTEME_IO_API_KEY:
         return True
-    
+
     try:
-        # Get contact ID from verified_users
-        row = await db_fetchone(
-            "SELECT systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
-            (telegram_id,)
-        )
-        if not row or not row[0]:
-            logger.warning(f"No Systeme.io contact ID found for telegram_id {telegram_id}")
+        # Fetch verified user from Supabase to get systeme_contact_id
+        try:
+            client = get_supabase()
+            res = client.table("verified_users").select("systeme_contact_id,status").eq("telegram_id", telegram_id).execute()
+            user_row = res.data[0] if res.data else None
+        except Exception as e:
+            logger.exception(f"Supabase fetch failed for achiever tag: {e}")
+            user_row = None
+        if not user_row or user_row.get("status") == "removed":
+            logger.warning(f"Verified user not found/removed for telegram_id {telegram_id}")
             return False
-        contact_id = row[0]
-        
+        contact_id = user_row.get("systeme_contact_id")
+        if not contact_id:
+            logger.warning(f"No Systeme.io contact ID for telegram_id {telegram_id}")
+            return False
+
         # Add achiever tag
         tag_id = int(SYSTEME_ACHIEVER_TAG_ID)
         add_payload = {"tag_id": tag_id}
         response = await systeme_api_request("POST", f"/contacts/{contact_id}/tags", json_data=add_payload)
-        
         if response:
             logger.info(f"Successfully added achiever tag to contact {contact_id}")
             return True
-        else:
-            logger.warning(f"Failed to add achiever tag to contact {contact_id}")
-            return False
-            
+        logger.warning(f"Failed to add achiever tag to contact {contact_id}")
+        return False
+
     except Exception as e:
         logger.exception(f"Failed to tag achiever in Systeme.io: {e}")
         return False
@@ -598,6 +611,8 @@ async def is_admin(user_id: int) -> bool:
     return ADMIN_USER_ID and int(user_id) == int(ADMIN_USER_ID)
 
 from utils.user_utils import user_verified_by_telegram_id
+# Async Postgres helpers used across features (submissions, wins, questions, badges)
+from utils.db_async import db_execute, db_fetchone, db_fetchall
 
 async def find_pending_by_hash(h: str):
     return await db_fetchone(
@@ -652,7 +667,7 @@ async def finalize_grading(update: Update, context: ContextTypes.DEFAULT_TYPE, c
         # Save to database
         await db_execute(
             "UPDATE submissions SET score = ?, status = ?, graded_at = ? WHERE submission_id = ?",
-            (int(score), "Graded", datetime.now(timezone.utc).isoformat(), uuid)
+            (int(score), "Graded", datetime.now(timezone.utc), uuid)
         )
         if comment:
             await db_execute(
@@ -735,14 +750,116 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         vid = await user_verified_by_telegram_id(user.id)
         if vid:
             # Verified -> show main menu
-            await reply_translated(update, "✅ You're verified! Welcome to AVAP!", reply_markup=get_main_menu_keyboard())
+            await update.message.reply_text("✅ You are already verified! You now have access to the bot.")
             return
         
-        # Not verified -> invite to verify
-        verify_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
-        await reply_translated(update, "Welcome! To use AVAP features you must verify your details.\nClick Verify Now to begin.", reply_markup=verify_btn)
+        # Not verified -> start verification flow
+        context.user_data['verify_step'] = 'name'
+        await update.message.reply_text("Welcome! Please enter your full name for verification:")
     except Exception as e:
         logger.exception("Error in start_handler: %s", e)
+
+# Student verification flow handler (for /start initiated verification)
+async def handle_student_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle student verification flow initiated by /start command."""
+    if update.effective_chat.type != ChatType.PRIVATE:
+        return
+    
+    # Check if user is already verified
+    if await user_verified_by_telegram_id(update.effective_user.id):
+        return
+    
+    step = context.user_data.get('verify_step')
+    if not step:
+        return
+    
+    if step == 'name':
+        name = update.message.text.strip()
+        if len(name) < 2:
+            await update.message.reply_text("Please enter a valid name (at least 2 characters):")
+            return
+        context.user_data['verify_name'] = name
+        context.user_data['verify_step'] = 'phone'
+        await update.message.reply_text("Enter your phone number:")
+    
+    elif step == 'phone':
+        phone = update.message.text.strip()
+        if not PHONE_RE.match(phone):
+            await update.message.reply_text("Invalid phone format. Use +<countrycode><number>. Try again:")
+            return
+        context.user_data['verify_phone'] = phone
+        context.user_data['verify_step'] = 'email'
+        await update.message.reply_text("Enter your email address:")
+    
+    elif step == 'email':
+        email = update.message.text.strip().lower()
+        if not EMAIL_RE.match(email):
+            await update.message.reply_text("Invalid email. Try again:")
+            return
+        
+        name = context.user_data.get('verify_name')
+        phone = context.user_data.get('verify_phone')
+        
+        # Check for pending verification by email
+        pending = await check_pending_verification(email)
+        if not pending:
+            await update.message.reply_text("❌ Your details do not match any pending verification. Contact admin.")
+            context.user_data.clear()
+            return
+        
+        # Match found -> move to verified_users
+        success = await add_verified_user(name, email, phone, update.effective_user.id)
+        if not success:
+            await update.message.reply_text("Verification failed. Please try again.")
+            context.user_data.clear()
+            return
+        
+        # Remove from pending verifications
+        await remove_pending_verification(email)
+        
+        # Update Google Sheets
+        try:
+            await sync_to_sheets(
+                "Verifications",
+                "append",
+                {},
+                row_data=[name, phone, email, update.effective_user.id, "verified"]
+            )
+        except Exception:
+            logger.exception("Failed to update Google Sheets")
+        
+        # Add to Systeme.io and tag "verified"
+        try:
+            parts = name.split()
+            first = parts[0] if parts else ""
+            last = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+            # Check if contact exists first
+            existing_contact = await systeme_get_contact_by_email(email)
+            if existing_contact:
+                contact_id = existing_contact['id']
+                await systeme_update_contact(contact_id, first, last, phone)
+            else:
+                contact_id = await systeme_create_contact_with_retry(first, last, email, phone)
+
+            if contact_id:
+                # Add and verify tag
+                await systeme_add_and_verify_tag(contact_id)
+                logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+
+                # Update Supabase with contact ID
+                try:
+                    client = get_supabase()
+                    client.table("verified_users").update({
+                        "systeme_contact_id": contact_id
+                    }).eq("telegram_id", update.effective_user.id).execute()
+                except Exception as e:
+                    logger.exception(f"Failed to update systeme_contact_id in Supabase: {e}")
+        except Exception as e:
+            logger.exception(f"Systeme.io integration failed: {e}")
+        
+        await update.message.reply_text("✅ Verification successful! You now have full access.")
+        context.user_data.clear()
 
 # Callback query for main inline buttons
 # Menu callback handler (for inline buttons) - DM ONLY
@@ -910,39 +1027,32 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     name = context.user_data.get('new_student_name')
     phone = context.user_data.get('new_student_phone')
-    h = make_hash(name, email, phone)
-    created_at = datetime.now(timezone.utc).isoformat()
     
     # Check for existing pending row to avoid generic error on insert
-    existing = await db_fetchone(
-        "SELECT id FROM pending_verifications WHERE email = ? AND status = ?",
-        (email, "Pending"),
-    )
+    existing = await check_pending_verification(email)
     if existing:
         await update.message.reply_text("A pending student with this email already exists.")
         return ConversationHandler.END
-    try:
-        await db_execute(
-            "INSERT INTO pending_verifications (name, email, phone, status, hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (name, email, phone, "Pending", h, created_at),
-        )
-    except Exception as e:
-        logger.exception("Add student insert failed: %s", e)
+    
+    # Add to Supabase pending_verifications
+    success = await add_pending_verification(name, email, phone, 0)
+    if not success:
         await update.message.reply_text("Failed to add student. Please try again.")
         return ConversationHandler.END
     
-    # Also append to Google Sheets if configured via unified helper
-    try:
-        await sync_to_sheets(
-            "Verifications",
-            "append",
-            {"name": name, "email": email, "phone": phone, "telegram_id": 0, "status": "Pending", "hash": h, "created_at": created_at},
-            row_data=[name, email, phone, 0, "Pending", h, created_at]
-        )
-    except Exception:
-        logger.exception("Failed to append to Google Sheets (non-fatal).")
+    # Send acknowledgement with inline button for admin verification
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Verify Now", callback_data=f"verify_{email}")]
+    ])
     
-    await reply_translated(update, f"Student {name} added. They can verify with these details. Admins can manually verify with /verify_student [email].")
+    await update.message.reply_text(
+        f"Student added to pending verifications ✅\n\n"
+        f"Name: {name}\n"
+        f"Phone: {phone}\n"
+        f"Email: {email}\n\n"
+        f"Click 'Verify Now' to verify immediately, or let the student verify themselves via DM.",
+        reply_markup=keyboard
+    )
     return ConversationHandler.END
 
 # Admin manual verification: /verify_student [email]
@@ -960,25 +1070,21 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await reply_translated(update, "Invalid email.")
         return
     
-    row = await db_fetchone(
-        "SELECT name, phone, hash FROM pending_verifications WHERE email = ? AND status = ?",
-        (email, "Pending")
-    )
-    if not row:
+    # Check for pending verification in Supabase
+    pending = await check_pending_verification(email)
+    if not pending:
         await reply_translated(update, "No pending student found with that email. Add with /add_student first.")
         return
     
-    name, phone, h = row
-    # Mark verified
-    verified_at = datetime.now(timezone.utc).isoformat()
-    await db_execute(
-        "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, status = EXCLUDED.status",
-        (name, email, phone, 0, "Verified", verified_at)
-    )
-    await db_execute(
-        "UPDATE pending_verifications SET status = ? WHERE email = ?",
-        ("Verified", email)
-    )
+    name = pending.get("name")
+    phone = pending.get("phone")
+    
+    # Add to verified users in Supabase
+    success = await add_verified_user(name, email, phone, 0)
+    if not success:
+        await reply_translated(update, "Failed to verify student. Please try again.")
+        return
+    await remove_pending_verification(email)
     
     # Update Google Sheets via unified helper
     try:
@@ -1033,39 +1139,130 @@ async def verify_student_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(f"Student with email {email} verified successfully!")
 
+# Inline button handler for admin verification
+async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin verification via inline button."""
+    query = update.callback_query
+    if not query:
+        return
+    
+    await query.answer()
+    
+    if not await is_admin(query.from_user.id):
+        await query.edit_message_text("❌ You are not authorized to perform this action.")
+        return
+    
+    if query.data.startswith("verify_"):
+        email = query.data.split("_", 1)[1]
+        
+        # Get pending verification
+        pending = await check_pending_verification(email)
+        if not pending:
+            await query.edit_message_text("❌ No pending verification found for this email.")
+            return
+        
+        # Move to verified_users
+        success = await add_verified_user(
+            pending.get("name"), 
+            pending.get("email"), 
+            pending.get("phone"), 
+            pending.get("telegram_id", 0)
+        )
+        
+        if success:
+            # Remove from pending
+            await remove_pending_verification(email)
+            
+            # Update Google Sheets
+            try:
+                await sync_to_sheets(
+                    "Verifications",
+                    "append",
+                    {},
+                    row_data=[pending.get("name"), pending.get("phone"), pending.get("email"), pending.get("telegram_id", 0), "verified"]
+                )
+            except Exception:
+                logger.exception("Failed to update Google Sheets")
+            
+            # Add to Systeme.io
+            try:
+                name = pending.get("name", "")
+                parts = name.split()
+                first = parts[0] if parts else ""
+                last = " ".join(parts[1:]) if len(parts) > 1 else ""
+                
+                # Check if contact exists first
+                existing_contact = await systeme_get_contact_by_email(email)
+                if existing_contact:
+                    contact_id = existing_contact['id']
+                    await systeme_update_contact(contact_id, first, last, pending.get("phone", ""))
+                else:
+                    contact_id = await systeme_create_contact_with_retry(first, last, email, pending.get("phone", ""))
+                
+                if contact_id:
+                    await systeme_add_and_verify_tag(contact_id)
+                    logger.info(f"Systeme.io contact {contact_id} created/updated and tagged successfully")
+            except Exception as e:
+                logger.exception(f"Systeme.io integration failed: {e}")
+            
+            await query.edit_message_text("✅ Student verified successfully!")
+        else:
+            await query.edit_message_text("❌ Failed to verify student. Please try again.")
+
 # Enhanced remove student functionality
 async def find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, name, or telegram ID with partial matching."""
     identifier = (identifier or "").strip()
+    
+    # Get all verified users from Supabase
+    all_users = await get_all_verified_users()
+    active_users = [user for user in all_users if user.get("status") != "removed"]
+    
     # Email exact (case-insensitive)
     if "@" in identifier:
-        row = await db_fetchone(
-            "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(email) = LOWER(?) AND removed_at IS NULL",
-            (identifier,)
-        )
-        if row:
-            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        for user in active_users:
+            if user.get("email", "").lower() == identifier.lower():
+                return {
+                    "telegram_id": user.get("telegram_id"),
+                    "name": user.get("name"),
+                    "email": user.get("email"),
+                    "phone": user.get("phone"),
+                    "systeme_contact_id": user.get("systeme_contact_id")
+                }
+    
     # Telegram ID
     try:
         t_id = int(identifier)
-        row = await db_fetchone(
-            "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE telegram_id = ? AND removed_at IS NULL",
-            (t_id,)
-        )
-        if row:
-            return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
+        for user in active_users:
+            if user.get("telegram_id") == t_id:
+                return {
+                    "telegram_id": user.get("telegram_id"),
+                    "name": user.get("name"),
+                    "email": user.get("email"),
+                    "phone": user.get("phone"),
+                    "systeme_contact_id": user.get("systeme_contact_id")
+                }
     except ValueError:
         pass
+    
     # Partial name (case-insensitive)
-    rows = await db_fetchall(
-        "SELECT telegram_id, name, email, phone, systeme_contact_id FROM verified_users WHERE LOWER(name) LIKE ? AND removed_at IS NULL",
-        (f"%{identifier.lower()}%",)
-    )
-    if len(rows) == 1:
-        row = rows[0]
-        return {"telegram_id": row[0], "name": row[1], "email": row[2], "phone": row[3], "systeme_contact_id": row[4]}
-    elif len(rows) > 1:
-        return {"multiple_matches": [(row[0], row[1], row[2]) for row in rows]}
+    matches = []
+    for user in active_users:
+        if identifier.lower() in user.get("name", "").lower():
+            matches.append((user.get("telegram_id"), user.get("name"), user.get("email")))
+    
+    if len(matches) == 1:
+        user = next(u for u in active_users if u.get("telegram_id") == matches[0][0])
+        return {
+            "telegram_id": user.get("telegram_id"),
+            "name": user.get("name"),
+            "email": user.get("email"),
+            "phone": user.get("phone"),
+            "systeme_contact_id": user.get("systeme_contact_id")
+        }
+    elif len(matches) > 1:
+        return {"multiple_matches": matches}
+    
     return None
 
 async def remove_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1173,19 +1370,11 @@ async def remove_student_reason(update: Update, context: ContextTypes.DEFAULT_TY
     
     for student in students_to_remove:
         try:
-            # Soft delete in database
-            await db_execute(
-                "UPDATE verified_users SET removed_at = ? WHERE telegram_id = ?",
-                (datetime.now(timezone.utc).isoformat(), student['telegram_id'])
-            )
-            await db_execute(
-                "UPDATE pending_verifications SET status = ?, telegram_id = ? WHERE email = ?",
-                ("Removed", 0, student['email'])
-            )
-            await db_execute(
-                "INSERT INTO removals (telegram_id, admin_id, reason) VALUES (?, ?, ?)",
-                (student['telegram_id'], update.effective_user.id, reason)
-            )
+            # Soft delete in Supabase
+            success = await soft_delete_verified_user(student['telegram_id'])
+            if not success:
+                failed_count += 1
+                continue
             
             # Update Google Sheets
             try:
@@ -1365,39 +1554,31 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = context.user_data.get('verify_phone')
     h = make_hash(name, email, phone)
     
-    row = await db_fetchone(
-        "SELECT id, name, email, phone, status FROM pending_verifications WHERE hash = ?",
-        (h,)
-    )
-    if not row:
-        await update.message.reply_text("Details not found. Contact an admin or try again.")
-        # Offer Verify Now
-        verify_btn = InlineKeyboardMarkup([[InlineKeyboardButton("Verify Now", callback_data="verify_now")]])
-        await update.message.reply_text("Try again or contact admin.", reply_markup=verify_btn)
+    # Check for pending verification by email
+    pending = await check_pending_verification(email)
+    if not pending:
+        await update.message.reply_text("❌ Your details do not match any pending verification. Contact admin.")
         return ConversationHandler.END
     
-    # Match found -> mark verified
-    pending_id = row[0]
-    await db_execute(
-        "INSERT INTO verified_users (name, email, phone, telegram_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, phone = EXCLUDED.phone, telegram_id = EXCLUDED.telegram_id, status = EXCLUDED.status",
-        (name, email, phone, update.effective_user.id, "Verified", datetime.now(timezone.utc).isoformat())
-    )
-    await db_execute(
-        "UPDATE pending_verifications SET telegram_id = ?, status = ? WHERE id = ?",
-        (update.effective_user.id, "Verified", pending_id)
-    )
+    # Match found -> move to verified_users
+    success = await add_verified_user(name, email, phone, update.effective_user.id)
+    if not success:
+        await update.message.reply_text("Verification failed. Please try again.")
+        return ConversationHandler.END
     
-    # Update Google Sheets via unified helper
+    # Remove from pending verifications
+    await remove_pending_verification(email)
+    
+    # Update Google Sheets
     try:
         await sync_to_sheets(
             "Verifications",
-            "update",
-            {"search_value": email},
-            search_col=2,
-            update_cols=[(4, update.effective_user.id), (5, "Verified")]
+            "append",
+            {},
+            row_data=[name, phone, email, update.effective_user.id, "verified"]
         )
     except Exception:
-        logger.exception("Sheets sync failed")
+        logger.exception("Failed to update Google Sheets")
     
     # Enhanced Systeme.io integration with async helpers
     systeme_success = False
@@ -1426,11 +1607,14 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 logger.warning(f"Systeme.io contact {contact_id} created but tagging failed")
 
-            # Update DB with contact ID
-            await db_execute(
-                "UPDATE verified_users SET systeme_contact_id = ? WHERE telegram_id = ?",
-                (contact_id, update.effective_user.id)
-            )
+            # Update Supabase with contact ID
+            try:
+                client = get_supabase()
+                client.table("verified_users").update({
+                    "systeme_contact_id": contact_id
+                }).eq("telegram_id", update.effective_user.id).execute()
+            except Exception as e:
+                logger.exception(f"Failed to update systeme_contact_id in Supabase: {e}")
         else:
             raise ValueError("Contact creation failed")
 
@@ -1438,27 +1622,7 @@ async def verify_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception(f"Systeme.io integration failed: {e}")
         await notify_admin_systeme_failure(name, email, str(e), contact_id)
 
-    # Send web link to student immediately after verification
-    try:
-        await update.message.reply_text(
-            f"🎉 Welcome to AVAP! Your verification is complete.\n\n"
-            f"📚 Access your course materials here: {AVAP_ACTIVATE_LINK}\n\n"
-            f"This link contains all instructions on how to access your course.",
-            reply_markup=get_main_menu_keyboard()
-        )
-    except Exception as e:
-        logger.exception(f"Failed to send web link to student: {e}")
-        # Fallback message without link
-        await update.message.reply_text("✅ Verified! Welcome to AVAP!", reply_markup=get_main_menu_keyboard())
-
-    # User feedback based on Systeme.io success
-    if systeme_success:
-        logger.info(f"Student {name} ({email}) verified successfully with full Systeme.io integration")
-    else:
-        logger.warning(f"Student {name} ({email}) verified in bot but Systeme.io sync had issues")
-    
-    # Clean up and end conversation
-    context.user_data.clear()
+    await update.message.reply_text("✅ Verification successful! You now have full access.")
     return ConversationHandler.END
 
 # Assignment submission handlers
@@ -1517,7 +1681,7 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
     submission_uuid = str(uuid.uuid4())
     module = context.user_data.get('submit_module')
     username = update.effective_user.username or update.effective_user.full_name
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(timezone.utc)
     
     await db_execute(
         """INSERT INTO submissions (submission_id, username, telegram_id, module, status, media_type, media_file_id, created_at)
@@ -1530,7 +1694,7 @@ async def submit_media_upload(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Submissions",
             "append",
             {},
-            row_data=[submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, timestamp]
+            row_data=[submission_uuid, username, update.effective_user.id, module, "Submitted", media_type, file_id, str(timestamp)]
         )
     except Exception:
         logger.exception("Failed to append submission to Sheets")
@@ -1823,7 +1987,7 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
         content = update.message.video.file_id
     
     win_id = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(timezone.utc)
     
     await db_execute(
         "INSERT INTO wins (win_id, username, telegram_id, content_type, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1835,7 +1999,7 @@ async def win_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Wins",
             "append",
             {},
-            row_data=[win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, timestamp]
+            row_data=[win_id, update.effective_user.username or update.effective_user.full_name, update.effective_user.id, typ, content, str(timestamp)]
         )
     except Exception:
         logger.exception("Failed to append win to Sheets")
@@ -1881,7 +2045,7 @@ async def ask_start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         qid = str(uuid.uuid4())
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now(timezone.utc)
         
         await db_execute(
             "INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1909,7 +2073,7 @@ async def ask_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     question_text = update.message.text.strip()
     qid = str(uuid.uuid4())
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(timezone.utc)
     
     await db_execute(
         "INSERT INTO questions (question_id, username, telegram_id, question, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1960,7 +2124,7 @@ async def answer_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ans = update.message.text or "[non-text answer]"
     await db_execute(
         "UPDATE questions SET answer = ?, answered_by = ?, answered_at = ?, status = ? WHERE question_id = ?",
-        (ans, update.effective_user.id, datetime.now(timezone.utc).isoformat(), "Answered", qid)
+        (ans, update.effective_user.id, datetime.now(timezone.utc), "Answered", qid)
     )
     
     # Send answer to student
@@ -2150,13 +2314,23 @@ async def chat_join_request_handler(update: Update, context: ContextTypes.DEFAUL
 
 # Sunday reminder job
 async def sunday_reminder_job():
-    rows = await db_fetchall("SELECT telegram_id, name FROM verified_users WHERE status = ?", ("Verified",))
-    for r in rows:
-        t_id, name = r[0], r[1]
-        try:
-            await telegram_app.bot.send_message(chat_id=t_id, text="🌞 Sunday Reminder: Check your progress with /status and share a win with /share_win!", reply_markup=get_main_menu_keyboard())
-        except Exception:
-            logger.exception("Failed to send reminder to %s", t_id)
+    try:
+        users = await get_all_verified_users()
+        for user in users:
+            if user.get("status", "verified").lower() == "verified":
+                t_id = user.get("telegram_id")
+                if not t_id:
+                    continue
+                try:
+                    await telegram_app.bot.send_message(
+                        chat_id=t_id,
+                        text="🌞 Sunday Reminder: Check your progress with /status and share a win with /share_win!",
+                        reply_markup=get_main_menu_keyboard(),
+                    )
+                except Exception:
+                    logger.exception("Failed to send reminder to %s", t_id)
+    except Exception as e:
+        logger.exception("Sunday reminder job failed: %s", e)
 
 # FastAPI endpoints
 @app.get("/")
@@ -2271,19 +2445,16 @@ async def dbdump():
     try:
         if not ADMIN_USER_ID:
             raise HTTPException(status_code=403, detail="Admin not configured")
-        tables = {
-            "verified_users": "SELECT id, name, email, phone, telegram_id, status, systeme_contact_id, language, created_at, removed_at FROM verified_users",
-            "pending_verifications": "SELECT id, name, email, phone, telegram_id, status, hash, created_at FROM pending_verifications",
-            "submissions": "SELECT id, submission_id, username, telegram_id, module, status, media_type, media_file_id, score, grader_id, comment, comment_type, created_at, graded_at FROM submissions",
-            "wins": "SELECT id, win_id, username, telegram_id, content_type, content, created_at FROM wins",
-            "questions": "SELECT id, question_id, username, telegram_id, question, status, created_at, answer, answered_by, answered_at FROM questions",
-            "student_badges": "SELECT id, telegram_id, badge_type, earned_at, notified, systeme_tagged FROM student_badges",
-            "removals": "SELECT id, telegram_id, admin_id, reason, removed_at FROM removals",
+        
+        # Get data from Supabase (verification tables only)
+        verified_users = await get_all_verified_users()
+        pending_verifications = await get_all_pending_verifications()
+        
+        payload = {
+            "verified_users": verified_users,
+            "pending_verifications": pending_verifications,
+            "note": "Only verification data shown. Submissions, wins, questions remain in Telegram/Sheets."
         }
-        payload = {}
-        for name, sql in tables.items():
-            rows = await db_fetchall(sql)
-            payload[name] = rows
         return JSONResponse(payload)
     except Exception as e:
         logger.exception("DB dump failed: %s", e)
@@ -2298,9 +2469,9 @@ async def admin_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("You are not authorized to run backups.")
         return
     try:
-        rows = await db_fetchall("SELECT * FROM verified_users")
-        backup_str = json.dumps(rows, default=str)
-        logger.info({"event": "backup_started", "rows": len(rows)})
+        verified_users = await get_all_verified_users()
+        backup_str = json.dumps(verified_users, default=str)
+        logger.info({"event": "backup_started", "rows": len(verified_users)})
 
         discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
         drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
@@ -2363,6 +2534,9 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("cancel", cancel_handler))
     app_obj.add_handler(CommandHandler("help", admin_help_handler))
     
+    # Student verification flow handler (for /start initiated verification)
+    app_obj.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_student_verification))
+    
     # Admin handlers
     add_student_conv = ConversationHandler(
         entry_points=[CommandHandler("add_student", add_student_start)],
@@ -2379,6 +2553,9 @@ def register_handlers(app_obj: Application):
     app_obj.add_handler(CommandHandler("get_submission", get_submission_cmd))
     app_obj.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
     app_obj.add_handler(CommandHandler("backup", admin_backup))
+    
+    # Admin verification callback handler
+    app_obj.add_handler(CallbackQueryHandler(admin_verify_callback, pattern="^verify_"))
     
     # Verification conversation for students
     verify_conv = ConversationHandler(
@@ -2521,12 +2698,21 @@ async def on_startup():
     logger.info("Starting up AVAP bot - webhook mode")
     
     # Initialize async DB and ensure schema exists
+    # Initialize Supabase for verification-only operations
     try:
-        await init_async_db()
-        from utils.db_async import ensure_schema
-        await ensure_schema()
+        init_supabase()
+        logger.info("Supabase client initialized successfully")
     except Exception as e:
-        logger.exception("Failed to initialize async DB: %s", e)
+        logger.exception("Failed to initialize Supabase: %s", e)
+    
+    # Initialize PostgreSQL for submissions, wins, questions, etc.
+    try:
+        from utils.db_async import init_async_db, ensure_schema
+        await init_async_db()
+        await ensure_schema()
+        logger.info("PostgreSQL initialized successfully")
+    except Exception as e:
+        logger.exception("Failed to initialize PostgreSQL: %s", e)
 
     # Initialize Google Sheets
     init_gsheets()
@@ -2610,7 +2796,9 @@ async def admin_purge_pending(request: Request):
     if not ADMIN_RESET_TOKEN or token != ADMIN_RESET_TOKEN:
         raise HTTPException(status_code=403, detail="Forbidden")
     try:
-        await db_execute("TRUNCATE TABLE pending_verifications;")
+        # Get all pending verifications and delete them
+        client = get_supabase()
+        result = client.table("pending_verifications").delete().execute()
         return {"status": "ok", "purged": "pending_verifications"}
     except Exception as e:
         logger.exception("Admin purge pending failed: %s", e)
@@ -2626,7 +2814,12 @@ async def admin_purge_email(request: Request):
         email = (data.get("email") or "").strip()
         if not email:
             raise HTTPException(status_code=400, detail="email required")
-        await db_execute("DELETE FROM pending_verifications WHERE email = :email", {"email": email})
+        
+        # Delete from Supabase
+        success = await remove_pending_verification(email)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete pending verification")
+        
         return {"status": "ok", "deleted_email": email}
     except HTTPException:
         raise
@@ -2646,22 +2839,12 @@ async def admin_remove_verified_by_email(request: Request):
         admin_id = data.get("admin_id")
         if not email:
             raise HTTPException(status_code=400, detail="email required")
-        # Soft-delete: mark removed_at and record in removals table
-        await db_execute(
-            "UPDATE verified_users SET removed_at = NOW() WHERE email = :email",
-            {"email": email},
-        )
-        # Insert audit rows for all matching users
-        rows = await db_fetchall(
-            "SELECT telegram_id FROM verified_users WHERE email = :email",
-            {"email": email},
-        )
-        for r in rows:
-            tg = r[0]
-            await db_execute(
-                "INSERT INTO removals (telegram_id, admin_id, reason, removed_at) VALUES (:tg, :admin, :reason, NOW())",
-                {"tg": tg, "admin": admin_id, "reason": reason},
-            )
+        
+        # Soft-delete in Supabase
+        success = await soft_delete_verified_user_by_email(email)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to soft delete user")
+        
         return {"status": "ok", "email": email, "soft_deleted": True}
     except HTTPException:
         raise
@@ -2681,14 +2864,12 @@ async def admin_remove_verified_by_telegram(request: Request):
         admin_id = data.get("admin_id")
         if not telegram_id:
             raise HTTPException(status_code=400, detail="telegram_id required")
-        await db_execute(
-            "UPDATE verified_users SET removed_at = NOW() WHERE telegram_id = :tg",
-            {"tg": telegram_id},
-        )
-        await db_execute(
-            "INSERT INTO removals (telegram_id, admin_id, reason, removed_at) VALUES (:tg, :admin, :reason, NOW())",
-            {"tg": telegram_id, "admin": admin_id, "reason": reason},
-        )
+        
+        # Soft-delete in Supabase
+        success = await soft_delete_verified_user(telegram_id)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to soft delete user")
+        
         return {"status": "ok", "telegram_id": telegram_id, "soft_deleted": True}
     except HTTPException:
         raise
@@ -2699,9 +2880,9 @@ async def admin_remove_verified_by_telegram(request: Request):
 @app.get("/trigger_backup")
 async def trigger_backup():
     try:
-        rows = await db_fetchall("SELECT * FROM verified_users")
-        backup_str = json.dumps(rows, default=str)
-        logger.info({"event": "triggered_backup", "rows": len(rows)})
+        verified_users = await get_all_verified_users()
+        backup_str = json.dumps(verified_users, default=str)
+        logger.info({"event": "triggered_backup", "rows": len(verified_users)})
 
         discord_webhook = os.getenv("DISCORD_WEBHOOK_URL")
         drive_creds_b64 = os.getenv("GOOGLE_DRIVE_CREDENTIALS_JSON")
