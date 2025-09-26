@@ -189,3 +189,9 @@ add_tip_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
     per_message=False
 )
+
+
+def register_handlers(application):
+    """Register all tips handlers with the application"""
+    # Add conversation handler
+    application.add_handler(add_tip_conv)

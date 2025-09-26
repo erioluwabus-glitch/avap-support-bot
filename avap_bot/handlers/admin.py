@@ -381,3 +381,13 @@ remove_student_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
     per_message=False
 )
+
+
+def register_handlers(application):
+    """Register all admin handlers with the application"""
+    # Add conversation handlers
+    application.add_handler(add_student_conv)
+    application.add_handler(remove_student_conv)
+    
+    # Add callback query handlers
+    application.add_handler(CallbackQueryHandler(admin_verify_callback, pattern="^verify_"))

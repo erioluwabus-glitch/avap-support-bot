@@ -14,10 +14,8 @@ from telegram.constants import ChatType
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # Import modular components
-from handlers.admin import add_student_conv, remove_student_conv, admin_verify_callback
-from handlers.student import start_handler, submit_conv, share_win_conv, ask_conv, status_callback
-from handlers.grading import grade_conv
-from handlers.tips import add_tip_conv, schedule_daily_tips
+from handlers import register_all
+from handlers.tips import schedule_daily_tips
 from handlers.webhook import webhook_handler, health_check
 from web.admin_endpoints import router as admin_router
 
@@ -62,7 +60,7 @@ async def on_startup():
         telegram_app = Application.builder().token(BOT_TOKEN).build()
         
         # Register handlers
-        await _register_handlers()
+        register_all(telegram_app)
         logger.info("✅ Handlers registered")
         
         # Initialize scheduler
@@ -116,28 +114,7 @@ async def on_shutdown():
         logger.exception("❌ Bot shutdown error: %s", e)
 
 
-async def _register_handlers():
-    """Register all bot handlers"""
-    # Admin handlers
-    telegram_app.add_handler(add_student_conv)
-    telegram_app.add_handler(remove_student_conv)
-    telegram_app.add_handler(CallbackQueryHandler(admin_verify_callback, pattern="^verify_"))
-    
-    # Student handlers
-    telegram_app.add_handler(CommandHandler("start", start_handler))
-    telegram_app.add_handler(submit_conv)
-    telegram_app.add_handler(share_win_conv)
-    telegram_app.add_handler(ask_conv)
-    telegram_app.add_handler(CallbackQueryHandler(status_callback, pattern="^status$"))
-    
-    # Grading handlers
-    telegram_app.add_handler(grade_conv)
-    
-    # Tips handlers
-    telegram_app.add_handler(add_tip_conv)
-    
-    # Cancel handler (fallback)
-    telegram_app.add_handler(CommandHandler("cancel", lambda u, c: "Operation cancelled."))
+# Handler registration is now handled by register_all() from handlers package
 
 
 async def _set_webhook():

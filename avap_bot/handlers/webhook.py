@@ -52,3 +52,10 @@ async def _process_update(update_data: Dict[str, Any]):
 async def health_check() -> Dict[str, str]:
     """Health check endpoint"""
     return {"status": "ok", "service": "avap-bot"}
+
+
+def register_handlers(application):
+    """Register webhook handlers with the application"""
+    # Webhook handlers don't need to register with the application
+    # They are handled by FastAPI endpoints
+    pass

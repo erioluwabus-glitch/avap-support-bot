@@ -528,3 +528,17 @@ ask_conv = ConversationHandler(
     fallbacks=[CommandHandler("cancel", cancel_handler)],
     per_message=False
 )
+
+
+def register_handlers(application):
+    """Register all student handlers with the application"""
+    # Add command handlers
+    application.add_handler(CommandHandler("start", start_handler))
+    
+    # Add conversation handlers
+    application.add_handler(submit_conv)
+    application.add_handler(share_win_conv)
+    application.add_handler(ask_conv)
+    
+    # Add callback query handlers
+    application.add_handler(CallbackQueryHandler(status_callback, pattern="^status$"))
