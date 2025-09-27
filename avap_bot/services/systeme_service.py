@@ -1,16 +1,16 @@
 """
-Systeme.io service for contact management
+Systeme.io service for contact management - Async implementation with httpx
 """
 import os
 import logging
-import aiohttp
 from typing import Optional, Dict, Any
+import httpx
 
 logger = logging.getLogger(__name__)
 
 SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
 SYSTEME_ACHIEVER_TAG_ID = os.getenv("SYSTEME_ACHIEVER_TAG_ID")
-SYSTEME_BASE_URL = "https://api.systeme.io/api/v1"
+SYSTEME_BASE_URL = os.getenv("SYSTEME_BASE_URL", "https://api.systeme.io/api/v1")
 
 
 async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
@@ -34,33 +34,34 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
         }
         
-        async with aiohttp.ClientSession() as session:
-            # Create contact
-            async with session.post(
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
                 f"{SYSTEME_BASE_URL}/contacts",
                 headers=headers,
-                json=contact_payload
-            ) as response:
-                if response.status == 201:
-                    result = await response.json()
-                    contact_id = result.get("id")
-                    logger.info("Created Systeme.io contact: %s", contact_data.get("email"))
-                    
-                    # Apply achiever tag if applicable
-                    if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
-                        await _apply_achiever_tag(contact_id, session, headers)
-                    
-                    return contact_id
-                else:
-                    logger.warning("Failed to create Systeme.io contact: %s", await response.text())
-                    return None
+                json=contact_payload,
+                timeout=10.0
+            )
+            
+            if response.status_code == 201:
+                result = response.json()
+                contact_id = result.get("id")
+                logger.info("Created Systeme.io contact: %s", contact_data.get("email"))
+                
+                # Apply achiever tag if applicable
+                if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+                    await _apply_achiever_tag(contact_id, client, headers)
+                
+                return contact_id
+            else:
+                logger.warning("Failed to create Systeme.io contact: %s", response.text)
+                return None
         
     except Exception as e:
         logger.exception("Failed to create Systeme.io contact: %s", e)
         return None
 
 
-async def _apply_achiever_tag(contact_id: str, session: aiohttp.ClientSession, headers: Dict[str, str]) -> bool:
+async def _apply_achiever_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
     """Apply achiever tag to contact"""
     try:
         tag_payload = {
@@ -68,25 +69,27 @@ async def _apply_achiever_tag(contact_id: str, session: aiohttp.ClientSession, h
             "tag_id": SYSTEME_ACHIEVER_TAG_ID
         }
         
-        async with session.post(
+        response = await client.post(
             f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
             headers=headers,
-            json=tag_payload
-        ) as response:
-            if response.status == 200:
-                logger.info("Applied achiever tag to contact: %s", contact_id)
-                return True
-            else:
-                logger.warning("Failed to apply achiever tag: %s", await response.text())
-                return False
-                
+            json=tag_payload,
+            timeout=10.0
+        )
+        
+        if response.status_code == 200:
+            logger.info("Applied achiever tag to contact: %s", contact_id)
+            return True
+        else:
+            logger.warning("Failed to apply achiever tag: %s", response.text)
+            return False
+            
     except Exception as e:
         logger.exception("Failed to apply achiever tag: %s", e)
         return False
 
 
-async def untag_or_remove_contact(contact_data: Dict[str, Any]) -> bool:
-    """Remove tag or delete contact from Systeme.io"""
+async def remove_contact_by_email(email: str) -> bool:
+    """Remove contact from Systeme.io by email"""
     try:
         if not SYSTEME_API_KEY:
             logger.warning("SYSTEME_API_KEY not set, skipping contact removal")
@@ -97,58 +100,59 @@ async def untag_or_remove_contact(contact_data: Dict[str, Any]) -> bool:
             "Content-Type": "application/json"
         }
         
-        email = contact_data.get("email")
-        if not email:
-            return False
-        
-        async with aiohttp.ClientSession() as session:
+        async with httpx.AsyncClient() as client:
             # Find contact by email
-            async with session.get(
+            response = await client.get(
                 f"{SYSTEME_BASE_URL}/contacts",
                 headers=headers,
-                params={"email": email}
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    contacts = result.get("data", [])
+                params={"email": email},
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                contacts = result.get("data", [])
+                
+                if contacts:
+                    contact_id = contacts[0].get("id")
                     
-                    if contacts:
-                        contact_id = contacts[0].get("id")
-                        
-                        # Remove tags
-                        await session.delete(
-                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
-                            headers=headers
-                        )
-                        
-                        # Delete contact
-                        async with session.delete(
-                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}",
-                            headers=headers
-                        ) as delete_response:
-                            if delete_response.status == 200:
-                                logger.info("Removed Systeme.io contact: %s", email)
-                                return True
-                            else:
-                                logger.warning("Failed to delete contact: %s", await delete_response.text())
-                                return False
+                    # Remove tags
+                    await client.delete(
+                        f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
+                        headers=headers,
+                        timeout=10.0
+                    )
+                    
+                    # Delete contact
+                    delete_response = await client.delete(
+                        f"{SYSTEME_BASE_URL}/contacts/{contact_id}",
+                        headers=headers,
+                        timeout=10.0
+                    )
+                    
+                    if delete_response.status_code == 200:
+                        logger.info("Removed Systeme.io contact: %s", email)
+                        return True
                     else:
-                        logger.warning("Contact not found in Systeme.io: %s", email)
+                        logger.warning("Failed to delete contact: %s", delete_response.text)
                         return False
                 else:
-                    logger.warning("Failed to find contact: %s", await response.text())
+                    logger.warning("Contact not found in Systeme.io: %s", email)
                     return False
+            else:
+                logger.warning("Failed to find contact: %s", response.text)
+                return False
         
     except Exception as e:
         logger.exception("Failed to remove Systeme.io contact: %s", e)
         return False
 
 
-async def update_contact_status(contact_data: Dict[str, Any], new_status: str) -> bool:
-    """Update contact status in Systeme.io"""
+async def tag_achiever(contact_id: str) -> bool:
+    """Add achiever tag to contact"""
     try:
-        if not SYSTEME_API_KEY:
-            logger.warning("SYSTEME_API_KEY not set, skipping contact update")
+        if not SYSTEME_API_KEY or not SYSTEME_ACHIEVER_TAG_ID:
+            logger.warning("SYSTEME_API_KEY or SYSTEME_ACHIEVER_TAG_ID not set, skipping achiever tagging")
             return False
         
         headers = {
@@ -156,49 +160,43 @@ async def update_contact_status(contact_data: Dict[str, Any], new_status: str) -
             "Content-Type": "application/json"
         }
         
-        email = contact_data.get("email")
-        if not email:
-            return False
-        
-        async with aiohttp.ClientSession() as session:
-            # Find contact by email
-            async with session.get(
-                f"{SYSTEME_BASE_URL}/contacts",
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
                 headers=headers,
-                params={"email": email}
-            ) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    contacts = result.get("data", [])
-                    
-                    if contacts:
-                        contact_id = contacts[0].get("id")
-                        
-                        # Update tags based on status
-                        new_tags = ["verified"] if new_status == "verified" else ["pending"]
-                        
-                        update_payload = {
-                            "tags": new_tags
-                        }
-                        
-                        async with session.put(
-                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}",
-                            headers=headers,
-                            json=update_payload
-                        ) as update_response:
-                            if update_response.status == 200:
-                                logger.info("Updated Systeme.io contact status: %s -> %s", email, new_status)
-                                return True
-                            else:
-                                logger.warning("Failed to update contact: %s", await update_response.text())
-                                return False
-                    else:
-                        logger.warning("Contact not found for update: %s", email)
-                        return False
-                else:
-                    logger.warning("Failed to find contact for update: %s", await response.text())
-                    return False
+                json={"tag_id": SYSTEME_ACHIEVER_TAG_ID},
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                logger.info("Added achiever tag to contact: %s", contact_id)
+                return True
+            else:
+                logger.warning("Failed to add achiever tag: %s", response.text)
+                return False
         
     except Exception as e:
-        logger.exception("Failed to update Systeme.io contact: %s", e)
+        logger.exception("Failed to tag achiever: %s", e)
+        return False
+
+
+def create_contact_and_tag_sync(payload: Dict[str, Any]) -> Optional[str]:
+    """Synchronous wrapper for create_contact_and_tag"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(create_contact_and_tag(payload))
+    except Exception as e:
+        logger.exception("Sync wrapper failed: %s", e)
+        return None
+
+
+def remove_contact_by_email_sync(email: str) -> bool:
+    """Synchronous wrapper for remove_contact_by_email"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(remove_contact_by_email(email))
+    except Exception as e:
+        logger.exception("Sync wrapper failed: %s", e)
         return False

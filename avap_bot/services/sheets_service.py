@@ -1,11 +1,13 @@
 """
-Google Sheets service for data storage
+Google Sheets service for data storage - Single spreadsheet with CSV fallback
 """
 import os
 import json
+import csv
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
+import base64
 
 try:
     import gspread
@@ -16,16 +18,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Google Sheets IDs
-VERIFICATION_SHEET_ID = os.getenv("GOOGLE_SHEET_ID_VERIFICATION")
-ASSIGNMENTS_SHEET_ID = os.getenv("GOOGLE_SHEET_ID_ASSIGNMENTS")
-WINS_SHEET_ID = os.getenv("GOOGLE_SHEET_ID_WINS")
-QUESTIONS_SHEET_ID = os.getenv("GOOGLE_SHEET_ID_FAQ")
-
-# Google credentials
+# Single spreadsheet configuration
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+GOOGLE_SHEET_URL = os.getenv("GOOGLE_SHEET_URL")
 GOOGLE_CREDENTIALS_JSON = os.getenv("GOOGLE_CREDENTIALS_JSON")
 
 _sheets_client = None
+_spreadsheet = None
+
+# CSV fallback directory
+CSV_DIR = "/tmp/avap_sheets"
+os.makedirs(CSV_DIR, exist_ok=True)
 
 
 def _get_sheets_client():
@@ -36,8 +39,19 @@ def _get_sheets_client():
     
     if _sheets_client is None:
         if GOOGLE_CREDENTIALS_JSON:
-            creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
-            creds = Credentials.from_service_account_info(creds_dict)
+            try:
+                # Try base64 decode first
+                try:
+                    creds_json = base64.b64decode(GOOGLE_CREDENTIALS_JSON).decode('utf-8')
+                except:
+                    # If not base64, use as raw JSON
+                    creds_json = GOOGLE_CREDENTIALS_JSON
+                
+                creds_dict = json.loads(creds_json)
+                creds = Credentials.from_service_account_info(creds_dict)
+            except Exception as e:
+                logger.warning("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
+                raise RuntimeError("Invalid Google credentials")
         else:
             creds = Credentials.from_service_account_file("credentials.json")
         
@@ -46,15 +60,63 @@ def _get_sheets_client():
     return _sheets_client
 
 
+def _get_spreadsheet():
+    """Get the main spreadsheet"""
+    global _spreadsheet
+    if _spreadsheet is None:
+        client = _get_sheets_client()
+        
+        if GOOGLE_SHEET_ID:
+            _spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+        elif GOOGLE_SHEET_URL:
+            _spreadsheet = client.open_by_url(GOOGLE_SHEET_URL)
+        else:
+            raise RuntimeError("GOOGLE_SHEET_ID or GOOGLE_SHEET_URL must be set")
+        
+        # Ensure all required worksheets exist
+        _ensure_worksheets()
+    
+    return _spreadsheet
+
+
+def _ensure_worksheets():
+    """Ensure all required worksheets exist"""
+    spreadsheet = _get_spreadsheet()
+    required_sheets = [
+        "verification", "submissions", "submissions_updates", 
+        "wins", "questions", "tips_manual"
+    ]
+    
+    existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
+    
+    for sheet_name in required_sheets:
+        if sheet_name not in existing_sheets:
+            try:
+                spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+                logger.info("Created worksheet: %s", sheet_name)
+            except Exception as e:
+                logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
+
+
+def _csv_fallback(filename: str, data: List[List[str]]):
+    """Fallback to CSV when Sheets is not available"""
+    filepath = os.path.join(CSV_DIR, filename)
+    try:
+        with open(filepath, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(data)
+        logger.info("CSV fallback: wrote to %s", filepath)
+        return True
+    except Exception as e:
+        logger.exception("CSV fallback failed: %s", e)
+        return False
+
+
 def append_pending_verification(record: Dict[str, Any]) -> bool:
     """Append pending verification to Google Sheets"""
     try:
-        if not VERIFICATION_SHEET_ID:
-            logger.warning("VERIFICATION_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(VERIFICATION_SHEET_ID).worksheet("Verification")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("verification")
         
         row = [
             record.get("name", ""),
@@ -70,192 +132,166 @@ def append_pending_verification(record: Dict[str, Any]) -> bool:
         
     except Exception as e:
         logger.exception("Failed to append pending verification to sheets: %s", e)
-        return False
+        # CSV fallback
+        return _csv_fallback("verification_pending.csv", [
+            record.get("name", ""),
+            record.get("email", ""),
+            record.get("phone", ""),
+            record.get("status", "Pending"),
+            datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        ])
 
 
-def update_verification_status(email: str, status: str) -> bool:
-    """Update verification status in Google Sheets"""
-    try:
-        if not VERIFICATION_SHEET_ID:
-            logger.warning("VERIFICATION_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(VERIFICATION_SHEET_ID).worksheet("Verification")
-        
-        # Find row by email
-        try:
-            cell = sheet.find(email)
-            sheet.update_cell(cell.row, 4, status)  # Status column
-            logger.info("Updated verification status: %s -> %s", email, status)
-            return True
-        except gspread.exceptions.CellNotFound:
-            logger.warning("Email not found in verification sheet: %s", email)
-            return False
-        
-    except Exception as e:
-        logger.exception("Failed to update verification status: %s", e)
-        return False
-
-
-def append_submission(record: Dict[str, Any]) -> bool:
+def append_submission(payload: Dict[str, Any]) -> bool:
     """Append assignment submission to Google Sheets"""
     try:
-        if not ASSIGNMENTS_SHEET_ID:
-            logger.warning("ASSIGNMENTS_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(ASSIGNMENTS_SHEET_ID).worksheet("Assignments")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("submissions")
         
         row = [
-            record.get("username", ""),
-            record.get("telegram_id", ""),
-            record.get("module", ""),
-            record.get("type", ""),
-            record.get("file_id", ""),
-            record.get("file_name", ""),
-            record.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
-            record.get("status", "Pending"),
+            payload.get("submission_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("module", ""),
+            payload.get("type", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+            payload.get("status", "Pending"),
             "",  # Grade column
             ""   # Comments column
         ]
         
         sheet.append_row(row)
-        logger.info("Added submission to sheets: %s - Module %s", record.get('username'), record.get('module'))
+        logger.info("Added submission to sheets: %s - Module %s", payload.get('username'), payload.get('module'))
         return True
         
     except Exception as e:
         logger.exception("Failed to append submission to sheets: %s", e)
-        return False
+        # CSV fallback
+        return _csv_fallback("submissions.csv", [
+            payload.get("submission_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("module", ""),
+            payload.get("type", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+            payload.get("status", "Pending"),
+            "",
+            ""
+        ])
 
 
-def update_submission_grade(username: str, module: str, grade: int) -> bool:
-    """Update submission grade in Google Sheets"""
+def update_submission_status(submission_id: str, status: str, score: Optional[int] = None) -> bool:
+    """Update submission status and grade in Google Sheets"""
     try:
-        if not ASSIGNMENTS_SHEET_ID:
-            logger.warning("ASSIGNMENTS_SHEET_ID not set")
-            return False
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("submissions")
         
-        client = _get_sheets_client()
-        sheet = client.open_by_key(ASSIGNMENTS_SHEET_ID).worksheet("Assignments")
-        
-        # Find row by username and module
+        # Find row by submission_id
         try:
-            cell = sheet.find(username)
-            # Check if module matches (assuming module is in column 3)
-            if sheet.cell(cell.row, 3).value == module:
-                sheet.update_cell(cell.row, 8, grade)  # Grade column
-                sheet.update_cell(cell.row, 7, "Graded")  # Status column
-                logger.info("Updated submission grade: %s - Module %s - Grade %s", username, module, grade)
-                return True
-        except gspread.exceptions.CellNotFound:
-            logger.warning("Submission not found: %s - Module %s", username, module)
+            cell = sheet.find(submission_id)
+            sheet.update_cell(cell.row, 9, status)  # Status column
+            if score is not None:
+                sheet.update_cell(cell.row, 10, score)  # Grade column
+            logger.info("Updated submission status: %s -> %s (score: %s)", submission_id, status, score)
+            return True
+        except Exception as e:
+            logger.warning("Submission not found: %s", submission_id)
             return False
         
     except Exception as e:
-        logger.exception("Failed to update submission grade: %s", e)
+        logger.exception("Failed to update submission status: %s", e)
         return False
 
 
-def add_grade_comment(username: str, module: str, comment: str) -> bool:
-    """Add grade comment to Google Sheets"""
-    try:
-        if not ASSIGNMENTS_SHEET_ID:
-            logger.warning("ASSIGNMENTS_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(ASSIGNMENTS_SHEET_ID).worksheet("Assignments")
-        
-        # Find row by username and module
-        try:
-            cell = sheet.find(username)
-            if sheet.cell(cell.row, 3).value == module:
-                sheet.update_cell(cell.row, 9, comment)  # Comments column
-                logger.info("Added grade comment: %s - Module %s", username, module)
-                return True
-        except gspread.exceptions.CellNotFound:
-            logger.warning("Submission not found for comment: %s - Module %s", username, module)
-            return False
-        
-    except Exception as e:
-        logger.exception("Failed to add grade comment: %s", e)
-        return False
-
-
-def append_win(record: Dict[str, Any]) -> bool:
+def append_win(payload: Dict[str, Any]) -> bool:
     """Append win to Google Sheets"""
     try:
-        if not WINS_SHEET_ID:
-            logger.warning("WINS_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(WINS_SHEET_ID).worksheet("Wins")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("wins")
         
         row = [
-            record.get("username", ""),
-            record.get("telegram_id", ""),
-            record.get("type", ""),
-            record.get("file_id", ""),
-            record.get("file_name", ""),
-            record.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+            payload.get("win_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("type", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         ]
         
         sheet.append_row(row)
-        logger.info("Added win to sheets: %s - %s", record.get('username'), record.get('type'))
+        logger.info("Added win to sheets: %s - %s", payload.get('username'), payload.get('type'))
         return True
         
     except Exception as e:
         logger.exception("Failed to append win to sheets: %s", e)
-        return False
+        # CSV fallback
+        return _csv_fallback("wins.csv", [
+            payload.get("win_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("type", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+        ])
 
 
-def append_question(record: Dict[str, Any]) -> bool:
+def append_question(payload: Dict[str, Any]) -> bool:
     """Append question to Google Sheets"""
     try:
-        if not QUESTIONS_SHEET_ID:
-            logger.warning("QUESTIONS_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(QUESTIONS_SHEET_ID).worksheet("Questions")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("questions")
         
         row = [
-            record.get("username", ""),
-            record.get("telegram_id", ""),
-            record.get("question_text", ""),
-            record.get("file_id", ""),
-            record.get("file_name", ""),
-            record.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
-            record.get("status", "Pending"),
+            payload.get("question_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("question_text", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+            payload.get("status", "Pending"),
             ""  # Answer column
         ]
         
         sheet.append_row(row)
-        logger.info("Added question to sheets: %s", record.get('username'))
+        logger.info("Added question to sheets: %s", payload.get('username'))
         return True
         
     except Exception as e:
         logger.exception("Failed to append question to sheets: %s", e)
-        return False
+        # CSV fallback
+        return _csv_fallback("questions.csv", [
+            payload.get("question_id", ""),
+            payload.get("username", ""),
+            payload.get("telegram_id", ""),
+            payload.get("question_text", ""),
+            payload.get("file_id", ""),
+            payload.get("file_name", ""),
+            payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+            payload.get("status", "Pending"),
+            ""
+        ])
 
 
-def get_student_submissions(username: str) -> List[Dict[str, Any]]:
+def get_student_submissions(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get student submissions from Google Sheets"""
     try:
-        if not ASSIGNMENTS_SHEET_ID:
-            return []
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(ASSIGNMENTS_SHEET_ID).worksheet("Assignments")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("submissions")
         
         # Get all data
         records = sheet.get_all_records()
         
-        # Filter by username
+        # Filter by username and optionally module
         student_submissions = [record for record in records if record.get("username") == username]
+        if module:
+            student_submissions = [s for s in student_submissions if s.get("module") == module]
         
         return student_submissions
         
@@ -264,71 +300,24 @@ def get_student_submissions(username: str) -> List[Dict[str, Any]]:
         return []
 
 
-def get_student_wins(username: str) -> List[Dict[str, Any]]:
-    """Get student wins from Google Sheets"""
-    try:
-        if not WINS_SHEET_ID:
-            return []
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(WINS_SHEET_ID).worksheet("Wins")
-        
-        # Get all data
-        records = sheet.get_all_records()
-        
-        # Filter by username
-        student_wins = [record for record in records if record.get("username") == username]
-        
-        return student_wins
-        
-    except Exception as e:
-        logger.exception("Failed to get student wins: %s", e)
-        return []
-
-
-def get_student_questions(username: str) -> List[Dict[str, Any]]:
-    """Get student questions from Google Sheets"""
-    try:
-        if not QUESTIONS_SHEET_ID:
-            return []
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(QUESTIONS_SHEET_ID).worksheet("Questions")
-        
-        # Get all data
-        records = sheet.get_all_records()
-        
-        # Filter by username
-        student_questions = [record for record in records if record.get("username") == username]
-        
-        return student_questions
-        
-    except Exception as e:
-        logger.exception("Failed to get student questions: %s", e)
-        return []
-
-
 def list_achievers() -> List[Dict[str, Any]]:
     """List students with 3+ assignments and 3+ wins"""
     try:
-        if not ASSIGNMENTS_SHEET_ID or not WINS_SHEET_ID:
-            return []
+        spreadsheet = _get_spreadsheet()
         
-        client = _get_sheets_client()
-        
-        # Get assignments
-        assignments_sheet = client.open_by_key(ASSIGNMENTS_SHEET_ID).worksheet("Assignments")
-        assignments = assignments_sheet.get_all_records()
+        # Get submissions
+        submissions_sheet = spreadsheet.worksheet("submissions")
+        submissions = submissions_sheet.get_all_records()
         
         # Get wins
-        wins_sheet = client.open_by_key(WINS_SHEET_ID).worksheet("Wins")
+        wins_sheet = spreadsheet.worksheet("wins")
         wins = wins_sheet.get_all_records()
         
         # Count submissions and wins per student
         student_stats = {}
         
-        for assignment in assignments:
-            username = assignment.get("username")
+        for submission in submissions:
+            username = submission.get("username")
             if username:
                 if username not in student_stats:
                     student_stats[username] = {"assignments": 0, "wins": 0}
@@ -358,12 +347,8 @@ def list_achievers() -> List[Dict[str, Any]]:
 def append_tip(tip_data: Dict[str, Any]) -> bool:
     """Append tip to Google Sheets"""
     try:
-        if not QUESTIONS_SHEET_ID:
-            logger.warning("QUESTIONS_SHEET_ID not set")
-            return False
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(QUESTIONS_SHEET_ID).worksheet("Tips")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("tips_manual")
         
         row = [
             tip_data.get("content", ""),
@@ -378,17 +363,20 @@ def append_tip(tip_data: Dict[str, Any]) -> bool:
         
     except Exception as e:
         logger.exception("Failed to append tip to sheets: %s", e)
-        return False
+        # CSV fallback
+        return _csv_fallback("tips_manual.csv", [
+            tip_data.get("content", ""),
+            tip_data.get("type", "manual"),
+            tip_data.get("added_by", ""),
+            tip_data.get("added_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+        ])
 
 
 def get_manual_tips() -> List[Dict[str, Any]]:
     """Get manual tips from Google Sheets"""
     try:
-        if not QUESTIONS_SHEET_ID:
-            return []
-        
-        client = _get_sheets_client()
-        sheet = client.open_by_key(QUESTIONS_SHEET_ID).worksheet("Tips")
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("tips_manual")
         
         # Get all data
         records = sheet.get_all_records()

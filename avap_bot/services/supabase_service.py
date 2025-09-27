@@ -1,8 +1,9 @@
 """
-Supabase service for verification operations
+Supabase service for verification operations - Complete CRUD implementation
 """
 import os
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
@@ -32,143 +33,151 @@ def get_supabase() -> Client:
     return supabase_client
 
 
-async def add_pending_verification(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Add pending verification record"""
-    try:
-        client = get_supabase()
-        result = client.table("pending_verifications").insert(record).execute()
-        if result.data:
-            logger.info("Added pending verification: %s", record.get('email'))
-            return result.data[0]
-        return None
-    except Exception as e:
-        logger.exception("Failed to add pending verification: %s", e)
-        return None
+def add_pending_verification(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Insert a row into pending_verifications. Return inserted row dict or raise."""
+    client = get_supabase()
+    # prefer DB default created_at; if record contains datetime, supabase client will accept iso string
+    payload = record.copy()
+    # If created_at is datetime, convert to ISO (Supabase accepts ISO strings)
+    ca = payload.get("created_at")
+    if isinstance(ca, datetime):
+        payload["created_at"] = ca.isoformat()
+    elif not ca:
+        payload["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    res = client.table("pending_verifications").insert(payload).execute()
+    if res.error:
+        logger.error("Supabase insert error: %s", res.error)
+        raise RuntimeError(f"Supabase insert failed: {res.error}")
+    return (res.data or [None])[0]
 
 
-async def find_pending_by_email_or_phone(email: str, phone: str) -> Optional[Dict[str, Any]]:
-    """Find pending verification by email or phone"""
-    try:
-        client = get_supabase()
-        result = client.table("pending_verifications").select("*").or_(f"email.eq.{email},phone.eq.{phone}").execute()
-        if result.data:
-            return result.data[0]
+def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
+    """Find verified user by telegram ID"""
+    client = get_supabase()
+    res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
+    if res.error:
+        logger.exception("Supabase find_verified_by_telegram error: %s", res.error)
         return None
-    except Exception as e:
-        logger.exception("Failed to find pending verification: %s", e)
-        return None
+    return (res.data or [None])[0]
 
 
-async def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
-    """Check if user is verified by telegram ID"""
-    try:
-        client = get_supabase()
-        result = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
-        if result.data:
-            return result.data[0]
-        return None
-    except Exception as e:
-        logger.exception("Failed to check verified user: %s", e)
-        return None
+def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Search pending_verifications by email or phone"""
+    client = get_supabase()
+    results = []
+    
+    if email:
+        res = client.table("pending_verifications").select("*").eq("email", email).execute()
+        if not res.error and res.data:
+            results.extend(res.data)
+    
+    if phone:
+        res = client.table("pending_verifications").select("*").eq("phone", phone).execute()
+        if not res.error and res.data:
+            results.extend(res.data)
+    
+    return results
 
 
-async def add_verified_user(record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Add verified user record"""
-    try:
-        client = get_supabase()
-        result = client.table("verified_users").insert(record).execute()
-        if result.data:
-            logger.info("Added verified user: %s", record.get('email'))
-            return result.data[0]
-        return None
-    except Exception as e:
-        logger.exception("Failed to add verified user: %s", e)
-        return None
+def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Search verified_users by email or phone"""
+    client = get_supabase()
+    results = []
+    
+    if email:
+        res = client.table("verified_users").select("*").eq("email", email).eq("status", "verified").execute()
+        if not res.error and res.data:
+            results.extend(res.data)
+    
+    if phone:
+        res = client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified").execute()
+        if not res.error and res.data:
+            results.extend(res.data)
+    
+    return results
 
 
-async def promote_pending_to_verified(pending_id: str) -> Optional[Dict[str, Any]]:
+def promote_pending_to_verified(pending_id: Any, telegram_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Promote pending verification to verified user"""
-    try:
-        client = get_supabase()
-        
-        # Get pending record
-        pending_result = client.table("pending_verifications").select("*").eq("id", pending_id).execute()
-        if not pending_result.data:
-            return None
-        
-        pending_record = pending_result.data[0]
-        
-        # Create verified user record
-        verified_record = {
-            "name": pending_record["name"],
-            "email": pending_record["email"],
-            "phone": pending_record["phone"],
-            "telegram_id": pending_record.get("telegram_id", 0),
-            "status": "verified",
-            "verified_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        # Add to verified users
-        verified_result = client.table("verified_users").insert(verified_record).execute()
-        if not verified_result.data:
-            return None
-        
-        # Remove from pending
-        client.table("pending_verifications").delete().eq("id", pending_id).execute()
-        
-        logger.info("Promoted pending to verified: %s", pending_record.get('email'))
-        return verified_result.data[0]
-        
-    except Exception as e:
-        logger.exception("Failed to promote pending to verified: %s", e)
+    client = get_supabase()
+    # Fetch pending row
+    r = client.table("pending_verifications").select("*").eq("id", pending_id).execute()
+    if r.error or not r.data:
+        logger.error("pending row not found: %s %s", pending_id, r.error)
         return None
+    row = r.data[0]
+    verified_payload = {
+        "name": row.get("name"),
+        "email": row.get("email"),
+        "phone": row.get("phone"),
+        "telegram_id": telegram_id or row.get("telegram_id"),  # may be None until student provides DM
+        "status": "verified",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    ins = client.table("verified_users").insert(verified_payload).execute()
+    if ins.error:
+        logger.error("Failed to promote pending to verified: %s", ins.error)
+        return None
+    # Optionally delete pending row:
+    client.table("pending_verifications").delete().eq("id", pending_id).execute()
+    return (ins.data or [None])[0]
 
 
-async def remove_verified_by_identifier(identifier: str) -> bool:
-    """Remove verified user by email, phone, or telegram_id"""
-    try:
-        client = get_supabase()
-        
-        # Try to find by different identifiers
-        result = client.table("verified_users").select("*").or_(
-            f"email.eq.{identifier},phone.eq.{identifier},telegram_id.eq.{identifier}"
-        ).execute()
-        
-        if not result.data:
-            return False
-        
-        # Soft delete by updating status
-        for user in result.data:
-            client.table("verified_users").update({
-                "status": "removed",
-                "removed_at": datetime.now(timezone.utc).isoformat()
-            }).eq("id", user["id"]).execute()
-        
-        logger.info("Removed verified user: %s", identifier)
+def remove_verified_by_identifier(identifier: str) -> bool:
+    """Identifier may be email, phone, or full name. Return True if deleted."""
+    client = get_supabase()
+    # Try email exact match
+    res = client.table("verified_users").delete().eq("email", identifier).execute()
+    if res.error:
+        logger.debug("remove by email error: %s", res.error)
+    if res.data:
         return True
-        
-    except Exception as e:
-        logger.exception("Failed to remove verified user: %s", e)
-        return False
+    # Try phone
+    res = client.table("verified_users").delete().eq("phone", identifier).execute()
+    if res.data:
+        return True
+    # Try name (less exact)
+    res = client.table("verified_users").delete().eq("name", identifier).execute()
+    return bool(res.data)
 
 
-async def get_all_verified_users() -> List[Dict[str, Any]]:
+def get_all_verified_users() -> List[Dict[str, Any]]:
     """Get all verified users"""
-    try:
-        client = get_supabase()
-        result = client.table("verified_users").select("*").eq("status", "verified").execute()
-        return result.data or []
-    except Exception as e:
-        logger.exception("Failed to get verified users: %s", e)
+    client = get_supabase()
+    res = client.table("verified_users").select("*").eq("status", "verified").execute()
+    if res.error:
+        logger.exception("get_all_verified_users error: %s", res.error)
         return []
+    return res.data or []
 
 
-async def get_all_pending_verifications() -> List[Dict[str, Any]]:
-    """Get all pending verifications"""
-    try:
-        client = get_supabase()
-        result = client.table("pending_verifications").select("*").execute()
-        return result.data or []
-    except Exception as e:
-        logger.exception("Failed to get pending verifications: %s", e)
-        return []
+def add_match_request(telegram_id: int) -> str:
+    """Add match request and return match_id"""
+    client = get_supabase()
+    match_id = str(uuid.uuid4())
+    payload = {
+        "telegram_id": telegram_id,
+        "match_id": match_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending"
+    }
+    res = client.table("match_requests").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add match request: %s", res.error)
+        raise RuntimeError(f"Match request failed: {res.error}")
+    return match_id
+
+
+def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
+    """Pop a match request excluding the given telegram_id"""
+    client = get_supabase()
+    # Get a random pending request that's not from the same user
+    res = client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1).execute()
+    if res.error or not res.data:
+        return None
+    
+    match_request = res.data[0]
+    # Mark as matched
+    client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
+    return match_request

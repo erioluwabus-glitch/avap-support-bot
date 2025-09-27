@@ -73,3 +73,13 @@ def validate_telegram_id(telegram_id: str) -> bool:
         return user_id > 0
     except ValueError:
         return False
+
+
+def valid_email(email: str) -> bool:
+    """Alias for validate_email for compatibility"""
+    return validate_email(email)
+
+
+def valid_phone(phone: str) -> bool:
+    """Alias for validate_phone for compatibility"""
+    return validate_phone(phone)

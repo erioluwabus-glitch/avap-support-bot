@@ -1,63 +1,48 @@
 #!/bin/bash
+# Test admin endpoints with proper authentication
 
-# Test admin endpoints
-# Usage: ./check_admin_endpoints.sh <BASE_URL> <ADMIN_RESET_TOKEN>
+# Configuration
+BASE_URL="${BASE_URL:-http://localhost:8080}"
+ADMIN_TOKEN="${ADMIN_RESET_TOKEN:-your_admin_token_here}"
 
-set -e
+echo "Testing admin endpoints with token: ${ADMIN_TOKEN:0:8}..."
 
-BASE_URL="$1"
-ADMIN_RESET_TOKEN="$2"
-
-if [ -z "$BASE_URL" ] || [ -z "$ADMIN_RESET_TOKEN" ]; then
-    echo "Usage: $0 <BASE_URL> <ADMIN_RESET_TOKEN>"
-    echo "Example: $0 https://your-app.onrender.com your-secret-token"
-    exit 1
-fi
-
-echo "🧪 Testing admin endpoints..."
-
-# Test health endpoint
-echo "Testing health endpoint..."
-curl -X GET "$BASE_URL/health" \
+# Test admin stats endpoint
+echo "1. Testing admin stats endpoint..."
+curl -X GET "${BASE_URL}/admin/stats" \
+  -H "X-Admin-Reset-Token: ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
   -w "\nHTTP Status: %{http_code}\n" \
   -s
 
-echo ""
-
-# Test admin stats (should require auth)
-echo "Testing admin stats (should require auth)..."
-curl -X GET "$BASE_URL/admin/stats" \
-  -w "\nHTTP Status: %{http_code}\n" \
-  -s
-
-echo ""
-
-# Test admin stats with auth
-echo "Testing admin stats with auth..."
-curl -X GET "$BASE_URL/admin/stats" \
-  -H "X-Admin-Reset-Token: $ADMIN_RESET_TOKEN" \
-  -w "\nHTTP Status: %{http_code}\n" \
-  -s
-
-echo ""
+echo -e "\n"
 
 # Test purge email endpoint
-echo "Testing purge email endpoint..."
-curl -X POST "$BASE_URL/admin/purge/email" \
+echo "2. Testing purge email endpoint..."
+curl -X POST "${BASE_URL}/admin/purge/email" \
+  -H "X-Admin-Reset-Token: ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Reset-Token: $ADMIN_RESET_TOKEN" \
   -d '{"email": "test@example.com"}' \
   -w "\nHTTP Status: %{http_code}\n" \
   -s
 
-echo ""
+echo -e "\n"
 
-# Test purge pending endpoint
-echo "Testing purge pending endpoint..."
-curl -X POST "$BASE_URL/admin/purge/pending" \
+# Test purge all pending endpoint
+echo "3. Testing purge all pending endpoint..."
+curl -X POST "${BASE_URL}/admin/purge/pending" \
+  -H "X-Admin-Reset-Token: ${ADMIN_TOKEN}" \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Reset-Token: $ADMIN_RESET_TOKEN" \
   -w "\nHTTP Status: %{http_code}\n" \
   -s
 
-echo "✅ Admin endpoints test completed"
+echo -e "\n"
+
+# Test unauthorized access (should fail)
+echo "4. Testing unauthorized access (should return 403)..."
+curl -X GET "${BASE_URL}/admin/stats" \
+  -H "Content-Type: application/json" \
+  -w "\nHTTP Status: %{http_code}\n" \
+  -s
+
+echo -e "\nAdmin endpoint tests completed"

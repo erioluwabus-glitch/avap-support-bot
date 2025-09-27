@@ -1,56 +1,82 @@
 """
-Admin notification service
+Admin notification service - Send notifications to admin via Telegram
 """
 import os
 import logging
-import aiohttp
 from typing import Optional
+import httpx
 
 logger = logging.getLogger(__name__)
 
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
+TELEGRAM_API_URL = "https://api.telegram.org/bot"
 
 
-async def notify_admin(message: str) -> bool:
-    """Send notification to admin via Telegram or Discord"""
+def notify_admin_sync(message: str) -> bool:
+    """Send notification to admin synchronously"""
     try:
-        # Try Discord webhook first
-        if DISCORD_WEBHOOK_URL:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    DISCORD_WEBHOOK_URL,
-                    json={"content": f"🤖 AVAP Bot Alert: {message}"}
-                ) as response:
-                    if response.status == 204:
-                        logger.info("Sent admin notification via Discord")
-                        return True
-                    else:
-                        logger.warning("Discord webhook failed: %s", await response.text())
+        if not BOT_TOKEN or not ADMIN_USER_ID:
+            logger.warning("BOT_TOKEN or ADMIN_USER_ID not set, cannot send notification")
+            return False
         
-        # Fallback to Telegram (requires bot instance)
-        # This would need to be called with bot context
-        logger.info("Admin notification (no webhook): %s", message)
-        return True
+        import requests
+        
+        url = f"{TELEGRAM_API_URL}{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": ADMIN_USER_ID,
+            "text": f"🚨 AVAP Bot Alert:\n\n{message}",
+            "parse_mode": "HTML"
+        }
+        
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            logger.info("Admin notification sent successfully")
+            return True
+        else:
+            logger.warning("Failed to send admin notification: %s", response.text)
+            return False
         
     except Exception as e:
         logger.exception("Failed to send admin notification: %s", e)
         return False
 
 
-async def notify_admin_telegram(bot, message: str) -> bool:
-    """Send notification to admin via Telegram DM"""
+async def notify_admin(message: str) -> bool:
+    """Send notification to admin asynchronously"""
     try:
-        if ADMIN_USER_ID:
-            await bot.send_message(
-                ADMIN_USER_ID,
-                f"🤖 **AVAP Bot Alert**\n\n{message}",
-                parse_mode="Markdown"
-            )
-            logger.info("Sent admin notification via Telegram")
-            return True
-        return False
+        if not BOT_TOKEN or not ADMIN_USER_ID:
+            logger.warning("BOT_TOKEN or ADMIN_USER_ID not set, cannot send notification")
+            return False
+        
+        url = f"{TELEGRAM_API_URL}{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": ADMIN_USER_ID,
+            "text": f"🚨 AVAP Bot Alert:\n\n{message}",
+            "parse_mode": "HTML"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, timeout=10.0)
+            if response.status_code == 200:
+                logger.info("Admin notification sent successfully")
+                return True
+            else:
+                logger.warning("Failed to send admin notification: %s", response.text)
+                return False
         
     except Exception as e:
-        logger.exception("Failed to send Telegram admin notification: %s", e)
+        logger.exception("Failed to send admin notification: %s", e)
         return False
+
+
+async def notify_admin_error(error_message: str, context: str = "") -> bool:
+    """Send error notification to admin with context"""
+    full_message = f"❌ <b>Error in {context}</b>\n\n{error_message}"
+    return await notify_admin(full_message)
+
+
+async def notify_admin_success(success_message: str, context: str = "") -> bool:
+    """Send success notification to admin with context"""
+    full_message = f"✅ <b>Success in {context}</b>\n\n{success_message}"
+    return await notify_admin(full_message)

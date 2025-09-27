@@ -13,16 +13,16 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from telegram.constants import ChatType
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# Import modular components
-from handlers import register_all
-from handlers.tips import schedule_daily_tips
-from handlers.webhook import webhook_handler, health_check
-from web.admin_endpoints import router as admin_router
+# Import modular components - FIXED IMPORTS
+from avap_bot.handlers import register_all
+from avap_bot.handlers.tips import schedule_daily_tips
+from avap_bot.handlers.webhook import webhook_handler, health_check
+from avap_bot.web.admin_endpoints import router as admin_router
 
-from services.supabase_service import init_supabase
-from services.notifier import notify_admin_telegram
-from utils.logging_config import setup_logging
-from utils.run_blocking import shutdown_executor
+from avap_bot.services.supabase_service import init_supabase
+from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.logging_config import setup_logging
+from avap_bot.utils.run_blocking import shutdown_executor
 
 # Setup logging
 setup_logging(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -135,18 +135,18 @@ async def _set_webhook():
             logger.info("✅ Webhook set successfully: %s", webhook_url)
         else:
             logger.warning("⚠️ Failed to set webhook")
-            
+
     except Exception as e:
         logger.exception("❌ Failed to set webhook: %s", e)
 
 
 # Webhook endpoint
-@app.post(f"/webhook/{BOT_TOKEN}")
-async def webhook_endpoint(request: Request, bot_token: str):
+@app.post("/webhook/{token}")
+async def webhook_endpoint(request: Request, token: str):
     """Handle incoming webhook updates"""
     try:
         # Verify token
-        if bot_token != BOT_TOKEN:
+        if token != BOT_TOKEN:
             raise HTTPException(status_code=403, detail="Forbidden")
         
         # Get update data
@@ -156,7 +156,7 @@ async def webhook_endpoint(request: Request, bot_token: str):
         asyncio.create_task(_process_update(update_data))
         
         return {"status": "ok"}
-        
+
     except Exception as e:
         logger.exception("Webhook error: %s", e)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -220,7 +220,7 @@ if __name__ == "__main__":
     logger.info("Starting uvicorn on port %s", port)
     
     uvicorn.run(
-        "avap_bot.bot_new:app",
+        "avap_bot.bot:app",
         host="0.0.0.0",
         port=port,
         log_level="info"

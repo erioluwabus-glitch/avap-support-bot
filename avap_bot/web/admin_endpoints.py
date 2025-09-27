@@ -8,7 +8,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from services.supabase_service import get_supabase
+from avap_bot.services.supabase_service import get_supabase
 
 logger = logging.getLogger(__name__)
 
