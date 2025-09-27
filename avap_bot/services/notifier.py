@@ -80,3 +80,8 @@ async def notify_admin_success(success_message: str, context: str = "") -> bool:
     """Send success notification to admin with context"""
     full_message = f"✅ <b>Success in {context}</b>\n\n{success_message}"
     return await notify_admin(full_message)
+
+
+async def notify_admin_telegram(bot, message: str) -> bool:
+    """Send notification to admin via Telegram bot (legacy function name)"""
+    return await notify_admin(message)
