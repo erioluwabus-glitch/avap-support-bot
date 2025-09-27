@@ -181,3 +181,18 @@ def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     # Mark as matched
     client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
     return match_request
+
+
+def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
+    """Check if user is verified by telegram_id"""
+    try:
+        supabase = get_supabase()
+        res = supabase.table('students').select('*').eq('telegram_id', telegram_id).eq('verification_status', 'verified').execute()
+        
+        if res.data and len(res.data) > 0:
+            return res.data[0]
+        return None
+        
+    except Exception as e:
+        logger.exception("Supabase check_verified_user error: %s", e)
+        return None
