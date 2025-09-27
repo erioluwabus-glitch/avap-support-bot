@@ -18,6 +18,8 @@ HANDLER_MODULES = [
     "grading",
     "tips",
     "webhook",
+    "matching",
+    "admin_tools",
 ]
 
 def register_all(application):

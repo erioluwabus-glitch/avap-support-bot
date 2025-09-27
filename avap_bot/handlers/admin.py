@@ -12,15 +12,15 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode, ChatType
 
-from services.supabase_service import (
+from avap_bot.services.supabase_service import (
     add_pending_verification, find_pending_by_email_or_phone,
     promote_pending_to_verified, remove_verified_by_identifier
 )
-from services.sheets_service import append_pending_verification, update_verification_status
-from services.systeme_service import create_contact_and_tag, untag_or_remove_contact
-from utils.validators import validate_email, validate_phone
-from utils.run_blocking import run_blocking
-from services.notifier import notify_admin_telegram
+from avap_bot.services.sheets_service import append_pending_verification, update_verification_status
+from avap_bot.services.systeme_service import create_contact_and_tag, untag_or_remove_contact
+from avap_bot.utils.validators import validate_email, validate_phone
+from avap_bot.utils.run_blocking import run_blocking
+from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
 

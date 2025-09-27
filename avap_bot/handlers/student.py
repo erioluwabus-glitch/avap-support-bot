@@ -11,13 +11,13 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode, ChatType
 
-from services.supabase_service import check_verified_user
-from services.sheets_service import (
+from avap_bot.services.supabase_service import find_verified_by_telegram
+from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
 )
-from utils.run_blocking import run_blocking
-from services.notifier import notify_admin_telegram
+from avap_bot.utils.run_blocking import run_blocking
+from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
 
