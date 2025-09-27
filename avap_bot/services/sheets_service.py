@@ -473,3 +473,41 @@ def update_verification_status(email: str, status: str) -> bool:
     except Exception as e:
         logger.exception("Failed to update verification status: %s", e)
         return False
+
+
+def get_student_wins(username: str) -> List[Dict[str, Any]]:
+    """Get student wins from Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("wins")
+        
+        # Get all data
+        records = sheet.get_all_records()
+        
+        # Filter by username
+        student_wins = [record for record in records if record.get("username") == username]
+        
+        return student_wins
+        
+    except Exception as e:
+        logger.exception("Failed to get student wins: %s", e)
+        return []
+
+
+def get_student_questions(username: str) -> List[Dict[str, Any]]:
+    """Get student questions from Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("questions")
+        
+        # Get all data
+        records = sheet.get_all_records()
+        
+        # Filter by username
+        student_questions = [record for record in records if record.get("username") == username]
+        
+        return student_questions
+        
+    except Exception as e:
+        logger.exception("Failed to get student questions: %s", e)
+        return []

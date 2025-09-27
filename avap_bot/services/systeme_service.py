@@ -3,7 +3,7 @@ Systeme.io service for contact management - Async implementation with httpx
 """
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -180,6 +180,76 @@ async def tag_achiever(contact_id: str) -> bool:
         return False
 
 
+async def untag_or_remove_contact(email: str, action: str = "untag") -> bool:
+    """Untag or remove contact from Systeme.io by email"""
+    try:
+        if not SYSTEME_API_KEY:
+            logger.warning("SYSTEME_API_KEY not set, skipping contact action")
+            return False
+        
+        headers = {
+            "Authorization": f"Bearer {SYSTEME_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            # Find contact by email
+            response = await client.get(
+                f"{SYSTEME_BASE_URL}/contacts",
+                headers=headers,
+                params={"email": email},
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                contacts = result.get("data", [])
+                
+                if contacts:
+                    contact_id = contacts[0].get("id")
+                    
+                    if action == "untag":
+                        # Remove all tags
+                        await client.delete(
+                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
+                            headers=headers,
+                            timeout=10.0
+                        )
+                        logger.info("Untagged Systeme.io contact: %s", email)
+                        return True
+                    elif action == "remove":
+                        # Remove tags first
+                        await client.delete(
+                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
+                            headers=headers,
+                            timeout=10.0
+                        )
+                        
+                        # Delete contact
+                        delete_response = await client.delete(
+                            f"{SYSTEME_BASE_URL}/contacts/{contact_id}",
+                            headers=headers,
+                            timeout=10.0
+                        )
+                        
+                        if delete_response.status_code == 200:
+                            logger.info("Removed Systeme.io contact: %s", email)
+                            return True
+                        else:
+                            logger.warning("Failed to delete contact: %s", delete_response.text)
+                            return False
+                else:
+                    logger.warning("Contact not found in Systeme.io: %s", email)
+                    return False
+            else:
+                logger.warning("Failed to find contact: %s", response.text)
+                return False
+        
+    except Exception as e:
+        logger.exception("Failed to untag/remove Systeme.io contact: %s", e)
+        return False
+
+
 def create_contact_and_tag_sync(payload: Dict[str, Any]) -> Optional[str]:
     """Synchronous wrapper for create_contact_and_tag"""
     import asyncio
@@ -197,6 +267,17 @@ def remove_contact_by_email_sync(email: str) -> bool:
     try:
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(remove_contact_by_email(email))
+    except Exception as e:
+        logger.exception("Sync wrapper failed: %s", e)
+        return False
+
+
+def untag_or_remove_contact_sync(email: str, action: str = "untag") -> bool:
+    """Synchronous wrapper for untag_or_remove_contact"""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(untag_or_remove_contact(email, action))
     except Exception as e:
         logger.exception("Sync wrapper failed: %s", e)
         return False
