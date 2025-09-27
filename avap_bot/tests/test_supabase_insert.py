@@ -46,7 +46,7 @@ async def test_check_verified_user():
     """Test checking verified user"""
     try:
         # Test with non-existent user
-        result = await check_verified_user(999999999)
+        result = check_verified_user(999999999)
         if result is None:
             logger.info("✅ Check verified user (non-existent) successful")
             return True

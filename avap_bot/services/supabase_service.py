@@ -187,7 +187,7 @@ def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Check if user is verified by telegram_id"""
     try:
         supabase = get_supabase()
-        res = supabase.table('students').select('*').eq('telegram_id', telegram_id).eq('verification_status', 'verified').execute()
+        res = supabase.table('verified_users').select('*').eq('telegram_id', telegram_id).eq('status', 'verified').execute()
         
         if res.data and len(res.data) > 0:
             return res.data[0]

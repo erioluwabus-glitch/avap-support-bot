@@ -36,7 +36,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     
     # Check if user is verified
-    verified_user = await check_verified_user(user_id)
+    verified_user = check_verified_user(user_id)
     if not verified_user:
         await update.message.reply_text(
             "👋 **Welcome to AVAP Support Bot!**\n\n"
