@@ -3,7 +3,7 @@ Unit tests for translator utilities.
 """
 import unittest
 from unittest.mock import patch
-from utils.translator import translate, get_supported_languages, clear_cache
+from avap_bot.utils.translator import translate, get_supported_languages, clear_cache
 
 class TestTranslator(unittest.TestCase):
     

@@ -6,8 +6,8 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, Application
-from utils.db_access import add_to_match_queue, get_match_queue, remove_from_match_queue
-from utils.matching import pair_students, create_match_message, should_match_students, get_match_stats
+from avap_bot.utils.db_access import add_to_match_queue, get_match_queue, remove_from_match_queue
+from avap_bot.utils.matching import pair_students, create_match_message, should_match_students, get_match_stats
 
 logger = logging.getLogger(__name__)
 

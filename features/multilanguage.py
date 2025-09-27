@@ -6,8 +6,8 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, Application
-from utils.db_access import set_user_language, get_user_language
-from utils.translator import get_supported_languages, translate
+from avap_bot.utils.db_access import set_user_language, get_user_language
+from avap_bot.utils.translator import get_supported_languages, translate
 
 logger = logging.getLogger(__name__)
 

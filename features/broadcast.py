@@ -8,8 +8,8 @@ import asyncio
 from typing import List
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, Application
-from utils.db_access import get_verified_users, send_with_backoff
-from utils.translator import translate
+from avap_bot.utils.db_access import get_verified_users, send_with_backoff
+from avap_bot.utils.translator import translate
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@ Unit tests for OpenAI client utilities.
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 import os
-from utils.openai_client import suggest_answer, transcribe_audio, download_and_transcribe_voice
+from avap_bot.utils.openai_client import suggest_answer, transcribe_audio, download_and_transcribe_voice
 
 class TestOpenAIClient(unittest.TestCase):
     

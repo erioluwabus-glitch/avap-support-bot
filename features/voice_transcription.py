@@ -6,9 +6,9 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import ContextTypes, MessageHandler, filters, Application
-from utils.openai_client import download_and_transcribe_voice
-from utils.db_access import init_database
-from utils.user_utils import user_verified_by_telegram_id
+from avap_bot.utils.openai_client import download_and_transcribe_voice
+from avap_bot.utils.db_access import init_database
+from avap_bot.utils.user_utils import user_verified_by_telegram_id
 
 logger = logging.getLogger(__name__)
 

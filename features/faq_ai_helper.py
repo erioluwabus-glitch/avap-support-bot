@@ -8,10 +8,10 @@ import uuid
 from typing import Optional
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters, Application
-from utils.db_access import add_question, mark_question_answered, get_unanswered_questions, find_similar_faq, add_faq_history
-from utils.faq_semantic import semantic_find, add_to_index
-from utils.openai_client import suggest_answer
-from utils.translator import translate
+from avap_bot.utils.db_access import add_question, mark_question_answered, get_unanswered_questions, find_similar_faq, add_faq_history
+from avap_bot.utils.faq_semantic import semantic_find, add_to_index
+from avap_bot.utils.openai_client import suggest_answer
+from avap_bot.utils.translator import translate
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +198,7 @@ def register_handlers(application: Application):
 
 def schedule_faq_check(application: Application):
     """Schedule the FAQ check job."""
-    from utils.scheduling import get_scheduler, schedule_faq_check_job
+    from avap_bot.utils.scheduling import get_scheduler, schedule_faq_check_job
     
     scheduler = get_scheduler()
     schedule_faq_check_job(scheduler, check_unanswered_questions, application)

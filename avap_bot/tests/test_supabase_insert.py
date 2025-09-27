@@ -4,7 +4,7 @@ Test Supabase operations
 import asyncio
 import os
 import logging
-from services.supabase_service import init_supabase, get_supabase, add_pending_verification, check_verified_user
+from avap_bot.services.supabase_service import init_supabase, get_supabase, add_pending_verification, check_verified_user
 
 logger = logging.getLogger(__name__)
 

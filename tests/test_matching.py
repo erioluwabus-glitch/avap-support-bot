@@ -3,7 +3,7 @@ Unit tests for matching utilities.
 """
 import unittest
 from datetime import datetime, timedelta
-from utils.matching import pair_students, create_match_message, should_match_students, get_match_stats
+from avap_bot.utils.matching import pair_students, create_match_message, should_match_students, get_match_stats
 
 class TestMatching(unittest.TestCase):
     

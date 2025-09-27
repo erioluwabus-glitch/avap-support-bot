@@ -11,10 +11,10 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
-from services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users
-from services.supabase_service import get_supabase
-from utils.run_blocking import run_blocking
-from services.notifier import notify_admin_telegram
+from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users
+from avap_bot.services.supabase_service import get_supabase
+from avap_bot.utils.run_blocking import run_blocking
+from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
 

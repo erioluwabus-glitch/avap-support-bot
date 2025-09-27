@@ -10,9 +10,9 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
-from services.sheets_service import update_submission_grade, add_grade_comment
-from utils.run_blocking import run_blocking
-from services.notifier import notify_admin_telegram
+from avap_bot.services.sheets_service import update_submission_grade, add_grade_comment
+from avap_bot.utils.run_blocking import run_blocking
+from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
 

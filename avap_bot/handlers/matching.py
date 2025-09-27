@@ -12,8 +12,8 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
-from services.supabase_service import get_supabase
-from services.notifier import notify_admin_telegram
+from avap_bot.services.supabase_service import get_supabase
+from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
 

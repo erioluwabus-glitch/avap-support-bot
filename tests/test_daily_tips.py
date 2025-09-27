@@ -4,7 +4,7 @@ Unit tests for daily tips feature.
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 import asyncio
-from features.daily_tips import get_daily_tip, send_daily_tip
+from avap_bot.features.daily_tips import get_daily_tip, send_daily_tip
 
 class TestDailyTips(unittest.TestCase):
     

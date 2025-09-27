@@ -68,10 +68,10 @@ from features import (
 )
 
 # Translation utilities
-from utils.db_access import get_user_language
-from utils.translator import translate
+from avap_bot.utils.db_access import get_user_language
+from avap_bot.utils.translator import translate
 # Supabase client for verification-only operations
-from utils.supabase_client import (
+from avap_bot.utils.supabase_client import (
     init_supabase, get_supabase, check_verified_user, add_verified_user,
     check_pending_verification, add_pending_verification, remove_pending_verification,
     get_all_pending_verifications, get_all_verified_users, soft_delete_verified_user,
@@ -610,9 +610,9 @@ def make_hash(name: str, email: str, phone: str) -> str:
 async def is_admin(user_id: int) -> bool:
     return ADMIN_USER_ID and int(user_id) == int(ADMIN_USER_ID)
 
-from utils.user_utils import user_verified_by_telegram_id
+from avap_bot.utils.user_utils import user_verified_by_telegram_id
 # Async Postgres helpers used across features (submissions, wins, questions, badges)
-from utils.db_async import db_execute, db_fetchone, db_fetchall
+from avap_bot.utils.db_async import db_execute, db_fetchone, db_fetchall
 
 async def find_pending_by_hash(h: str):
     return await db_fetchone(
@@ -2707,7 +2707,7 @@ async def on_startup():
     
     # Initialize PostgreSQL for submissions, wins, questions, etc.
     try:
-        from utils.db_async import init_async_db, ensure_schema
+        from avap_bot.utils.db_async import init_async_db, ensure_schema
         await init_async_db()
         await ensure_schema()
         logger.info("PostgreSQL initialized successfully")
@@ -2740,7 +2740,7 @@ async def on_startup():
     # Initialize new features
     try:
         # Initialize database for new features
-        from utils.db_access import init_database
+        from avap_bot.utils.db_access import init_database
         await run_blocking(init_database)
         logger.info("init_database() completed (threaded).")
         

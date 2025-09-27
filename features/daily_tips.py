@@ -8,8 +8,8 @@ import asyncio
 from typing import Optional
 from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, Application
-from utils.db_access import get_random_daily_tip, add_daily_tip, get_verified_users, send_with_backoff
-from utils.translator import translate
+from avap_bot.utils.db_access import get_random_daily_tip, add_daily_tip, get_verified_users, send_with_backoff
+from avap_bot.utils.translator import translate
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ def register_handlers(application: Application):
 
 def schedule_daily_job(application: Application):
     """Schedule the daily tips job."""
-    from utils.scheduling import get_scheduler, schedule_daily_job
+    from avap_bot.utils.scheduling import get_scheduler, schedule_daily_job
     
     scheduler = get_scheduler()
     schedule_daily_job(scheduler, send_daily_tip, application)

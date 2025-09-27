@@ -3,7 +3,7 @@ User-related shared utilities to avoid circular imports.
 Supabase implementation for verification-only operations.
 """
 from typing import Optional, Dict, Any
-from utils.supabase_client import check_verified_user
+from avap_bot.utils.supabase_client import check_verified_user
 
 
 async def user_verified_by_telegram_id(telegram_id: int) -> Optional[Dict[str, Any]]:
