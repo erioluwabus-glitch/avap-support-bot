@@ -389,3 +389,87 @@ def get_manual_tips() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.exception("Failed to get manual tips: %s", e)
         return []
+
+
+def update_submission_grade(submission_id: str, grade: int, comment: str = "") -> bool:
+    """Update submission grade and comment in Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("submissions")
+        
+        # Find row by submission_id
+        try:
+            cell = sheet.find(submission_id)
+            sheet.update_cell(cell.row, 10, grade)  # Grade column
+            if comment:
+                sheet.update_cell(cell.row, 11, comment)  # Comments column
+            logger.info("Updated submission grade: %s -> %s (comment: %s)", submission_id, grade, comment)
+            return True
+        except Exception as e:
+            logger.warning("Submission not found: %s", submission_id)
+            return False
+        
+    except Exception as e:
+        logger.exception("Failed to update submission grade: %s", e)
+        return False
+
+
+def add_grade_comment(submission_id: str, comment: str) -> bool:
+    """Add grade comment to submission in Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("submissions")
+        
+        # Find row by submission_id
+        try:
+            cell = sheet.find(submission_id)
+            sheet.update_cell(cell.row, 11, comment)  # Comments column
+            logger.info("Added grade comment: %s -> %s", submission_id, comment)
+            return True
+        except Exception as e:
+            logger.warning("Submission not found: %s", submission_id)
+            return False
+        
+    except Exception as e:
+        logger.exception("Failed to add grade comment: %s", e)
+        return False
+
+
+def get_all_verified_users() -> List[Dict[str, Any]]:
+    """Get all verified users from Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("verification")
+        
+        # Get all data
+        records = sheet.get_all_records()
+        
+        # Filter verified users
+        verified_users = [record for record in records if record.get("status", "").lower() == "verified"]
+        
+        return verified_users
+        
+    except Exception as e:
+        logger.exception("Failed to get verified users: %s", e)
+        return []
+
+
+def update_verification_status(email: str, status: str) -> bool:
+    """Update verification status in Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("verification")
+        
+        # Find row by email
+        try:
+            cell = sheet.find(email)
+            sheet.update_cell(cell.row, 4, status)  # Status column
+            logger.info("Updated verification status: %s -> %s", email, status)
+            return True
+        except Exception as e:
+            logger.warning("Email not found: %s", email)
+            return False
+        
+    except Exception as e:
+        logger.exception("Failed to update verification status: %s", e)
+        return False
