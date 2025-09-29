@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: avap-support-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m avap_bot
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    scaling:
+      minInstances: 1
+      maxInstances: 1

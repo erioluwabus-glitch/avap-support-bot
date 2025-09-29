@@ -4,12 +4,15 @@ Webhook handlers for Telegram updates
 import logging
 import asyncio
 from typing import Dict, Any
+from datetime import datetime
 
 from telegram import Update
 from telegram.ext import ContextTypes
-from fastapi import Request, HTTPException
+from fastapi import Request, HTTPException, FastAPI
 
 logger = logging.getLogger(__name__)
+
+app = FastAPI()
 
 
 async def webhook_handler(request: Request, bot_token: str) -> Dict[str, str]:
@@ -49,9 +52,14 @@ async def _process_update(update_data: Dict[str, Any]):
         logger.exception("Failed to process update: %s", e)
 
 
-async def health_check() -> Dict[str, str]:
+@app.get("/health")
+async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "service": "avap-bot"}
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "supabase": "connected" if supabase_client else "disconnected"
+    }
 
 
 def register_handlers(application):

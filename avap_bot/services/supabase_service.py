@@ -15,15 +15,69 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase_client: Optional[Client] = None
 
 
-def init_supabase() -> Client:
-    """Initialize Supabase client"""
-    global supabase_client
+def validate_supabase_url(url: str) -> str:
+    """Validate and clean Supabase URL format"""
+    if not url:
+        raise ValueError("Supabase URL cannot be empty")
+    
+    # Strip any trailing slashes
+    cleaned_url = url.rstrip('/')
+    
+    if not cleaned_url.startswith('https://'):
+        raise ValueError("Supabase URL must start with https://")
+    
+    if not cleaned_url.endswith('.supabase.co'):
+        raise ValueError("Supabase URL must end with .supabase.co")
+        
+    return cleaned_url
+
+def validate_supabase_credentials() -> None:
+    """Validate Supabase credentials"""
     if not SUPABASE_URL or not SUPABASE_KEY:
-        raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
-    if supabase_client is None:
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        logger.info("Supabase client initialized successfully")
-    return supabase_client
+        raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+        
+    if not SUPABASE_KEY.startswith('eyJ'):
+        raise ValueError("Invalid SUPABASE_KEY format - should start with 'eyJ'")
+        
+    if len(SUPABASE_KEY) < 100:
+        raise ValueError("SUPABASE_KEY appears too short - check key format")
+
+def check_required_tables(client: Client) -> None:
+    """Check if all required tables exist"""
+    required_tables = ['verified_users', 'pending_verifications', 'match_requests']
+    
+    for table in required_tables:
+        try:
+            # Test query to check if table exists
+            client.table(table).select('count', count='exact').limit(1).execute()
+            logger.info(f"✅ Table '{table}' exists")
+        except Exception as e:
+            logger.error(f"❌ Table '{table}' not found or inaccessible")
+            raise RuntimeError(f"Required table '{table}' not found in database. Please create the table first.")
+
+def init_supabase() -> Client:
+    """Initialize Supabase client with optimized startup"""
+    global supabase_client
+    
+    if supabase_client:
+        return supabase_client
+        
+    try:
+        validate_supabase_credentials()
+        
+        logger.info("🚀 Initializing Supabase connection...")
+        test_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+        
+        # Quick connection test
+        test_client.table('verified_users').select('count', count='exact').limit(1).execute()
+        
+        supabase_client = test_client
+        logger.info("✅ Supabase connected successfully")
+        return supabase_client
+            
+    except Exception as e:
+        logger.error(f"❌ Supabase connection failed: {str(e)}")
+        raise
 
 
 def get_supabase() -> Client:
@@ -34,22 +88,32 @@ def get_supabase() -> Client:
 
 
 def add_pending_verification(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Insert a row into pending_verifications. Return inserted row dict or raise."""
+    """Insert a row into pending_verifications"""
     client = get_supabase()
-    # prefer DB default created_at; if record contains datetime, supabase client will accept iso string
-    payload = record.copy()
-    # If created_at is datetime, convert to ISO (Supabase accepts ISO strings)
-    ca = payload.get("created_at")
-    if isinstance(ca, datetime):
-        payload["created_at"] = ca.isoformat()
-    elif not ca:
-        payload["created_at"] = datetime.now(timezone.utc).isoformat()
-    
-    res = client.table("pending_verifications").insert(payload).execute()
-    if res.error:
-        logger.error("Supabase insert error: %s", res.error)
-        raise RuntimeError(f"Supabase insert failed: {res.error}")
-    return (res.data or [None])[0]
+    try:
+        logger.info(f"➡️ Adding pending verification for: {record.get('name', 'Unknown')}")
+        
+        # Sanitize payload
+        payload = {
+            'name': record.get('name'),
+            'email': record.get('email'),
+            'phone': record.get('phone'),
+            'telegram_id': record.get('telegram_id'),
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        result = client.table('pending_verifications').insert(payload).execute()
+        
+        if result.data:
+            logger.info(f"✅ Added pending verification with ID: {result.data[0].get('id')}")
+            return result.data[0]
+        else:
+            logger.error("❌ No data returned from verification insert")
+            raise RuntimeError("Failed to insert verification")
+            
+    except Exception as e:
+        logger.error(f"❌ Error adding pending verification: {str(e)}")
+        raise
 
 
 def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
