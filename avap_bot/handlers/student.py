@@ -11,42 +11,117 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode, ChatType
 
-from avap_bot.services.supabase_service import find_verified_by_telegram, check_verified_user
+from avap_bot.services.supabase_service import (
+    find_verified_by_telegram, check_verified_user,
+    find_pending_by_email_or_phone, promote_pending_to_verified
+)
 from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
 )
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.validators import validate_email, validate_phone
 
 logger = logging.getLogger(__name__)
 
 # Conversation states
-SUBMIT_MODULE, SUBMIT_TYPE, SUBMIT_FILE = range(3)
-SHARE_WIN_TYPE, SHARE_WIN_FILE = range(2)
-ASK_QUESTION = range(1)
+VERIFY_IDENTIFIER = range(1)
+SUBMIT_MODULE, SUBMIT_TYPE, SUBMIT_FILE = range(1, 4)
+SHARE_WIN_TYPE, SHARE_WIN_FILE = range(4, 6)
+ASK_QUESTION = range(6, 7)
 
 ASSIGNMENT_GROUP_ID = int(os.getenv("ASSIGNMENT_GROUP_ID", "0"))
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0"))
 QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0"))
+LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://t.me/avapsupportbot")
 
 
-async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /start command"""
-    user_id = update.effective_user.id
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
+    """Handle /start command. Check for verification and start verification if needed."""
+    user = update.effective_user
     
-    # Check if user is verified
-    verified_user = check_verified_user(user_id)
-    if not verified_user:
+    # Check if user is already verified
+    verified_user = await check_verified_user(user.id)
+    if verified_user:
+        await _show_main_menu(update, context, verified_user)
+        return ConversationHandler.END
+
+    # If not verified, start the verification process
+    await update.message.reply_text(
+        "👋 **Welcome to AVAP Support Bot!**\n\n"
+        "To get started, please verify your account.\n"
+        "Please enter your email address or phone number that you used to register for the course:",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return VERIFY_IDENTIFIER
+
+
+async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle the user's email/phone input for verification."""
+    identifier = update.message.text.strip().lower()
+    user = update.effective_user
+
+    is_email = validate_email(identifier)
+    is_phone = validate_phone(identifier)
+
+    if not is_email and not is_phone:
         await update.message.reply_text(
-            "👋 **Welcome to AVAP Support Bot!**\n\n"
-            "You need to be verified to use bot features.\n"
-            "Please contact an admin for verification.",
+            "❌ That doesn't look like a valid email or phone number. Please try again:"
+        )
+        return VERIFY_IDENTIFIER
+
+    try:
+        # Find a pending verification record
+        email = identifier if is_email else None
+        phone = identifier if is_phone else None
+        pending_records = await find_pending_by_email_or_phone(email=email, phone=phone)
+
+        if not pending_records:
+            await update.message.reply_text(
+                "❌ Your details were not found in the verification list. Please contact an admin to get added."
+            )
+            return ConversationHandler.END
+
+        # For simplicity, take the first match if there are multiple
+        pending_record = pending_records[0]
+        pending_id = pending_record['id']
+
+        # Promote the pending user to verified
+        verified_user = await promote_pending_to_verified(pending_id, user.id, user.username)
+        if not verified_user:
+            raise Exception("Failed to promote user to verified status.")
+
+        logger.info(f"User {user.id} ({verified_user['name']}) successfully verified.")
+
+        # Approve chat join request if the group ID is set
+        if SUPPORT_GROUP_ID:
+            try:
+                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user.id)
+                logger.info(f"Approved join request for user {user.id} to support group.")
+            except Exception as e:
+                logger.error(f"Failed to approve join request for user {user.id}: {e}")
+
+        await update.message.reply_text(
+            f"🎉 **Congratulations, {verified_user['name']}! You are now verified!**\n\n"
+            f"Welcome to the AVAP community. You now have access to all the bot features.\n\n"
+            f"Here is the landing page link: {LANDING_PAGE_LINK}",
             parse_mode=ParseMode.MARKDOWN
         )
-        return
-    
-    # Show verified user menu
+        await _show_main_menu(update, context, verified_user)
+        return ConversationHandler.END
+
+    except Exception as e:
+        logger.exception(f"Verification failed for identifier '{identifier}': {e}")
+        await notify_admin_telegram(context.bot, f"Verification failed for user {user.full_name} ({user.id}) with identifier '{identifier}'. Error: {e}")
+        await update.message.reply_text(
+            "❌ An error occurred during verification. The admin has been notified. Please try again later."
+        )
+        return ConversationHandler.END
+
+
+async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, verified_user: Dict[str, Any]):
+    """Display the main menu for verified users."""
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("📝 Submit Assignment", callback_data="submit")],
         [InlineKeyboardButton("🏆 Share Win", callback_data="share_win")],
@@ -67,7 +142,7 @@ async def submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     query = update.callback_query
     await query.answer()
     
-    if not _is_verified(update):
+    if not await _is_verified(update):
         await query.edit_message_text("❌ You need to be verified to submit assignments.")
         return ConversationHandler.END
     
@@ -183,6 +258,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             forward_text = (
                 f"📝 **New Assignment Submission**\n\n"
                 f"Student: @{username}\n"
+                f"Telegram ID: {user_id}\n"
                 f"Module: {module}\n"
                 f"Type: {submission_type.title()}\n"
                 f"File: {file_name}\n"
@@ -220,7 +296,7 @@ async def share_win_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    if not _is_verified(update):
+    if not await _is_verified(update):
         await query.edit_message_text("❌ You need to be verified to share wins.")
         return ConversationHandler.END
     
@@ -339,7 +415,7 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    if not _is_verified(update):
+    if not await _is_verified(update):
         await query.edit_message_text("❌ You need to be verified to check status.")
         return
     
@@ -393,7 +469,7 @@ async def ask_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     
-    if not _is_verified(update):
+    if not await _is_verified(update):
         await query.edit_message_text("❌ You need to be verified to ask questions.")
         return ConversationHandler.END
     
@@ -492,13 +568,23 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
-def _is_verified(update: Update) -> bool:
-    """Check if user is verified (simplified for now)"""
-    # This would check Supabase in real implementation
-    return True
+async def _is_verified(update: Update) -> bool:
+    """Check if user is verified by checking Supabase."""
+    return await check_verified_user(update.effective_user.id) is not None
 
 
 # Conversation handlers
+
+# Main verification and start conversation
+start_conv = ConversationHandler(
+    entry_points=[CommandHandler("start", start_handler)],
+    states={
+        VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    per_message=False
+)
+
 submit_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(submit_callback, pattern="^submit$")],
     states={
@@ -533,7 +619,7 @@ ask_conv = ConversationHandler(
 def register_handlers(application):
     """Register all student handlers with the application"""
     # Add command handlers
-    application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(start_conv)
     
     # Add conversation handlers
     application.add_handler(submit_conv)

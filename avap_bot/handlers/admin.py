@@ -14,7 +14,8 @@ from telegram.constants import ParseMode, ChatType
 
 from avap_bot.services.supabase_service import (
     add_pending_verification, find_pending_by_email_or_phone,
-    promote_pending_to_verified, remove_verified_by_identifier
+    promote_pending_to_verified, remove_verified_by_identifier,
+    find_verified_by_email_or_phone, find_verified_by_name
 )
 from avap_bot.services.sheets_service import append_pending_verification, update_verification_status
 from avap_bot.services.systeme_service import create_contact_and_tag, untag_or_remove_contact
@@ -99,14 +100,19 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     phone = context.user_data['student_phone']
     
     try:
-        # Check for duplicates
-        existing = await find_pending_by_email_or_phone(email, phone)
+        # Check for duplicates in both pending and verified tables
+        pending_existing = await find_pending_by_email_or_phone(email, phone)
+        verified_existing = await find_verified_by_email_or_phone(email, phone)
+        
+        existing = pending_existing or verified_existing
         if existing:
+            # Get the first existing record for the error message
+            existing_record = existing[0]
             await update.message.reply_text(
                 f"❌ A student with this email or phone already exists:\n"
-                f"Email: {existing.get('email', 'N/A')}\n"
-                f"Phone: {existing.get('phone', 'N/A')}\n"
-                f"Status: {existing.get('status', 'N/A')}"
+                f"Email: {existing_record.get('email', 'N/A')}\n"
+                f"Phone: {existing_record.get('phone', 'N/A')}\n"
+                f"Status: {existing_record.get('status', 'N/A')}"
             )
             return ConversationHandler.END
         
@@ -126,7 +132,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         asyncio.create_task(_background_add_student_tasks(pending_data))
         
         # Send confirmation with verify button
-        keyboard = InlineKeyboardMarkup([[
+        keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("✅ Verify Now", callback_data=f"verify_{result['id']}")
         ]])
         
@@ -142,7 +148,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         
         # Notify verification group
-        if VERIFICATION_GROUP_ID:
+        if VERIFICATION_GROUP_ID and update.message.chat.id != VERIFICATION_GROUP_ID:
             await context.bot.send_message(
                 VERIFICATION_GROUP_ID,
                 f"🆕 **New Student Added**\n\n"
@@ -158,9 +164,10 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
     except Exception as e:
         logger.exception("Failed to add student: %s", e)
-        await notify_admin_telegram(context.bot, f"❌ Failed to add student {name}: {str(e)}")
+        error_message = f"❌ Failed to add student {name}.\nReason: {str(e)}"
+        await notify_admin_telegram(context.bot, error_message)
         await update.message.reply_text(
-            f"❌ Failed to add student. Please try again or contact admin."
+            f"❌ Failed to add student. An error occurred and the admin has been notified."
         )
         return ConversationHandler.END
 
@@ -191,7 +198,7 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pending_id = query.data.split("_")[1]
         
         # Promote to verified
-        verified_data = await promote_pending_to_verified(pending_id)
+        verified_data = await promote_pending_to_verified(pending_id=pending_id)
         if not verified_data:
             await query.edit_message_text("❌ Failed to verify student.")
             return
@@ -257,7 +264,8 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
             )
             return ConversationHandler.END
         
-        keyboard = InlineKeyboardMarkup([[
+        context.user_data['student_to_remove'] = student
+        keyboard = InlineKeyboardMarkup([[ 
             InlineKeyboardButton("🗑️ REMOVE", callback_data="remove_confirm"),
             InlineKeyboardButton("❌ CANCEL", callback_data="remove_cancel")
         ]])
@@ -268,7 +276,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
             f"Email: {student['email']}\n"
             f"Phone: {student['phone']}\n"
             f"Telegram ID: {student.get('telegram_id', 'Not set')}\n\n"
-            f"Are you sure you want to remove this student?",
+            f"Are you sure you want to remove this student? This will also ban them from the support group.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=keyboard
         )
@@ -295,7 +303,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
     
     try:
         identifier = context.user_data['remove_identifier']
-        student = await _find_student_by_identifier(identifier)
+        student = context.user_data['student_to_remove']
         
         if not student:
             await query.edit_message_text("❌ Student not found.")
@@ -311,11 +319,25 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         
         # Update Google Sheets
         await run_blocking(update_verification_status, student['email'], 'Removed')
+
+        # Ban from support group if ID is available
+        if SUPPORT_GROUP_ID and student.get('telegram_id'):
+            try:
+                await context.bot.ban_chat_member(
+                    chat_id=SUPPORT_GROUP_ID,
+                    user_id=student['telegram_id']
+                )
+                logger.info(f"Banned user {student['telegram_id']} from support group {SUPPORT_GROUP_ID}.")
+            except Exception as e:
+                logger.error(f"Could not ban user {student['telegram_id']} from support group: {e}")
+                # Non-fatal, so we just log it and continue
+                await notify_admin_telegram(context.bot, f"Failed to ban {student.get('name')} from support group.")
         
         await query.edit_message_text(
             f"✅ **Student Removed Successfully**\n\n"
             f"Name: {student['name']}\n"
             f"Email: {student['email']}\n\n"
+            f"They have been removed from all systems and banned from the support group.\n"
             f"Please revoke their course access manually.",
             parse_mode=ParseMode.MARKDOWN
         )
@@ -340,17 +362,24 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
-    """Find student by email, phone, or name"""
+    """Find student by email, phone, or name in the verified_users table."""
     # Try as email first
     if validate_email(identifier):
-        return await find_pending_by_email_or_phone(identifier, "")
+        results = await find_verified_by_email_or_phone(email=identifier)
+        if results:
+            return results[0]
     
     # Try as phone
     if validate_phone(identifier):
-        return await find_pending_by_email_or_phone("", identifier)
+        results = await find_verified_by_email_or_phone(phone=identifier)
+        if results:
+            return results[0]
     
-    # Try as name (would need additional search function)
-    # For now, return None
+    # Try as name
+    results = await find_verified_by_name(identifier)
+    if results:
+        return results[0]
+
     return None
 
 
@@ -362,7 +391,7 @@ def _is_admin(update: Update) -> bool:
 
 # Conversation handlers
 add_student_conv = ConversationHandler(
-    entry_points=[CommandHandler("addstudent", add_student_start)],
+    entry_points=[CommandHandler("addstudent", add_student_start, filters=filters.Chat(chat_id=VERIFICATION_GROUP_ID))],
     states={
         ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
         ADD_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
@@ -373,7 +402,7 @@ add_student_conv = ConversationHandler(
 )
 
 remove_student_conv = ConversationHandler(
-    entry_points=[CommandHandler("remove_student", remove_student_start)],
+    entry_points=[CommandHandler("remove_student", remove_student_start, filters=filters.Chat(chat_id=VERIFICATION_GROUP_ID))],
     states={
         REMOVE_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_identifier)],
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],

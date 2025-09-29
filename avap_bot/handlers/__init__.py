@@ -6,44 +6,25 @@ This module dynamically imports handler modules and calls their
 python-telegram-bot Application object.
 """
 
-from importlib import import_module
 import logging
+from telegram.ext import Application
+from . import admin, student, grading, tips, matching, admin_tools
 
 logger = logging.getLogger(__name__)
 
-# Add or remove module names here to match your repository files.
-HANDLER_MODULES = [
-    "admin",
-    "student",
-    "grading",
-    "tips",
-    "webhook",
-    "matching",
-    "admin_tools",
-]
-
-def register_all(application):
+def register_all(application: Application):
     """
     Import each handler module and call its register_handlers(application)
     if that function exists. Modules that are missing or don't expose the
     function are skipped with a log message.
     """
-    for name in HANDLER_MODULES:
-        fqname = f"avap_bot.handlers.{name}"
+    modules = [admin, student, grading, tips, matching, admin_tools]
+    
+    for module in modules:
         try:
-            mod = import_module(fqname)
-        except ModuleNotFoundError:
-            logger.warning("Handler module not found: %s (skipping)", fqname)
-            continue
-        except Exception:
-            logger.exception("Failed to import handler module %s", fqname)
-            continue
-
-        if hasattr(mod, "register_handlers"):
-            try:
-                mod.register_handlers(application)
-                logger.info("Registered handlers from %s", fqname)
-            except Exception:
-                logger.exception("Error registering handlers from %s", fqname)
-        else:
-            logger.warning("Module %s does not expose register_handlers(), skipping", fqname)
+            if hasattr(module, 'register_handlers'):
+                module.register_handlers(application)
+                logger.info(f"✅ Registered handlers from {module.__name__}")
+        except Exception as e:
+            logger.error(f"❌ Failed to register handlers from {module.__name__}: {str(e)}")
+            raise

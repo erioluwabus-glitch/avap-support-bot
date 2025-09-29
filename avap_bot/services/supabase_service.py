@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
+from postgrest.exceptions import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,23 @@ def init_supabase() -> Client:
 
 
 def get_supabase() -> Client:
-    """Get Supabase client instance"""
+    """Get or initialize Supabase client with connection check"""
+    global supabase_client
     if supabase_client is None:
-        return init_supabase()
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            logger.error("❌ Missing Supabase credentials")
+            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+            
+        try:
+            logger.info("🔄 Initializing Supabase connection...")
+            supabase_client = create_client(SUPABASE_URL.rstrip('/'), SUPABASE_KEY)
+            # Test connection
+            supabase_client.table('verified_users').select('count', count='exact').limit(1).execute()
+            logger.info("✅ Supabase connection successful")
+        except Exception as e:
+            logger.error(f"❌ Supabase connection failed: {str(e)}")
+            raise
+            
     return supabase_client
 
 
@@ -161,6 +176,15 @@ def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional
     
     return results
 
+def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
+    """Search verified_users by name (case-insensitive)"""
+    client = get_supabase()
+    res = client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified").execute()
+    if res.error:
+        logger.exception("Supabase find_verified_by_name error: %s", res.error)
+        return []
+    return res.data or []
+
 
 def promote_pending_to_verified(pending_id: Any, telegram_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     """Promote pending verification to verified user"""
@@ -232,7 +256,6 @@ def add_match_request(telegram_id: int) -> str:
         raise RuntimeError(f"Match request failed: {res.error}")
     return match_id
 
-
 def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     """Pop a match request excluding the given telegram_id"""
     client = get_supabase()
@@ -245,7 +268,6 @@ def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     # Mark as matched
     client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
     return match_request
-
 
 def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Check if user is verified by telegram_id"""

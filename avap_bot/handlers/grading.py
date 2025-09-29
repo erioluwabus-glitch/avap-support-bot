@@ -3,6 +3,7 @@ Grading handlers for assignment evaluation
 """
 import os
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
@@ -32,7 +33,7 @@ async def grade_assignment(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     # Extract submission info from forwarded message
     submission_info = _extract_submission_info(update.message)
     if not submission_info:
-        await update.message.reply_text("❌ Could not extract submission information.")
+        await update.message.reply_text("❌ Could not extract submission information. Make sure the forwarded message contains the student's username, telegram ID, module, and type.")
         return ConversationHandler.END
     
     context.user_data['submission_info'] = submission_info
@@ -113,7 +114,7 @@ async def grade_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
         
         # Notify student
-        await _notify_student_grade(context.user_data['submission_info'], context.user_data.get('grade'), None)
+        await _notify_student_grade(context, context.user_data['submission_info'], context.user_data.get('grade'), None)
         return ConversationHandler.END
     
     # Ask for comment
@@ -134,22 +135,22 @@ async def add_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         # Get comment content
         comment_text = None
         comment_file_id = None
-        comment_file_name = None
-        
-        if update.message.document:
-            comment_file_id = update.message.document.file_id
-            comment_file_name = update.message.document.file_name
-            comment_text = f"Document: {comment_file_name}"
+        comment_file_type = None
+
+        if update.message.text:
+            comment_text = update.message.text
         elif update.message.voice:
             comment_file_id = update.message.voice.file_id
-            comment_file_name = f"comment_voice_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.ogg"
-            comment_text = "Voice comment"
+            comment_file_type = "voice"
+            comment_text = "(Voice comment attached)"
         elif update.message.video:
             comment_file_id = update.message.video.file_id
-            comment_file_name = update.message.video.file_name or f"comment_video_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.mp4"
-            comment_text = "Video comment"
-        elif update.message.text:
-            comment_text = update.message.text
+            comment_file_type = "video"
+            comment_text = "(Video comment attached)"
+        elif update.message.document:
+            comment_file_id = update.message.document.file_id
+            comment_file_type = "document"
+            comment_text = f"(Document comment attached: {update.message.document.file_name})"
         else:
             await update.message.reply_text("❌ Unsupported comment type. Please send text, document, audio, or video.")
             return GRADE_COMMENT
@@ -167,7 +168,7 @@ async def add_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         )
         
         # Notify student
-        await _notify_student_grade(submission_info, grade, comment_text, comment_file_id)
+        await _notify_student_grade(context, submission_info, grade, comment_text, comment_file_id, comment_file_type)
         
         return ConversationHandler.END
         
@@ -178,50 +179,65 @@ async def add_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
 
-async def _notify_student_grade(submission_info: Dict[str, Any], grade: int, comment: Optional[str], comment_file_id: Optional[str] = None):
+async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_info: Dict[str, Any], grade: int, comment: Optional[str], comment_file_id: Optional[str] = None, comment_file_type: Optional[str] = None):
     """Notify student about their grade"""
     try:
         telegram_id = submission_info.get('telegram_id')
         if not telegram_id:
+            logger.warning("Could not notify student: telegram_id is missing from submission info.")
+            await notify_admin_telegram(context.bot, f"Could not notify @{submission_info.get('username')}, telegram_id missing.")
             return
         
         message = (
-            f"📝 **Assignment Graded!**\n\n"
-            f"Module: {submission_info['module']}\n"
-            f"Grade: {grade}/10\n"
+            f"🎉 **Your assignment has been graded!**\n\n"
+            f"**Module:** {submission_info['module']}\n"
+            f"**Grade:** {grade}/10\n"
         )
         
         if comment:
-            message += f"Comment: {comment}\n"
-        
-        # Send notification (this would need bot context in real implementation)
-        logger.info("Would notify student %s about grade %s", telegram_id, grade)
+            message += f"\n**Comments:**\n{comment}"
+        else:
+            message += "\n**Comments:**\nNo comments provided."
+
+        # Send the main notification text
+        await context.bot.send_message(chat_id=telegram_id, text=message, parse_mode=ParseMode.MARKDOWN)
+
+        # If there is a file comment, send it as a separate message
+        if comment_file_id and comment_file_type:
+            if comment_file_type == 'voice':
+                await context.bot.send_voice(chat_id=telegram_id, voice=comment_file_id)
+            elif comment_file_type == 'video':
+                await context.bot.send_video(chat_id=telegram_id, video=comment_file_id)
+            elif comment_file_type == 'document':
+                await context.bot.send_document(chat_id=telegram_id, document=comment_file_id)
+
+        logger.info("Notified student %s about grade %s", telegram_id, grade)
         
     except Exception as e:
         logger.exception("Failed to notify student about grade: %s", e)
+        await notify_admin_telegram(context.bot, f"Failed to notify student {telegram_id} about grade. Error: {e}")
 
 
 def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
     """Extract submission info from forwarded message"""
     try:
-        # This is a simplified extraction - in real implementation,
-        # you'd parse the forwarded message text to extract username, module, etc.
         text = message.text or message.caption or ""
         
-        # Simple regex extraction (would need more robust parsing)
-        import re
-        username_match = re.search(r'@(\w+)', text)
-        module_match = re.search(r'Module: (\d+)', text)
-        type_match = re.search(r'Type: (\w+)', text)
+        # Regex extraction for all required fields
+        username_match = re.search(r"Student: @(\w+)", text)
+        telegram_id_match = re.search(r"Telegram ID: (\d+)", text)
+        module_match = re.search(r"Module: (\d+)", text)
+        type_match = re.search(r"Type: (\w+)", text)
         
-        if username_match and module_match and type_match:
+        if username_match and module_match and type_match and telegram_id_match:
             return {
                 'username': username_match.group(1),
+                'telegram_id': int(telegram_id_match.group(1)),
                 'module': module_match.group(1),
                 'type': type_match.group(1),
-                'telegram_id': 0  # Would need to be extracted or looked up
             }
         
+        logger.warning("Could not extract all required info from message text: %s", text)
         return None
         
     except Exception as e:
@@ -237,7 +253,7 @@ def _is_admin(update: Update) -> bool:
 
 # Conversation handler
 grade_conv = ConversationHandler(
-    entry_points=[CommandHandler("grade", grade_assignment)],
+    entry_points=[CommandHandler("grade", grade_assignment, filters=filters.Chat(chat_id=ASSIGNMENT_GROUP_ID))],
     states={
         GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^grade_|^grade_cancel$")],
         GRADE_COMMENT: [
