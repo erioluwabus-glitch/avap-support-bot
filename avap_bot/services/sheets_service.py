@@ -318,24 +318,35 @@ def list_achievers() -> List[Dict[str, Any]]:
         
         for submission in submissions:
             username = submission.get("username")
-            if username:
-                if username not in student_stats:
-                    student_stats[username] = {"assignments": 0, "wins": 0}
-                student_stats[username]["assignments"] += 1
+            if not username:
+                continue
+            if username not in student_stats:
+                student_stats[username] = {"assignments": 0, "wins": 0, "telegram_id": submission.get("telegram_id")}
+            student_stats[username]["assignments"] += 1
+            if not student_stats[username].get("telegram_id") and submission.get("telegram_id"):
+                student_stats[username]["telegram_id"] = submission.get("telegram_id")
         
         for win in wins:
             username = win.get("username")
-            if username:
-                if username not in student_stats:
-                    student_stats[username] = {"assignments": 0, "wins": 0}
-                student_stats[username]["wins"] += 1
+            if not username:
+                continue
+            if username not in student_stats:
+                student_stats[username] = {"assignments": 0, "wins": 0, "telegram_id": win.get("telegram_id")}
+            student_stats[username]["wins"] += 1
+            if not student_stats[username].get("telegram_id") and win.get("telegram_id"):
+                student_stats[username]["telegram_id"] = win.get("telegram_id")
         
         # Filter achievers (3+ assignments and 3+ wins)
-        achievers = [
-            {"username": username, "assignments": stats["assignments"], "wins": stats["wins"]}
-            for username, stats in student_stats.items()
-            if stats["assignments"] >= 3 and stats["wins"] >= 3
-        ]
+        achievers = []
+        for username, stats in student_stats.items():
+            if stats["assignments"] >= 3 and stats["wins"] >= 3:
+                achiever_data = {
+                    "username": username,
+                    "assignments": stats["assignments"],
+                    "wins": stats["wins"],
+                    "telegram_id": stats.get("telegram_id")
+                }
+                achievers.append(achiever_data)
         
         return achievers
         

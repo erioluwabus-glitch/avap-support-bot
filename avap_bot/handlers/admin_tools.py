@@ -4,11 +4,12 @@ Admin tools for submissions, achievers, and messaging
 import os
 import logging
 import asyncio
+import csv
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users
@@ -24,6 +25,30 @@ GET_SUBMISSION, BROADCAST_MESSAGE, MESSAGE_ACHIEVERS = range(3)
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0"))
 
+def log_missing_telegram_ids(users: List[Dict[str, Any]]):
+    """Logs users with missing telegram IDs to a CSV file."""
+    report_dir = "deprecated_from_audit/reports"
+    os.makedirs(report_dir, exist_ok=True)
+    filepath = os.path.join(report_dir, "achievers_missing_telegram_id.csv")
+    
+    file_exists = os.path.isfile(filepath)
+    
+    try:
+        with open(filepath, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow(['timestamp', 'username', 'assignments', 'wins'])
+            
+            for user in users:
+                writer.writerow([
+                    datetime.now(timezone.utc).isoformat(),
+                    user.get('username'),
+                    user.get('assignments'),
+                    user.get('wins')
+                ])
+        logger.info(f"Logged {len(users)} users with missing telegram_id to {filepath}")
+    except Exception as e:
+        logger.error(f"Failed to log missing telegram_ids to CSV: {e}")
 
 async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /get_submission command"""
@@ -100,8 +125,8 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message = "🏆 **Top Achievers**\n\n"
         for i, achiever in enumerate(achievers, 1):
             username = achiever.get('username', 'Unknown')
-            assignments = achiever.get('assignments_count', 0)
-            wins = achiever.get('wins_count', 0)
+            assignments = achiever.get('assignments', 0)
+            wins = achiever.get('wins', 0)
             
             message += f"**{i}. @{username}**\n"
             message += f"   Assignments: {assignments}\n"
@@ -159,7 +184,7 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         
         # Send message to each achiever
         sent_count = 0
-        failed_count = 0
+        failed_users = []
         
         for achiever in achievers:
             try:
@@ -172,15 +197,19 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     )
                     sent_count += 1
                 else:
-                    failed_count += 1
+                    failed_users.append(achiever)
             except Exception as e:
                 logger.exception("Failed to send message to achiever: %s", e)
-                failed_count += 1
+                failed_users.append(achiever)
         
+        failed_count = len(failed_users)
+        if failed_users:
+            log_missing_telegram_ids(failed_users)
+
         await update.message.reply_text(
             f"✅ **Broadcast Complete!**\n\n"
             f"Messages sent: {sent_count}\n"
-            f"Failed: {failed_count}",
+            f"Failed (missing Telegram ID): {failed_count}",
             parse_mode=ParseMode.MARKDOWN
         )
         
@@ -296,5 +325,3 @@ def register_handlers(application):
     
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
-
-
