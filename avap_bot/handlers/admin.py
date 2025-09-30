@@ -314,11 +314,13 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         if not success:
             raise Exception("Failed to remove from Supabase")
         
-        # Remove from Systeme.io
-        await untag_or_remove_contact(student)
-        
-        # Update Google Sheets
-        await run_blocking(update_verification_status, student['email'], 'Removed')
+        # Remove from Systeme.io and update Google Sheets
+        if student and student.get('email'):
+            await untag_or_remove_contact(student['email'], action="remove")
+            await run_blocking(update_verification_status, student['email'], 'Removed')
+        else:
+            logger.warning(f"Could not update Systeme.io or Google Sheets for student because email is missing. Student data: {student}")
+            await notify_admin_telegram(context.bot, f"Failed to update Systeme.io/Sheets for student {student.get('name')} (email missing).")
 
         # Ban from support group if ID is available
         if SUPPORT_GROUP_ID and student.get('telegram_id'):
