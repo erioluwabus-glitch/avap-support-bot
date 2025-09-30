@@ -27,7 +27,9 @@ _sheets_client = None
 _spreadsheet = None
 
 # CSV fallback directory
-CSV_DIR = "/tmp/avap_sheets"
+# IMPORTANT: /tmp/ is ephemeral on many hosting platforms like Render.
+# For persistent backups, set the STABLE_BACKUP_DIR environment variable.
+CSV_DIR = os.getenv("STABLE_BACKUP_DIR", "/tmp/avap_sheets")
 os.makedirs(CSV_DIR, exist_ok=True)
 
 
@@ -100,6 +102,8 @@ def _ensure_worksheets():
 
 def _csv_fallback(filename: str, data: List[List[str]]):
     """Fallback to CSV when Sheets is not available"""
+    # IMPORTANT: /tmp/ is ephemeral on many hosting platforms like Render.
+    # For persistent backups, set the STABLE_BACKUP_DIR environment variable.
     if not os.getenv("STABLE_BACKUP_DIR"):
         logger.warning("Using ephemeral /tmp/ directory for CSV fallback. Set STABLE_BACKUP_DIR for persistent storage.")
     
@@ -307,50 +311,80 @@ def list_achievers() -> List[Dict[str, Any]]:
     """List students with 3+ assignments and 3+ wins"""
     try:
         spreadsheet = _get_spreadsheet()
-        
+
+        # Get verified users for telegram_id lookup
+        verification_sheet = spreadsheet.worksheet("verification")
+        verified_users = verification_sheet.get_all_records()
+        email_to_telegram_id = {
+            user.get("email"): user.get("telegram_id")
+            for user in verified_users if user.get("email") and user.get("telegram_id")
+        }
+
         # Get submissions
         submissions_sheet = spreadsheet.worksheet("submissions")
         submissions = submissions_sheet.get_all_records()
-        
+
         # Get wins
         wins_sheet = spreadsheet.worksheet("wins")
         wins = wins_sheet.get_all_records()
-        
+
         # Count submissions and wins per student
         student_stats = {}
-        
+
         for submission in submissions:
             username = submission.get("username")
             if not username:
                 continue
             if username not in student_stats:
-                student_stats[username] = {"assignments": 0, "wins": 0, "telegram_id": submission.get("telegram_id")}
+                student_stats[username] = {
+                    "assignments": 0,
+                    "wins": 0,
+                    "telegram_id": submission.get("telegram_id"),
+                    "email": submission.get("email")
+                }
             student_stats[username]["assignments"] += 1
             if not student_stats[username].get("telegram_id") and submission.get("telegram_id"):
                 student_stats[username]["telegram_id"] = submission.get("telegram_id")
-        
+            if not student_stats[username].get("email") and submission.get("email"):
+                student_stats[username]["email"] = submission.get("email")
+
         for win in wins:
             username = win.get("username")
             if not username:
                 continue
             if username not in student_stats:
-                student_stats[username] = {"assignments": 0, "wins": 0, "telegram_id": win.get("telegram_id")}
+                student_stats[username] = {
+                    "assignments": 0,
+                    "wins": 0,
+                    "telegram_id": win.get("telegram_id"),
+                    "email": win.get("email")
+                }
             student_stats[username]["wins"] += 1
             if not student_stats[username].get("telegram_id") and win.get("telegram_id"):
                 student_stats[username]["telegram_id"] = win.get("telegram_id")
-        
+            if not student_stats[username].get("email") and win.get("email"):
+                student_stats[username]["email"] = win.get("email")
+
         # Filter achievers (3+ assignments and 3+ wins)
         achievers = []
         for username, stats in student_stats.items():
             if stats["assignments"] >= 3 and stats["wins"] >= 3:
+                telegram_id = stats.get("telegram_id")
+                if not telegram_id:
+                    # Fallback to email lookup
+                    email = stats.get("email")
+                    if email in email_to_telegram_id:
+                        telegram_id = email_to_telegram_id[email]
+
                 achiever_data = {
                     "username": username,
                     "assignments": stats["assignments"],
                     "wins": stats["wins"],
-                    "telegram_id": stats.get("telegram_id")
+                    "telegram_id": telegram_id,
+                    "email": stats.get("email")
                 }
                 achievers.append(achiever_data)
-        
+
         return achievers
         
     except Exception as e:
