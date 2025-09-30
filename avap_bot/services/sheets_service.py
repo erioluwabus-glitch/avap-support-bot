@@ -100,6 +100,9 @@ def _ensure_worksheets():
 
 def _csv_fallback(filename: str, data: List[List[str]]):
     """Fallback to CSV when Sheets is not available"""
+    if not os.getenv("STABLE_BACKUP_DIR"):
+        logger.warning("Using ephemeral /tmp/ directory for CSV fallback. Set STABLE_BACKUP_DIR for persistent storage.")
+    
     filepath = os.path.join(CSV_DIR, filename)
     try:
         with open(filepath, 'a', newline='', encoding='utf-8') as f:
@@ -518,6 +521,11 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
         student_questions = [record for record in records if record.get("username") == username]
         
         return student_questions
+        
+    except Exception as e:
+        logger.exception("Failed to get student questions: %s", e)
+        return []
+       return student_questions
         
     except Exception as e:
         logger.exception("Failed to get student questions: %s", e)
