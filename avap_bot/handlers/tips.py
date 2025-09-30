@@ -4,7 +4,7 @@ Daily tips handlers and scheduling
 import os
 import logging
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Optional, Dict, Any, List
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -133,9 +133,12 @@ async def _get_daily_tip_content() -> Optional[str]:
         manual_tips = await run_blocking(get_manual_tips)
         
         if manual_tips:
-            # Use manual tip (simple rotation)
-            tip = manual_tips[0]  # In real implementation, use proper rotation
-            return tip.get('content', '')
+            # Use manual tip (deterministic rotation based on day of the year)
+            num_tips = len(manual_tips)
+            if num_tips > 0:
+                index = date.today().timetuple().tm_yday % num_tips
+                tip = manual_tips[index]
+                return tip.get('content', '')
         
         # Fallback to AI-generated tip
         if OPENAI_API_KEY:
