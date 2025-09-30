@@ -12,9 +12,10 @@ from avap_bot.services.supabase_service import (
     check_verified_user,
     add_match_request,
     pop_match_request,
-    get_user_by_telegram_id
+    find_verified_by_telegram
 )
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.run_blocking import run_blocking
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,8 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User @{user.username} ({user.id}) initiated /match.")
 
     # 1. Check if user is verified
-    if not await check_verified_user(user.id):
+    verified_user = await run_blocking(check_verified_user, user.id)
+    if not verified_user:
         await update.message.reply_text(
             "❌ You must be a verified student to use the matching feature.\n"
             "Please complete verification by sending /start.",
@@ -34,22 +36,24 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # 2. Add the current user to the matching queue
-        await add_match_request(user.id)
+        await run_blocking(add_match_request, user.id)
         logger.info(f"User {user.id} added to match queue.")
 
         # 3. Try to find another student in the queue
-        matched_user_record = await pop_match_request(exclude_id=user.id)
+        matched_user_record = await run_blocking(pop_match_request, exclude_id=user.id)
 
         if matched_user_record:
             matched_user_id = matched_user_record['telegram_id']
             logger.info(f"Found a match for user {user.id} with user {matched_user_id}.")
 
             # 4. If a match is found, notify both users
-            current_user_details = await get_user_by_telegram_id(user.id)
-            matched_user_details = await get_user_by_telegram_id(matched_user_id)
+            current_user_details = verified_user
+            matched_user_details = await run_blocking(find_verified_by_telegram, matched_user_id)
 
-            current_username = current_user_details.get('username', f"user_{user.id}")
-            matched_username = matched_user_details.get('username', f"user_{matched_user_id}")
+            current_username = user.username or current_user_details.get('name')
+            
+            matched_user_chat = await context.bot.get_chat(matched_user_id)
+            matched_username = matched_user_chat.username or (matched_user_details and matched_user_details.get('name'))
 
             # Notify current user
             await context.bot.send_message(
