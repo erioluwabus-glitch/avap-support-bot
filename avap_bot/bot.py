@@ -323,6 +323,7 @@ async def internal_error_handler(request: Request, exc: HTTPException):
 async def test_supabase_connection():
     """Test Supabase connection"""
     try:
+        from avap_bot.services.supabase_service import get_supabase
         client = get_supabase()
         result = client.table("verified_users").select("count").execute()
         logger.info("✅ Supabase connection test passed")
@@ -360,6 +361,7 @@ async def test_ai_features():
 async def test_database_schema():
     """Test database schema"""
     try:
+        from avap_bot.services.supabase_service import get_supabase
         client = get_supabase()
         
         # Test all required tables exist
@@ -370,7 +372,7 @@ async def test_database_schema():
         
         for table in tables:
             result = client.table(table).select("count").limit(1).execute()
-            if result.error:
+            if not result.data:
                 logger.error("❌ Table %s not found or accessible", table)
                 return False
             logger.info("✅ Table %s accessible", table)
@@ -445,12 +447,12 @@ if __name__ == "__main__":
         asyncio.run(run_tests())
     else:
         # Run bot normally
-        port = int(os.getenv("PORT", "8080"))
-        logger.info("Starting uvicorn on port %s", port)
-        
-        uvicorn.run(
-            "avap_bot.bot:app",
-            host="0.0.0.0",
-            port=port,
-            log_level="info"
-        )
+    port = int(os.getenv("PORT", "8080"))
+    logger.info("Starting uvicorn on port %s", port)
+    
+    uvicorn.run(
+        "avap_bot.bot:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )

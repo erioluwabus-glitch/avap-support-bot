@@ -20,7 +20,6 @@ HANDLER_MODULES = [
     "webhook",
     "matching",
     "admin_tools",
-    "verify",
     "answer",
 ]
 

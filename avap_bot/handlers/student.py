@@ -142,7 +142,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
 
         # Promote the pending user to verified
         verified_user = promote_pending_to_verified(pending_id, user.id, user.username)
-        if not verified_user:
+    if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
         logger.info(f"User {user.id} ({verified_user['name']}) successfully verified.")

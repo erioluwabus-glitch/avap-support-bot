@@ -22,7 +22,7 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /match command for student pairing."""
     user = update.effective_user
     logger.info(f"User @{user.username} ({user.id}) initiated /match.")
-
+    
     # 1. Check if user is verified
     if not check_verified_user(user.id):
         await update.message.reply_text(
@@ -31,7 +31,7 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode=ParseMode.MARKDOWN
         )
         return
-
+    
     try:
         # 2. Add the current user to the matching queue
         add_match_request(user.id)
@@ -59,19 +59,19 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"You've been matched with: @{matched_username}\n\n"
                     f"You can now start chatting and collaborating!"
                 ),
-                parse_mode=ParseMode.MARKDOWN
-            )
-
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
             # Notify the other user
             await context.bot.send_message(
                 chat_id=matched_user_id,
                 text=(
-                    f"🎉 **Match Found!**\n\n"
+            f"🎉 **Match Found!**\n\n"
                     f"You've been matched with: @{current_username}\n\n"
                     f"You can now start chatting and collaborating!"
                 ),
-                parse_mode=ParseMode.MARKDOWN
-            )
+            parse_mode=ParseMode.MARKDOWN
+        )
             logger.info(f"Successfully notified both users of the match: {user.id} and {matched_user_id}")
 
         else:
@@ -80,9 +80,9 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 "🔍 **You've been added to the matching queue!**\n\n"
                 "I'll notify you as soon as another student is available to be matched.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
     except Exception as e:
         logger.exception("Error during /match process for user %s: %s", user.id, e)
         await notify_admin_telegram(context.bot, f"Error in /match command for user {user.id}: {e}")

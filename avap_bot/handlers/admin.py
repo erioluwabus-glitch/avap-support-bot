@@ -260,7 +260,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
     
     # Find student
     try:
-        student = await _find_student_by_identifier(identifier)
+        student = await run_blocking(_find_student_by_identifier, identifier)
         if not student:
             await update.message.reply_text(
                 f"❌ No student found with identifier: {identifier}"
@@ -364,7 +364,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
 
-async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
+def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, phone, or name in the verified_users table."""
     # Try as email first
     if validate_email(identifier):
@@ -407,7 +407,7 @@ add_student_conv = ConversationHandler(
 )
 
 remove_student_conv = ConversationHandler(
-    entry_points=[CommandHandler("remove_student", remove_student_start, filters=filters.Chat(chat_id=VERIFICATION_GROUP_ID))],
+    entry_points=[CommandHandler("remove_student", remove_student_start)],
     states={
         REMOVE_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_identifier)],
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],
