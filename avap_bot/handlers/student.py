@@ -39,7 +39,7 @@ LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://t.me/avapsupportbot"
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
-    """Handle /start command. Check for verification and start verification if needed."""
+    """Handle /start command. Check for verification and show appropriate response."""
     user = update.effective_user
     
     # Check if user is already verified
@@ -48,11 +48,63 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
         await _show_main_menu(update, context, verified_user)
         return ConversationHandler.END
 
-    # If not verified, start the verification process
+    # If not verified, show welcome message and suggest verification
     await update.message.reply_text(
         "👋 **Welcome to AVAP Support Bot!**\n\n"
-        "To get started, please verify your account.\n"
-        "Please enter your email address or phone number that you used to register for the course:",
+        "To access all features, please verify your account first.\n"
+        "Use /verify to start the verification process.\n\n"
+        "**Available commands:**\n"
+        "• /verify - Verify your account\n"
+        "• /help - Show help information",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    return ConversationHandler.END
+
+
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command."""
+    help_text = """
+🤖 **AVAP Support Bot Help**
+
+**For Students:**
+• /start - Start using the bot
+• /verify - Verify your account
+• /submit - Submit assignments
+• /sharewin - Share your wins
+• /status - Check your status
+• /ask - Ask questions
+• /match - Find study partners
+
+**For Admins:**
+• /addstudent - Add new student
+• /grade - Grade assignments
+• /list_achievers - List top achievers
+• /broadcast - Send announcements
+
+**General:**
+• /cancel - Cancel current operation
+• /help - Show this help message
+
+Need more help? Contact support!
+    """
+    
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def verify_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /verify command to start verification process."""
+    user = update.effective_user
+    
+    # Check if user is already verified
+    verified_user = await check_verified_user(user.id)
+    if verified_user:
+        await _show_main_menu(update, context, verified_user)
+        return ConversationHandler.END
+
+    # Start verification process
+    await update.message.reply_text(
+        "🔐 **Account Verification**\n\n"
+        "To verify your account, please enter your email address or phone number that you used to register for the course:",
         parse_mode=ParseMode.MARKDOWN
     )
     return VERIFY_IDENTIFIER
@@ -594,8 +646,12 @@ def _is_verified(update: Update) -> bool:
 # Conversation handlers
 
 # Main verification and start conversation
-start_conv = ConversationHandler(
-    entry_points=[CommandHandler("start", start_handler)],
+# Separate start command handler (not in conversation)
+start_handler_cmd = CommandHandler("start", start_handler)
+
+# Verification conversation handler
+verify_conv = ConversationHandler(
+    entry_points=[CommandHandler("verify", verify_start_handler)],
     states={
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
     },
@@ -637,9 +693,11 @@ ask_conv = ConversationHandler(
 def register_handlers(application):
     """Register all student handlers with the application"""
     # Add command handlers
-    application.add_handler(start_conv)
+    application.add_handler(start_handler_cmd)
+    application.add_handler(CommandHandler("help", help_handler))
     
     # Add conversation handlers
+    application.add_handler(verify_conv)
     application.add_handler(submit_conv)
     application.add_handler(share_win_conv)
     application.add_handler(ask_conv)
