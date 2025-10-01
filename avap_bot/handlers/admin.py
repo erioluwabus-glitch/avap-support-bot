@@ -260,7 +260,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
     
     # Find student
     try:
-        student = _find_student_by_identifier(identifier)
+        student = await _find_student_by_identifier(identifier)
         if not student:
             await update.message.reply_text(
                 f"❌ No student found with identifier: {identifier}"
@@ -313,12 +313,12 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
             return ConversationHandler.END
         
         # Remove from all systems
-        success = await remove_verified_by_identifier(identifier)
+        success = remove_verified_by_identifier(identifier)
         if not success:
             raise Exception("Failed to remove from Supabase")
         
         # Remove from Systeme.io
-        await untag_or_remove_contact(student)
+        await untag_or_remove_contact(student['email'])
         
         # Update Google Sheets
         await run_blocking(update_verification_status, student['email'], 'Removed')
