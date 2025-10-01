@@ -630,17 +630,9 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
-<<<<<<< HEAD
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
     return await check_verified_user(update.effective_user.id) is not None
-=======
-def _is_verified(update: Update) -> bool:
-    """Check if user is verified"""
-    user_id = update.effective_user.id
-    verified_user = check_verified_user(user_id)
-    return verified_user is not None
->>>>>>> a43d9ec (🎉 Complete AVAP Support Bot Implementation)
 
 
 # Conversation handlers
