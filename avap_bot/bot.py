@@ -179,8 +179,8 @@ async def webhook_endpoint(request: Request, token: str):
         # Get update data
         update_data = await request.json()
         
-        # Process update asynchronously
-        asyncio.create_task(_process_update(update_data))
+        # Process update synchronously
+        await _process_update(update_data)
         
         return {"status": "ok"}
 
