@@ -2,6 +2,7 @@
 Webhook handler for Telegram bot updates and health checks.
 """
 
+import asyncio
 import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException
@@ -35,14 +36,34 @@ async def webhook_handler(request: Request) -> JSONResponse:
 @router.get("/health")
 async def health_check() -> JSONResponse:
     """
-    Health check endpoint for monitoring.
+    Health check endpoint for monitoring and keeping service active.
     """
     try:
-        # Basic health check
+        # Do some work to keep the service active
+        import time
+        start_time = time.time()
+        
+        # Simulate some work
+        await asyncio.sleep(0.1)
+        
+        # Check if Supabase is accessible
+        try:
+            from avap_bot.services.supabase_service import get_supabase
+            client = get_supabase()
+            # Simple query to keep database connection active
+            client.table("verified_users").select("id").limit(1).execute()
+        except Exception as e:
+            logger.warning("Supabase health check failed: %s", e)
+        
+        processing_time = time.time() - start_time
+        
         return JSONResponse(content={
             "status": "healthy",
             "service": "avap-support-bot",
-            "version": "1.0.0"
+            "version": "2.0.0",
+            "timestamp": time.time(),
+            "processing_time_ms": round(processing_time * 1000, 2),
+            "keep_alive": "active"
         })
     
     except Exception as e:

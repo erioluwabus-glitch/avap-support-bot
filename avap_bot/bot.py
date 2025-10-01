@@ -68,17 +68,38 @@ async def on_startup():
         scheduler = AsyncIOScheduler()
         await schedule_daily_tips(telegram_app, scheduler)
         
-        # Schedule keep-alive ping every 10 minutes
+        # Schedule keep-alive ping every 2 minutes (more aggressive)
         scheduler.add_job(
             keep_alive_ping,
             'interval',
-            minutes=10,
+            minutes=2,
             id='keep_alive_ping',
+            replace_existing=True
+        )
+        
+        # Schedule additional keep-alive every 30 seconds for critical periods
+        scheduler.add_job(
+            keep_alive_ping,
+            'interval',
+            seconds=30,
+            id='keep_alive_ping_aggressive',
+            replace_existing=True
+        )
+        
+        # Schedule a more frequent ping every 15 seconds during peak hours
+        scheduler.add_job(
+            keep_alive_ping,
+            'interval',
+            seconds=15,
+            id='keep_alive_ping_peak',
             replace_existing=True
         )
         
         scheduler.start()
         logger.info("✅ Scheduler started")
+        
+        # Start continuous keep-alive background task
+        asyncio.create_task(continuous_keep_alive())
         
         # Start Telegram application
         await telegram_app.initialize()
@@ -152,19 +173,48 @@ async def _set_webhook():
 
 
 async def keep_alive_ping():
-    """Keep the service alive by pinging itself every 10 minutes"""
+    """Keep the service alive by pinging multiple endpoints aggressively"""
     try:
         if RENDER_EXTERNAL_URL:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(f"{RENDER_EXTERNAL_URL}/health") as response:
-                    if response.status == 200:
-                        logger.info("🔄 Keep-alive ping successful")
-                    else:
-                        logger.warning("⚠️ Keep-alive ping returned status: %s", response.status)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                # Ping multiple endpoints to keep service active
+                endpoints = [
+                    f"{RENDER_EXTERNAL_URL}/health",
+                    f"{RENDER_EXTERNAL_URL}/",
+                    f"{RENDER_EXTERNAL_URL}/webhook/{BOT_TOKEN}"
+                ]
+                
+                success_count = 0
+                for endpoint in endpoints:
+                    try:
+                        async with session.get(endpoint) as response:
+                            if response.status in [200, 405]:  # 405 is OK for HEAD requests
+                                success_count += 1
+                                logger.debug(f"🔄 Keep-alive ping successful: {endpoint}")
+                            else:
+                                logger.warning(f"⚠️ Keep-alive ping returned status {response.status}: {endpoint}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Keep-alive ping failed for {endpoint}: {e}")
+                
+                if success_count > 0:
+                    logger.info(f"🔄 Keep-alive ping successful ({success_count}/{len(endpoints)} endpoints)")
+                else:
+                    logger.error("❌ All keep-alive pings failed")
         else:
             logger.warning("⚠️ RENDER_EXTERNAL_URL not set, skipping keep-alive ping")
     except Exception as e:
         logger.error("❌ Keep-alive ping failed: %s", e)
+
+
+async def continuous_keep_alive():
+    """Continuous keep-alive task that runs every 10 seconds"""
+    while True:
+        try:
+            await keep_alive_ping()
+            await asyncio.sleep(10)  # Wait 10 seconds between pings
+        except Exception as e:
+            logger.error("❌ Continuous keep-alive failed: %s", e)
+            await asyncio.sleep(5)  # Wait 5 seconds before retrying
 
 
 # Webhook endpoint
