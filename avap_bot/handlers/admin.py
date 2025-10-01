@@ -36,6 +36,7 @@ VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0"))
 
 async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the add student conversation"""
+    logger.info(f"Add student command called by user {update.effective_user.id}")
     if not _is_admin(update):
         await update.message.reply_text("❌ This command is only for admins.")
         return ConversationHandler.END
@@ -386,12 +387,14 @@ async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
-    return user_id == ADMIN_USER_ID
+    is_admin = user_id == ADMIN_USER_ID
+    logger.info(f"Admin check: user_id={user_id}, ADMIN_USER_ID={ADMIN_USER_ID}, is_admin={is_admin}")
+    return is_admin
 
 
 # Conversation handlers
 add_student_conv = ConversationHandler(
-    entry_points=[CommandHandler("addstudent", add_student_start, filters=filters.Chat(chat_id=VERIFICATION_GROUP_ID))],
+    entry_points=[CommandHandler("addstudent", add_student_start)],
     states={
         ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_name)],
         ADD_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
