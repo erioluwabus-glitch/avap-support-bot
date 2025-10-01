@@ -13,7 +13,8 @@ from telegram.constants import ParseMode, ChatType
 
 from avap_bot.services.supabase_service import (
     find_verified_by_telegram, check_verified_user,
-    find_pending_by_email_or_phone, promote_pending_to_verified
+    add_assignment, add_win, add_question,
+    get_student_assignments, get_student_wins, get_student_questions
 )
 from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
@@ -250,7 +251,10 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             'status': 'Pending'
         }
         
-        # Save to Google Sheets
+        # Save to Supabase
+        await run_blocking(add_assignment, submission_data)
+        
+        # Also save to Google Sheets for backup
         await run_blocking(append_submission, submission_data)
         
         # Forward to assignment group
@@ -373,7 +377,10 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             'shared_at': datetime.now(timezone.utc)
         }
         
-        # Save to Google Sheets
+        # Save to Supabase
+        await run_blocking(add_win, win_data)
+        
+        # Also save to Google Sheets for backup
         await run_blocking(append_win, win_data)
         
         # Forward to support group
@@ -423,10 +430,10 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
         
-        # Get student data
-        submissions = await run_blocking(get_student_submissions, username)
-        wins = await run_blocking(get_student_wins, username)
-        questions = await run_blocking(get_student_questions, username)
+        # Get student data from Supabase
+        submissions = await run_blocking(get_student_assignments, user_id)
+        wins = await run_blocking(get_student_wins, user_id)
+        questions = await run_blocking(get_student_questions, user_id)
         
         # Calculate stats
         total_submissions = len(submissions)
@@ -521,7 +528,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             'status': 'Pending'
         }
         
-        # Save to Google Sheets
+        # Save to Supabase
+        await run_blocking(add_question, question_data)
+        
+        # Also save to Google Sheets for backup
         await run_blocking(append_question, question_data)
         
         # Forward to questions group
@@ -568,9 +578,17 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+<<<<<<< HEAD
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
     return await check_verified_user(update.effective_user.id) is not None
+=======
+def _is_verified(update: Update) -> bool:
+    """Check if user is verified"""
+    user_id = update.effective_user.id
+    verified_user = check_verified_user(user_id)
+    return verified_user is not None
+>>>>>>> a43d9ec (🎉 Complete AVAP Support Bot Implementation)
 
 
 # Conversation handlers

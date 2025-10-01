@@ -213,15 +213,138 @@ async def internal_error_handler(request: Request, exc: HTTPException):
     )
 
 
+# Testing functions
+async def test_supabase_connection():
+    """Test Supabase connection"""
+    try:
+        client = get_supabase()
+        result = client.table("verified_users").select("count").execute()
+        logger.info("✅ Supabase connection test passed")
+        return True
+    except Exception as e:
+        logger.error("❌ Supabase connection test failed: %s", e)
+        return False
+
+
+async def test_ai_features():
+    """Test AI features"""
+    try:
+        from avap_bot.services.ai_service import generate_daily_tip, find_faq_match
+        
+        # Test tip generation
+        tip = await generate_daily_tip()
+        if tip:
+            logger.info("✅ AI tip generation test passed")
+        else:
+            logger.warning("⚠️ AI tip generation returned empty")
+        
+        # Test FAQ matching
+        faq_match = await find_faq_match("How do I submit an assignment?")
+        if faq_match:
+            logger.info("✅ FAQ matching test passed")
+        else:
+            logger.info("ℹ️ No FAQ match found (expected for empty database)")
+        
+        return True
+    except Exception as e:
+        logger.error("❌ AI features test failed: %s", e)
+        return False
+
+
+async def test_database_schema():
+    """Test database schema"""
+    try:
+        client = get_supabase()
+        
+        # Test all required tables exist
+        tables = [
+            "pending_verifications", "verified_users", "assignments", 
+            "wins", "questions", "faqs", "tips", "match_requests"
+        ]
+        
+        for table in tables:
+            result = client.table(table).select("count").limit(1).execute()
+            if result.error:
+                logger.error("❌ Table %s not found or accessible", table)
+                return False
+            logger.info("✅ Table %s accessible", table)
+        
+        logger.info("✅ Database schema test passed")
+        return True
+    except Exception as e:
+        logger.error("❌ Database schema test failed: %s", e)
+        return False
+
+
+async def test_environment_variables():
+    """Test required environment variables"""
+    required_vars = [
+        "BOT_TOKEN", "SUPABASE_URL", "SUPABASE_KEY", 
+        "ADMIN_USER_ID", "GOOGLE_CREDENTIALS_JSON", "GOOGLE_SHEET_ID"
+    ]
+    
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+    
+    if missing_vars:
+        logger.warning("⚠️ Missing environment variables: %s", ", ".join(missing_vars))
+        return False
+    
+    logger.info("✅ Environment variables test passed")
+    return True
+
+
+async def run_tests():
+    """Run all tests"""
+    logger.info("🧪 Running bot tests...")
+    
+    tests = [
+        ("Environment Variables", test_environment_variables),
+        ("Database Schema", test_database_schema),
+        ("Supabase Connection", test_supabase_connection),
+        ("AI Features", test_ai_features),
+    ]
+    
+    results = []
+    for test_name, test_func in tests:
+        logger.info("Running %s test...", test_name)
+        try:
+            result = await test_func()
+            results.append((test_name, result))
+        except Exception as e:
+            logger.exception("Test %s failed with exception: %s", test_name, e)
+            results.append((test_name, False))
+    
+    # Summary
+    passed = sum(1 for _, result in results if result)
+    total = len(results)
+    
+    logger.info("🧪 Test Results: %d/%d passed", passed, total)
+    for test_name, result in results:
+        status = "✅ PASS" if result else "❌ FAIL"
+        logger.info("  %s: %s", test_name, status)
+    
+    return passed == total
+
+
 if __name__ == "__main__":
     import uvicorn
+    import asyncio
     
-    port = int(os.getenv("PORT", "8080"))
-    logger.info("Starting uvicorn on port %s", port)
-    
-    uvicorn.run(
-        "avap_bot.bot:app",
-        host="0.0.0.0",
-        port=port,
-        log_level="info"
-    )
+    # Check if running tests
+    if len(os.sys.argv) > 1 and os.sys.argv[1] == "test":
+        # Run tests
+        asyncio.run(run_tests())
+    else:
+        # Run bot normally
+        port = int(os.getenv("PORT", "8080"))
+        logger.info("Starting uvicorn on port %s", port)
+        
+        uvicorn.run(
+            "avap_bot.bot:app",
+            host="0.0.0.0",
+            port=port,
+            log_level="info"
+        )

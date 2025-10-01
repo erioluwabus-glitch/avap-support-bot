@@ -4,6 +4,7 @@ Supabase service for verification operations - Complete CRUD implementation
 import os
 import logging
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from supabase import create_client, Client
@@ -282,3 +283,221 @@ def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.exception("Supabase check_verified_user error: %s", e)
         return None
+
+
+# Assignment functions
+def add_assignment(assignment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a new assignment submission"""
+    client = get_supabase()
+    payload = assignment_data.copy()
+    if 'submitted_at' in payload and isinstance(payload['submitted_at'], datetime):
+        payload['submitted_at'] = payload['submitted_at'].isoformat()
+    
+    res = client.table("assignments").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add assignment: %s", res.error)
+        raise RuntimeError(f"Assignment insert failed: {res.error}")
+    return (res.data or [None])[0]
+
+
+def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
+    """Get all assignments for a student"""
+    client = get_supabase()
+    res = client.table("assignments").select("*").eq("telegram_id", telegram_id).order("submitted_at", desc=True).execute()
+    if res.error:
+        logger.exception("Failed to get student assignments: %s", res.error)
+        return []
+    return res.data or []
+
+
+def update_assignment_grade(assignment_id: str, grade: int, comments: str = None) -> bool:
+    """Update assignment with grade and comments"""
+    client = get_supabase()
+    update_data = {
+        "grade": grade,
+        "status": "graded",
+        "graded_at": datetime.now(timezone.utc).isoformat()
+    }
+    if comments:
+        update_data["comments"] = comments
+    
+    res = client.table("assignments").update(update_data).eq("id", assignment_id).execute()
+    return not res.error
+
+
+# Win functions
+def add_win(win_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a new win"""
+    client = get_supabase()
+    payload = win_data.copy()
+    if 'shared_at' in payload and isinstance(payload['shared_at'], datetime):
+        payload['shared_at'] = payload['shared_at'].isoformat()
+    
+    res = client.table("wins").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add win: %s", res.error)
+        raise RuntimeError(f"Win insert failed: {res.error}")
+    return (res.data or [None])[0]
+
+
+def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
+    """Get all wins for a student"""
+    client = get_supabase()
+    res = client.table("wins").select("*").eq("telegram_id", telegram_id).order("shared_at", desc=True).execute()
+    if res.error:
+        logger.exception("Failed to get student wins: %s", res.error)
+        return []
+    return res.data or []
+
+
+# Question functions
+def add_question(question_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a new question"""
+    client = get_supabase()
+    payload = question_data.copy()
+    if 'asked_at' in payload and isinstance(payload['asked_at'], datetime):
+        payload['asked_at'] = payload['asked_at'].isoformat()
+    
+    res = client.table("questions").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add question: %s", res.error)
+        raise RuntimeError(f"Question insert failed: {res.error}")
+    return (res.data or [None])[0]
+
+
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+    """Get all questions for a student"""
+    client = get_supabase()
+    res = client.table("questions").select("*").eq("telegram_id", telegram_id).order("asked_at", desc=True).execute()
+    if res.error:
+        logger.exception("Failed to get student questions: %s", res.error)
+        return []
+    return res.data or []
+
+
+def update_question_answer(question_id: str, answer: str) -> bool:
+    """Update question with answer"""
+    client = get_supabase()
+    update_data = {
+        "answer": answer,
+        "status": "answered",
+        "answered_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    res = client.table("questions").update(update_data).eq("id", question_id).execute()
+    return not res.error
+
+
+# FAQ functions
+def get_faqs() -> List[Dict[str, Any]]:
+    """Get all FAQs for AI matching"""
+    client = get_supabase()
+    res = client.table("faqs").select("*").execute()
+    if res.error:
+        logger.exception("Failed to get FAQs: %s", res.error)
+        return []
+    return res.data or []
+
+
+def add_faq(question: str, answer: str, category: str = "general") -> Dict[str, Any]:
+    """Add a new FAQ"""
+    client = get_supabase()
+    payload = {
+        "question": question,
+        "answer": answer,
+        "category": category
+    }
+    
+    res = client.table("faqs").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add FAQ: %s", res.error)
+        raise RuntimeError(f"FAQ insert failed: {res.error}")
+    return (res.data or [None])[0]
+
+
+# Tips functions
+def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
+    """Get tip for specific day of week"""
+    client = get_supabase()
+    res = client.table("tips").select("*").eq("day_of_week", day_of_week).order("is_manual", desc=True).limit(1).execute()
+    if res.error:
+        logger.exception("Failed to get tip: %s", res.error)
+        return None
+    return (res.data or [None])[0]
+
+
+def add_manual_tip(tip_text: str, day_of_week: int) -> Dict[str, Any]:
+    """Add a manual tip for specific day"""
+    client = get_supabase()
+    payload = {
+        "tip_text": tip_text,
+        "day_of_week": day_of_week,
+        "is_manual": True
+    }
+    
+    res = client.table("tips").insert(payload).execute()
+    if res.error:
+        logger.error("Failed to add manual tip: %s", res.error)
+        raise RuntimeError(f"Manual tip insert failed: {res.error}")
+    return (res.data or [None])[0]
+
+
+# Admin functions
+def get_top_students() -> List[Dict[str, Any]]:
+    """Get students with 3+ assignments and 3+ wins"""
+    client = get_supabase()
+    
+    # Get all verified users
+    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
+    if users_res.error:
+        logger.exception("Failed to get verified users: %s", users_res.error)
+        return []
+    
+    top_students = []
+    for user in users_res.data or []:
+        telegram_id = user.get('telegram_id')
+        if not telegram_id:
+            continue
+            
+        # Count assignments
+        assignments_res = client.table("assignments").select("id").eq("telegram_id", telegram_id).execute()
+        assignment_count = len(assignments_res.data or [])
+        
+        # Count wins
+        wins_res = client.table("wins").select("id").eq("telegram_id", telegram_id).execute()
+        wins_count = len(wins_res.data or [])
+        
+        if assignment_count >= 3 and wins_count >= 3:
+            user['assignment_count'] = assignment_count
+            user['wins_count'] = wins_count
+            top_students.append(user)
+    
+    return top_students
+
+
+def get_all_verified_telegram_ids() -> List[int]:
+    """Get all verified user telegram IDs for broadcasting"""
+    client = get_supabase()
+    res = client.table("verified_users").select("telegram_id").eq("status", "verified").not_.is_("telegram_id", "null").execute()
+    if res.error:
+        logger.exception("Failed to get verified telegram IDs: %s", res.error)
+        return []
+    return [user['telegram_id'] for user in res.data or []]
+
+
+# Update user badge
+def update_user_badge(telegram_id: int, badge: str) -> bool:
+    """Update user badge"""
+    client = get_supabase()
+    res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
+    return not res.error
+
+
+def get_assignment_by_id(assignment_id: str) -> Optional[Dict[str, Any]]:
+    """Get assignment by ID"""
+    client = get_supabase()
+    res = client.table("assignments").select("*").eq("id", assignment_id).execute()
+    if res.error:
+        logger.exception("Failed to get assignment: %s", res.error)
+        return None
+    return (res.data or [None])[0]
