@@ -13,6 +13,7 @@ from telegram.constants import ParseMode, ChatType
 
 from avap_bot.services.supabase_service import (
     find_verified_by_telegram, check_verified_user,
+    find_pending_by_email_or_phone, promote_pending_to_verified,
     add_assignment, add_win, add_question,
     get_student_assignments, get_student_wins, get_student_questions
 )
@@ -63,10 +64,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
-    help_text = """
-🤖 **AVAP Support Bot Help**
+    help_text = """🤖 *AVAP Support Bot Help*
 
-**For Students:**
+*For Students:*
 • /start - Start using the bot
 • /verify - Verify your account
 • /submit - Submit assignments
@@ -75,18 +75,17 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /ask - Ask questions
 • /match - Find study partners
 
-**For Admins:**
+*For Admins:*
 • /addstudent - Add new student
 • /grade - Grade assignments
 • /list_achievers - List top achievers
 • /broadcast - Send announcements
 
-**General:**
+*General:*
 • /cancel - Cancel current operation
 • /help - Show this help message
 
-Need more help? Contact support!
-    """
+Need more help? Contact support!"""
     
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -141,7 +140,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
-        verified_user = await promote_pending_to_verified(pending_id, user.id, user.username)
+        verified_user = promote_pending_to_verified(pending_id, user.id, user.username)
         if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
