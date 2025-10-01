@@ -64,6 +64,10 @@ async def on_startup():
         register_all(telegram_app)
         logger.info("✅ Handlers registered")
         
+        # Add error handler
+        telegram_app.add_error_handler(error_handler)
+        logger.info("✅ Error handler registered")
+        
         # Initialize scheduler
         scheduler = AsyncIOScheduler()
         await schedule_daily_tips(telegram_app, scheduler)
@@ -215,6 +219,30 @@ async def continuous_keep_alive():
         except Exception as e:
             logger.error("❌ Continuous keep-alive failed: %s", e)
             await asyncio.sleep(5)  # Wait 5 seconds before retrying
+
+
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors in the bot"""
+    logger.error("Exception while handling an update:", exc_info=context.error)
+    
+    # Try to send error message to user
+    try:
+        if update and update.effective_message:
+            await update.effective_message.reply_text(
+                "❌ An error occurred. Please try again or contact support if the problem persists."
+            )
+    except Exception as e:
+        logger.error("Failed to send error message to user: %s", e)
+    
+    # Notify admin about the error
+    try:
+        from avap_bot.services.notifier import notify_admin_telegram
+        error_msg = f"❌ Bot Error: {str(context.error)}"
+        if update and update.effective_user:
+            error_msg += f"\nUser: @{update.effective_user.username or 'unknown'} ({update.effective_user.id})"
+        await notify_admin_telegram(context.bot, error_msg)
+    except Exception as e:
+        logger.error("Failed to notify admin about error: %s", e)
 
 
 # Webhook endpoint

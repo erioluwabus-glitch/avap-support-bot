@@ -17,6 +17,7 @@ from avap_bot.services.supabase_service import (
     add_assignment, add_win, add_question,
     get_student_assignments, get_student_wins, get_student_questions
 )
+from avap_bot.handlers.matching import match_student
 from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
@@ -64,9 +65,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
-    help_text = """🤖 *AVAP Support Bot Help*
+    help_text = """🤖 <b>AVAP Support Bot Help</b>
 
-*For Students:*
+<b>For Students:</b>
 • /start - Start using the bot
 • /verify - Verify your account
 • /submit - Submit assignments
@@ -75,19 +76,19 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • /ask - Ask questions
 • /match - Find study partners
 
-*For Admins:*
+<b>For Admins:</b>
 • /addstudent - Add new student
 • /grade - Grade assignments
 • /list_achievers - List top achievers
 • /broadcast - Send announcements
 
-*General:*
+<b>General:</b>
 • /cancel - Cancel current operation
 • /help - Show this help message
 
 Need more help? Contact support!"""
     
-    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
 async def verify_start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -624,8 +625,24 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle cancel command"""
-    await update.message.reply_text("❌ Operation cancelled.")
+    """Handle /cancel command"""
+    # Clear any user data
+    if 'user_data' in context:
+        context.user_data.clear()
+    
+    # Check if user is verified to show appropriate menu
+    user = update.effective_user
+    verified_user = check_verified_user(user.id)
+    
+    if verified_user:
+        await _show_main_menu(update, context, verified_user)
+    else:
+        await update.message.reply_text(
+            "❌ Operation cancelled.\n\n"
+            "Use /start to begin or /verify to verify your account.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    
     return ConversationHandler.END
 
 
@@ -686,6 +703,8 @@ def register_handlers(application):
     # Add command handlers
     application.add_handler(start_handler_cmd)
     application.add_handler(CommandHandler("help", help_handler))
+    application.add_handler(CommandHandler("cancel", cancel_handler))
+    application.add_handler(CommandHandler("match", match_student))
     
     # Add conversation handlers
     application.add_handler(verify_conv)

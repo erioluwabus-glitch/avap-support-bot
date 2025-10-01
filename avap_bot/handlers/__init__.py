@@ -21,6 +21,7 @@ HANDLER_MODULES = [
     "matching",
     "admin_tools",
     "verify",
+    "answer",
 ]
 
 def register_all(application):

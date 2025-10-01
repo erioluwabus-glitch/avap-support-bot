@@ -37,8 +37,10 @@ VERIFICATION_GROUP_ID = int(os.getenv("VERIFICATION_GROUP_ID", "0"))
 async def add_student_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the add student conversation"""
     logger.info(f"Add student command called by user {update.effective_user.id}")
+    logger.info(f"ADMIN_USER_ID: {ADMIN_USER_ID}")
+    
     if not _is_admin(update):
-        await update.message.reply_text("❌ This command is only for admins.")
+        await update.message.reply_text(f"❌ This command is only for admins. Your ID: {update.effective_user.id}, Admin ID: {ADMIN_USER_ID}")
         return ConversationHandler.END
     
     await update.message.reply_text(
