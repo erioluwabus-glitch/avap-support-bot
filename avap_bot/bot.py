@@ -5,6 +5,7 @@ Main entrypoint with FastAPI + Telegram bot integration
 import os
 import logging
 import asyncio
+import aiohttp
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request, HTTPException
@@ -66,6 +67,16 @@ async def on_startup():
         # Initialize scheduler
         scheduler = AsyncIOScheduler()
         await schedule_daily_tips(telegram_app, scheduler)
+        
+        # Schedule keep-alive ping every 10 minutes
+        scheduler.add_job(
+            keep_alive_ping,
+            'interval',
+            minutes=10,
+            id='keep_alive_ping',
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info("✅ Scheduler started")
         
@@ -138,6 +149,22 @@ async def _set_webhook():
 
     except Exception as e:
         logger.exception("❌ Failed to set webhook: %s", e)
+
+
+async def keep_alive_ping():
+    """Keep the service alive by pinging itself every 10 minutes"""
+    try:
+        if RENDER_EXTERNAL_URL:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{RENDER_EXTERNAL_URL}/health") as response:
+                    if response.status == 200:
+                        logger.info("🔄 Keep-alive ping successful")
+                    else:
+                        logger.warning("⚠️ Keep-alive ping returned status: %s", response.status)
+        else:
+            logger.warning("⚠️ RENDER_EXTERNAL_URL not set, skipping keep-alive ping")
+    except Exception as e:
+        logger.error("❌ Keep-alive ping failed: %s", e)
 
 
 # Webhook endpoint
