@@ -12,7 +12,7 @@ from avap_bot.services.supabase_service import (
     check_verified_user,
     add_match_request,
     pop_match_request,
-    get_user_by_telegram_id
+    find_verified_by_telegram
 )
 from avap_bot.services.notifier import notify_admin_telegram
 
@@ -45,8 +45,8 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"Found a match for user {user.id} with user {matched_user_id}.")
 
             # 4. If a match is found, notify both users
-            current_user_details = await get_user_by_telegram_id(user.id)
-            matched_user_details = await get_user_by_telegram_id(matched_user_id)
+            current_user_details = await find_verified_by_telegram(user.id)
+            matched_user_details = await find_verified_by_telegram(matched_user_id)
 
             current_username = current_user_details.get('username', f"user_{user.id}")
             matched_username = matched_user_details.get('username', f"user_{matched_user_id}")
