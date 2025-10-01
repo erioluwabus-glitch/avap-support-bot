@@ -11,7 +11,7 @@ async def user_verified_by_telegram_id(telegram_id: int) -> Optional[Dict[str, A
 
     Structure: {"name", "email", "phone", "telegram_id", "status"}
     """
-    user_data = await check_verified_user(telegram_id)
+    user_data = check_verified_user(telegram_id)
     if user_data and user_data.get("status") != "removed":
         return {
             "name": user_data.get("name"),

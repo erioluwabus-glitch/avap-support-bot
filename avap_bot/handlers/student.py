@@ -43,7 +43,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     user = update.effective_user
     
     # Check if user is already verified
-    verified_user = await check_verified_user(user.id)
+    verified_user = check_verified_user(user.id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
         return ConversationHandler.END
@@ -96,7 +96,7 @@ async def verify_start_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user = update.effective_user
     
     # Check if user is already verified
-    verified_user = await check_verified_user(user.id)
+    verified_user = check_verified_user(user.id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
         return ConversationHandler.END
@@ -128,7 +128,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         # Find a pending verification record
         email = identifier if is_email else None
         phone = identifier if is_phone else None
-        pending_records = await find_pending_by_email_or_phone(email=email, phone=phone)
+        pending_records = find_pending_by_email_or_phone(email=email, phone=phone)
 
         if not pending_records:
             await update.message.reply_text(
@@ -632,7 +632,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
-    return await check_verified_user(update.effective_user.id) is not None
+    return check_verified_user(update.effective_user.id) is not None
 
 
 # Conversation handlers

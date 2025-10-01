@@ -101,8 +101,8 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     
     try:
         # Check for duplicates in both pending and verified tables
-        pending_existing = await find_pending_by_email_or_phone(email, phone)
-        verified_existing = await find_verified_by_email_or_phone(email, phone)
+        pending_existing = find_pending_by_email_or_phone(email, phone)
+        verified_existing = find_verified_by_email_or_phone(email, phone)
         
         existing = pending_existing or verified_existing
         if existing:
@@ -124,7 +124,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'status': 'Pending'
         }
         
-        result = await add_pending_verification(pending_data)
+        result = add_pending_verification(pending_data)
         if not result:
             raise Exception("Failed to add pending verification to Supabase")
         
@@ -257,7 +257,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
     
     # Find student
     try:
-        student = await _find_student_by_identifier(identifier)
+        student = _find_student_by_identifier(identifier)
         if not student:
             await update.message.reply_text(
                 f"❌ No student found with identifier: {identifier}"
@@ -365,18 +365,18 @@ async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any
     """Find student by email, phone, or name in the verified_users table."""
     # Try as email first
     if validate_email(identifier):
-        results = await find_verified_by_email_or_phone(email=identifier)
+        results = find_verified_by_email_or_phone(email=identifier)
         if results:
             return results[0]
     
     # Try as phone
     if validate_phone(identifier):
-        results = await find_verified_by_email_or_phone(phone=identifier)
+        results = find_verified_by_email_or_phone(phone=identifier)
         if results:
             return results[0]
     
     # Try as name
-    results = await find_verified_by_name(identifier)
+    results = find_verified_by_name(identifier)
     if results:
         return results[0]
 
