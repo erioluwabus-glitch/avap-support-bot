@@ -136,10 +136,13 @@ def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Find verified user by telegram ID"""
     client = get_supabase()
     res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
-    if res.error:
-        logger.exception("Supabase find_verified_by_telegram error: %s", res.error)
+    try:
+        if res.data and len(res.data) > 0:
+            return res.data[0]
         return None
-    return (res.data or [None])[0]
+    except Exception as e:
+        logger.exception("Supabase find_verified_by_telegram error: %s", e)
+        return None
 
 
 def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -149,12 +152,12 @@ def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[
     
     if email:
         res = client.table("pending_verifications").select("*").eq("email", email).execute()
-        if not res.error and res.data:
+        if res.data:
             results.extend(res.data)
     
     if phone:
         res = client.table("pending_verifications").select("*").eq("phone", phone).execute()
-        if not res.error and res.data:
+        if res.data:
             results.extend(res.data)
     
     return results
@@ -167,12 +170,12 @@ def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional
     
     if email:
         res = client.table("verified_users").select("*").eq("email", email).eq("status", "verified").execute()
-        if not res.error and res.data:
+        if res.data:
             results.extend(res.data)
     
     if phone:
         res = client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified").execute()
-        if not res.error and res.data:
+        if res.data:
             results.extend(res.data)
     
     return results
@@ -181,10 +184,11 @@ def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
     """Search verified_users by name (case-insensitive)"""
     client = get_supabase()
     res = client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified").execute()
-    if res.error:
-        logger.exception("Supabase find_verified_by_name error: %s", res.error)
+    try:
+        return res.data or []
+    except Exception as e:
+        logger.exception("Supabase find_verified_by_name error: %s", e)
         return []
-    return res.data or []
 
 
 def promote_pending_to_verified(pending_id: Any, telegram_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -192,8 +196,8 @@ def promote_pending_to_verified(pending_id: Any, telegram_id: Optional[int] = No
     client = get_supabase()
     # Fetch pending row
     r = client.table("pending_verifications").select("*").eq("id", pending_id).execute()
-    if r.error or not r.data:
-        logger.error("pending row not found: %s %s", pending_id, r.error)
+    if not r.data:
+        logger.error("pending row not found: %s", pending_id)
         return None
     row = r.data[0]
     verified_payload = {
@@ -205,40 +209,48 @@ def promote_pending_to_verified(pending_id: Any, telegram_id: Optional[int] = No
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     ins = client.table("verified_users").insert(verified_payload).execute()
-    if ins.error:
-        logger.error("Failed to promote pending to verified: %s", ins.error)
+    try:
+        if ins.data and len(ins.data) > 0:
+            # Optionally delete pending row:
+            client.table("pending_verifications").delete().eq("id", pending_id).execute()
+            return ins.data[0]
         return None
-    # Optionally delete pending row:
-    client.table("pending_verifications").delete().eq("id", pending_id).execute()
-    return (ins.data or [None])[0]
+    except Exception as e:
+        logger.error("Failed to promote pending to verified: %s", e)
+        return None
 
 
 def remove_verified_by_identifier(identifier: str) -> bool:
     """Identifier may be email, phone, or full name. Return True if deleted."""
     client = get_supabase()
-    # Try email exact match
-    res = client.table("verified_users").delete().eq("email", identifier).execute()
-    if res.error:
-        logger.debug("remove by email error: %s", res.error)
-    if res.data:
-        return True
-    # Try phone
-    res = client.table("verified_users").delete().eq("phone", identifier).execute()
-    if res.data:
-        return True
-    # Try name (less exact)
-    res = client.table("verified_users").delete().eq("name", identifier).execute()
-    return bool(res.data)
+    try:
+        # Try email exact match
+        res = client.table("verified_users").delete().eq("email", identifier).execute()
+        if res.data:
+            return True
+        
+        # Try phone
+        res = client.table("verified_users").delete().eq("phone", identifier).execute()
+        if res.data:
+            return True
+        
+        # Try name (less exact)
+        res = client.table("verified_users").delete().eq("name", identifier).execute()
+        return bool(res.data)
+    except Exception as e:
+        logger.debug("remove by identifier error: %s", e)
+        return False
 
 
 def get_all_verified_users() -> List[Dict[str, Any]]:
     """Get all verified users"""
     client = get_supabase()
     res = client.table("verified_users").select("*").eq("status", "verified").execute()
-    if res.error:
-        logger.exception("get_all_verified_users error: %s", res.error)
+    try:
+        return res.data or []
+    except Exception as e:
+        logger.exception("get_all_verified_users error: %s", e)
         return []
-    return res.data or []
 
 
 def add_match_request(telegram_id: int) -> str:
@@ -252,10 +264,13 @@ def add_match_request(telegram_id: int) -> str:
         "status": "pending"
     }
     res = client.table("match_requests").insert(payload).execute()
-    if res.error:
-        logger.error("Failed to add match request: %s", res.error)
-        raise RuntimeError(f"Match request failed: {res.error}")
-    return match_id
+    try:
+        if res.data and len(res.data) > 0:
+            return res.data[0]["id"]
+        raise RuntimeError("Match request failed: No data returned")
+    except Exception as e:
+        logger.error("Failed to add match request: %s", e)
+        raise RuntimeError(f"Match request failed: {e}")
 
 def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     """Pop a match request excluding the given telegram_id"""
