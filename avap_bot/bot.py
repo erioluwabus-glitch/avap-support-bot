@@ -8,10 +8,12 @@ from telegram import Update
 from telegram.ext import Application
 from fastapi import FastAPI, Request, Response
 import uvicorn
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from avap_bot.utils.logging_config import setup_logging
 from avap_bot.services.supabase_service import init_supabase
 from avap_bot.handlers import register_all
+from avap_bot.handlers.tips import schedule_daily_tips
 
 # Initialize logging
 setup_logging()
@@ -30,6 +32,11 @@ bot_app = Application.builder().token(BOT_TOKEN).build()
 
 # Register all handlers
 register_all(bot_app)
+
+# Create scheduler for daily tips
+scheduler = AsyncIOScheduler()
+scheduler.start()
+logger.info("Scheduler started for daily tips")
 
 # --- Webhook and Health Check ---
 async def health_check():
@@ -57,6 +64,10 @@ async def initialize_services():
     try:
         # Initialize Supabase
         init_supabase()
+        
+        # Schedule daily tips
+        await schedule_daily_tips(bot_app.bot, scheduler)
+        
         logger.info("Services initialized successfully.")
     except Exception as e:
         logger.critical(f"Failed to initialize services: {e}", exc_info=True)

@@ -127,24 +127,56 @@ async def send_daily_tip(bot):
 
 
 async def _get_daily_tip_content() -> Optional[str]:
-    """Get daily tip content (manual or AI-generated)"""
+    """Get daily tip content (manual or AI-generated)
+    
+    Rotation logic:
+    - Monday (day 0): AI-generated tip
+    - Tuesday (day 1): Manual tip
+    - Wednesday (day 2): AI-generated tip
+    - Thursday (day 3): Manual tip
+    - Friday (day 4): AI-generated tip
+    - Saturday (day 5): Manual tip
+    - Sunday (day 6): AI-generated tip
+    
+    So: Even days (Mon, Wed, Fri, Sun) = AI, Odd days (Tue, Thu, Sat) = Manual
+    """
     try:
-        # Try to get manual tips first
+        today = date.today()
+        day_of_week = today.weekday()  # 0 = Monday, 6 = Sunday
+        
+        # Determine if today should be AI or manual
+        use_ai = (day_of_week % 2 == 0)  # Even days use AI
+        
+        if use_ai:
+            # Try AI-generated tip first
+            if OPENAI_API_KEY:
+                ai_tip = await _generate_ai_tip()
+                if ai_tip:
+                    logger.info(f"Using AI-generated tip for {today.strftime('%A')}")
+                    return ai_tip
+            
+            # Fallback to manual if AI fails
+            logger.warning("AI tip generation failed, falling back to manual tip")
+        
+        # Use manual tip (for odd days or as fallback)
         manual_tips = await run_blocking(get_manual_tips)
         
         if manual_tips:
-            # Use manual tip (deterministic rotation based on day of the year)
             num_tips = len(manual_tips)
             if num_tips > 0:
-                index = date.today().timetuple().tm_yday % num_tips
+                # Rotate through manual tips based on day of year
+                index = today.timetuple().tm_yday % num_tips
                 tip = manual_tips[index]
+                logger.info(f"Using manual tip #{index+1} for {today.strftime('%A')}")
                 return tip.get('content', '')
         
-        # Fallback to AI-generated tip
+        # Final fallback to AI if no manual tips
         if OPENAI_API_KEY:
+            logger.warning("No manual tips available, using AI as fallback")
             return await _generate_ai_tip()
         
-        # Default tip if no manual or AI available
+        # Default tip if nothing else works
+        logger.warning("No tips available, using default tip")
         return "💡 Remember: Consistency is key to success! Keep working on your goals every day."
         
     except Exception as e:

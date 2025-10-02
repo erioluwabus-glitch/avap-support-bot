@@ -8,7 +8,7 @@ python-telegram-bot Application object.
 
 import logging
 from telegram.ext import Application
-from . import admin, student, grading, tips, matching, admin_tools
+from . import admin, student, grading, tips, matching, admin_tools, questions
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def register_all(application: Application):
     if that function exists. Modules that are missing or don't expose the
     function are skipped with a log message.
     """
-    modules = [admin, student, grading, tips, matching, admin_tools]
+    modules = [admin, student, grading, tips, matching, admin_tools, questions]
     
     for module in modules:
         try:

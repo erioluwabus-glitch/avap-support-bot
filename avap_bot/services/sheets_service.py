@@ -439,44 +439,102 @@ def get_manual_tips() -> List[Dict[str, Any]]:
         return []
 
 
-def update_submission_grade(submission_id: str, grade: int, comment: str = "") -> bool:
-    """Update submission grade and comment in Google Sheets"""
+def update_submission_grade(username_or_id: str, module_or_grade: Any, grade: Optional[int] = None, comment: str = "") -> bool:
+    """Update submission grade and comment in Google Sheets
+    
+    Can be called as:
+    - update_submission_grade(username, module, grade, comment) - legacy
+    - update_submission_grade(submission_id, grade, comment) - new way
+    """
     try:
         spreadsheet = _get_spreadsheet()
         sheet = spreadsheet.worksheet("submissions")
         
-        # Find row by submission_id
-        try:
-            cell = sheet.find(submission_id)
-            sheet.update_cell(cell.row, 10, grade)  # Grade column
-            if comment:
-                sheet.update_cell(cell.row, 11, comment)  # Comments column
-            logger.info("Updated submission grade: %s -> %s (comment: %s)", submission_id, grade, comment)
-            return True
-        except Exception as e:
-            logger.warning("Submission not found: %s", submission_id)
+        # Detect which calling pattern is being used
+        if grade is not None:
+            # Legacy pattern: update_submission_grade(username, module, grade, comment)
+            username = username_or_id
+            module = str(module_or_grade)
+            actual_grade = grade
+            
+            # Find row by username and module
+            all_records = sheet.get_all_records()
+            for i, record in enumerate(all_records, start=2):  # start at 2 for header
+                if record.get("username") == username and str(record.get("module")) == module:
+                    sheet.update_cell(i, 9, "Graded")  # Status column
+                    sheet.update_cell(i, 10, actual_grade)  # Grade column
+                    if comment:
+                        sheet.update_cell(i, 11, comment)  # Comments column
+                    logger.info(f"Updated submission grade for {username} module {module}: {actual_grade}")
+                    return True
+            
+            logger.warning(f"Submission not found for {username} module {module}")
             return False
+        else:
+            # New pattern: update_submission_grade(submission_id, grade, comment)
+            submission_id = username_or_id
+            actual_grade = module_or_grade
+            
+            # Find row by submission_id
+            try:
+                cell = sheet.find(submission_id)
+                sheet.update_cell(cell.row, 9, "Graded")  # Status column
+                sheet.update_cell(cell.row, 10, actual_grade)  # Grade column
+                if comment:
+                    sheet.update_cell(cell.row, 11, comment)  # Comments column
+                logger.info("Updated submission grade: %s -> %s (comment: %s)", submission_id, actual_grade, comment)
+                return True
+            except Exception as e:
+                logger.warning("Submission not found: %s", submission_id)
+                return False
         
     except Exception as e:
         logger.exception("Failed to update submission grade: %s", e)
         return False
 
 
-def add_grade_comment(submission_id: str, comment: str) -> bool:
-    """Add grade comment to submission in Google Sheets"""
+def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Optional[str] = None) -> bool:
+    """Add grade comment to submission in Google Sheets
+    
+    Can be called as:
+    - add_grade_comment(username, module, comment) - legacy
+    - add_grade_comment(submission_id, comment) - new way
+    """
     try:
         spreadsheet = _get_spreadsheet()
         sheet = spreadsheet.worksheet("submissions")
         
-        # Find row by submission_id
-        try:
-            cell = sheet.find(submission_id)
-            sheet.update_cell(cell.row, 11, comment)  # Comments column
-            logger.info("Added grade comment: %s -> %s", submission_id, comment)
-            return True
-        except Exception as e:
-            logger.warning("Submission not found: %s", submission_id)
+        # Detect which calling pattern is being used
+        if comment is not None:
+            # Legacy pattern: add_grade_comment(username, module, comment)
+            username = username_or_id
+            module = str(module_or_comment)
+            actual_comment = comment
+            
+            # Find row by username and module
+            all_records = sheet.get_all_records()
+            for i, record in enumerate(all_records, start=2):  # start at 2 for header
+                if record.get("username") == username and str(record.get("module")) == module:
+                    sheet.update_cell(i, 11, actual_comment)  # Comments column
+                    logger.info(f"Added grade comment for {username} module {module}: {actual_comment}")
+                    return True
+            
+            logger.warning(f"Submission not found for {username} module {module}")
             return False
+        else:
+            # New pattern: add_grade_comment(submission_id, comment)
+            submission_id = username_or_id
+            actual_comment = module_or_comment
+            
+            # Find row by submission_id
+            try:
+                cell = sheet.find(submission_id)
+                sheet.update_cell(cell.row, 11, actual_comment)  # Comments column
+                logger.info("Added grade comment: %s -> %s", submission_id, actual_comment)
+                return True
+            except Exception as e:
+                logger.warning("Submission not found: %s", submission_id)
+                return False
         
     except Exception as e:
         logger.exception("Failed to add grade comment: %s", e)
@@ -559,8 +617,28 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.exception("Failed to get student questions: %s", e)
         return []
-       return student_questions
+
+
+def update_question_status(username: str, answer: str) -> bool:
+    """Update question status and add answer in Google Sheets"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        sheet = spreadsheet.worksheet("questions")
+        
+        # Find row by username (get the most recent question)
+        all_records = sheet.get_all_records()
+        for i, record in enumerate(reversed(all_records), start=1):
+            if record.get("username") == username and record.get("status") == "Pending":
+                # Update the row (i is from bottom, so actual row is len - i + 2 for header)
+                actual_row = len(all_records) - i + 2
+                sheet.update_cell(actual_row, 8, "Answered")  # Status column
+                sheet.update_cell(actual_row, 9, answer)  # Answer column
+                logger.info(f"Updated question status for {username} to Answered")
+                return True
+        
+        logger.warning(f"No pending question found for {username}")
+        return False
         
     except Exception as e:
-        logger.exception("Failed to get student questions: %s", e)
-        return []
+        logger.exception("Failed to update question status: %s", e)
+        return False

@@ -100,20 +100,48 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     phone = context.user_data['student_phone']
     
     try:
-        # Check for duplicates in both pending and verified tables
-        pending_existing = await find_pending_by_email_or_phone(email, phone)
-        verified_existing = await find_verified_by_email_or_phone(email, phone)
+        # IMPORTANT: Check for duplicates in both pending and verified tables
+        # This prevents multiple students from using the same email or phone
+        pending_by_email = await find_pending_by_email_or_phone(email=email, phone=None)
+        pending_by_phone = await find_pending_by_email_or_phone(email=None, phone=phone)
+        verified_by_email = await find_verified_by_email_or_phone(email=email, phone=None)
+        verified_by_phone = await find_verified_by_email_or_phone(email=None, phone=phone)
         
-        existing = pending_existing or verified_existing
-        if existing:
+        # Combine all potential duplicates
+        all_existing = []
+        if pending_by_email:
+            all_existing.extend(pending_by_email)
+        if pending_by_phone:
+            all_existing.extend(pending_by_phone)
+        if verified_by_email:
+            all_existing.extend(verified_by_email)
+        if verified_by_phone:
+            all_existing.extend(verified_by_phone)
+        
+        if all_existing:
             # Get the first existing record for the error message
-            existing_record = existing[0]
+            existing_record = all_existing[0]
+            duplicate_type = "email" if existing_record.get('email') == email else "phone number"
+            
             await update.message.reply_text(
-                f"❌ A student with this email or phone already exists:\n"
-                f"Email: {existing_record.get('email', 'N/A')}\n"
-                f"Phone: {existing_record.get('phone', 'N/A')}\n"
-                f"Status: {existing_record.get('status', 'N/A')}"
+                f"❌ **Duplicate Detected!**\n\n"
+                f"A student with this {duplicate_type} already exists:\n\n"
+                f"📧 Email: {existing_record.get('email', 'N/A')}\n"
+                f"📱 Phone: {existing_record.get('phone', 'N/A')}\n"
+                f"👤 Name: {existing_record.get('name', 'N/A')}\n"
+                f"📊 Status: {existing_record.get('status', 'N/A')}\n\n"
+                f"⚠️ Each email and phone can only be used once to ensure unique student access.",
+                parse_mode=ParseMode.MARKDOWN
             )
+            
+            # Notify admin about duplicate attempt
+            await notify_admin_telegram(
+                context.bot,
+                f"🚨 Duplicate student attempt blocked!\n"
+                f"Attempted to add: {name} ({email}, {phone})\n"
+                f"Conflicts with existing: {existing_record.get('name')} ({existing_record.get('email')})"
+            )
+            
             return ConversationHandler.END
         
         # Add to Supabase
@@ -197,8 +225,8 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         pending_id = query.data.split("_")[1]
         
-        # Promote to verified
-        verified_data = await promote_pending_to_verified(pending_id=pending_id)
+        # Promote to verified (telegram_id will be None for admin verification until student does /start)
+        verified_data = await promote_pending_to_verified(pending_id=pending_id, telegram_id=None)
         if not verified_data:
             await query.edit_message_text("❌ Failed to verify student.")
             return

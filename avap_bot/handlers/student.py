@@ -88,7 +88,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
-        verified_user = await promote_pending_to_verified(pending_id, user.id, user.username)
+        verified_user = await promote_pending_to_verified(pending_id, user.id)
         if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
@@ -506,6 +506,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             question_text = "Video question"
         elif update.message.text:
             question_text = update.message.text
+            file_name = None
         else:
             await update.message.reply_text("❌ Unsupported question type. Please send text, document, audio, or video.")
             return ASK_QUESTION
@@ -529,13 +530,14 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             forward_text = (
                 f"❓ **New Question**\n\n"
                 f"Student: @{username}\n"
+                f"Telegram ID: {user_id}\n"
                 f"Question: {question_text}\n"
-                f"File: {file_name}\n"
-                f"File ID: `{file_id}`" if file_id else "Text question"
             )
+            if file_id:
+                forward_text += f"File: {file_name}\nFile ID: `{file_id}`"
             
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{username}")
+                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
             
             if file_id:
@@ -566,6 +568,93 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle cancel command"""
     await update.message.reply_text("❌ Operation cancelled.")
     return ConversationHandler.END
+
+
+async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ask command from support group"""
+    # Only process if message is from support group
+    if update.message.chat.id != SUPPORT_GROUP_ID:
+        return
+    
+    user = update.effective_user
+    username = user.username or "unknown"
+    
+    # Check if user is verified
+    verified_user = await check_verified_user(user.id)
+    if not verified_user:
+        await update.message.reply_text(
+            "❌ You must be a verified student to ask questions.\n"
+            "Please send /start to the bot in private to verify.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    # Get the question from the command
+    # Format: /ask <question text>
+    message_text = update.message.text
+    if not message_text or len(message_text.split(maxsplit=1)) < 2:
+        await update.message.reply_text(
+            "❓ **Usage:** `/ask <your question>`\n"
+            "Example: `/ask How do I submit an assignment?`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+    
+    question_text = message_text.split(maxsplit=1)[1]
+    
+    try:
+        # Prepare question data
+        question_data = {
+            'username': username,
+            'telegram_id': user.id,
+            'question_text': question_text,
+            'file_id': None,
+            'file_name': None,
+            'asked_at': datetime.now(timezone.utc),
+            'status': 'Pending'
+        }
+        
+        # Save to Google Sheets
+        await run_blocking(append_question, question_data)
+        
+        # Forward to questions group
+        if QUESTIONS_GROUP_ID:
+            forward_text = (
+                f"❓ **New Question from Support Group**\n\n"
+                f"Student: @{username}\n"
+                f"Telegram ID: {user.id}\n"
+                f"Question: {question_text}\n"
+            )
+            
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user.id}_{username}")
+            ]])
+            
+            # Send to questions group for admin to answer
+            await context.bot.send_message(
+                QUESTIONS_GROUP_ID, 
+                forward_text, 
+                parse_mode=ParseMode.MARKDOWN, 
+                reply_markup=keyboard
+            )
+        
+        # Confirm in support group
+        await update.message.reply_text(
+            f"✅ Your question has been forwarded to the support team, @{username}!\n"
+            f"You'll get an answer soon.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_to_message_id=update.message.message_id
+        )
+        
+        logger.info(f"Support group question from {username}: {question_text}")
+        
+    except Exception as e:
+        logger.exception("Failed to submit support group question: %s", e)
+        await notify_admin_telegram(context.bot, f"❌ Support group question failed: {str(e)}")
+        await update.message.reply_text(
+            "❌ Failed to submit question. Please try again or contact admin.",
+            reply_to_message_id=update.message.message_id
+        )
 
 
 async def _is_verified(update: Update) -> bool:
@@ -628,3 +717,6 @@ def register_handlers(application):
     
     # Add callback query handlers
     application.add_handler(CallbackQueryHandler(status_callback, pattern="^status$"))
+    
+    # Add support group /ask handler (only processes messages from support group)
+    application.add_handler(CommandHandler("ask", support_group_ask_handler, filters=filters.ChatType.SUPERGROUP | filters.ChatType.GROUP))
