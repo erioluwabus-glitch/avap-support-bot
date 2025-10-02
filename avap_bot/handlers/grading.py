@@ -12,6 +12,7 @@ from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, Mess
 from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import update_submission_grade, add_grade_comment
+from avap_bot.services.supabase_service import update_assignment_grade, get_assignment_by_id
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 
