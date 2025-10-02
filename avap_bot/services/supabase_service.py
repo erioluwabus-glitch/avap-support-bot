@@ -134,8 +134,9 @@ def add_pending_verification(record: Dict[str, Any]) -> Dict[str, Any]:
 
 def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Find verified user by telegram ID"""
-    client = get_supabase()
-    res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
+    try:
+        client = get_supabase()
+        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
         if res.data and len(res.data) > 0:
             return res.data[0]
         return None
