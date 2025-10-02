@@ -75,7 +75,7 @@ def init_supabase() -> Client:
         
         supabase_client = test_client
         logger.info("✅ Supabase connected successfully")
-    return supabase_client
+        return supabase_client
             
     except Exception as e:
         logger.error(f"❌ Supabase connection failed: {str(e)}")
