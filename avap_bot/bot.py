@@ -4,6 +4,7 @@ Main entry point for the AVAP Support Bot.
 import os
 import logging
 import asyncio
+import time
 from telegram import Update
 from telegram.ext import Application
 from fastapi import FastAPI, Request, Response
@@ -39,9 +40,66 @@ scheduler.start()
 logger.info("Scheduler started for daily tips")
 
 # --- Webhook and Health Check ---
+async def keep_alive_check(bot):
+    """Background keep-alive check to prevent Render timeouts."""
+    try:
+        # Perform a simple database check to keep connection alive
+        from avap_bot.services.supabase_service import get_supabase
+        client = get_supabase()
+        await client.table("verified_users").select("id").limit(1).execute()
+
+        # Log activity to show the bot is active
+        logger.info("Keep-alive check completed - Bot is active and responsive")
+
+    except Exception as e:
+        logger.error(f"Keep-alive check failed: {e}")
+        # Try to reinitialize if there are issues
+        try:
+            from avap_bot.services.supabase_service import init_supabase
+            await init_supabase()
+            logger.info("Reinitialized Supabase connection")
+        except Exception as reinit_error:
+            logger.error(f"Failed to reinitialize Supabase: {reinit_error}")
+
+
 async def health_check():
-    """Simple health check endpoint."""
-    return {"status": "ok"}
+    """Comprehensive health check endpoint with keep-alive functionality."""
+    try:
+        # Check if Supabase is still connected
+        from avap_bot.services.supabase_service import get_supabase
+        client = get_supabase()
+        await client.table("verified_users").select("id").limit(1).execute()
+
+        # Check if bot application is initialized
+        if not bot_app or not hasattr(bot_app, 'bot'):
+            raise RuntimeError("Bot application not initialized")
+
+        # Check if scheduler is running
+        if not scheduler or scheduler.state == 0:
+            logger.warning("Scheduler may not be running properly")
+
+        # Log health check activity to prevent timeouts
+        logger.info("Health check passed - Bot is alive and responsive")
+
+        return {
+            "status": "healthy",
+            "service": "avap-support-bot",
+            "version": "2.0.0",
+            "timestamp": time.time(),
+            "uptime": "active",
+            "supabase_connected": True,
+            "bot_initialized": True,
+            "scheduler_running": scheduler.running if scheduler else False,
+            "keep_alive": "active"
+        }
+
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": time.time()
+        }
 
 async def telegram_webhook(request: Request):
     """Handle incoming Telegram updates."""
@@ -66,7 +124,7 @@ async def initialize_services():
     logger.info("Initializing services...")
     try:
         # Initialize Supabase
-        init_supabase()
+        await init_supabase()
 
         # Initialize the Telegram Application
         logger.info("Initializing Telegram Application...")
@@ -75,6 +133,17 @@ async def initialize_services():
 
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
+
+        # Schedule keep-alive health checks every 5 minutes
+        scheduler.add_job(
+            keep_alive_check,
+            'interval',
+            minutes=5,
+            args=[bot_app.bot],
+            id='keep_alive',
+            replace_existing=True
+        )
+        logger.info("Keep-alive health checks scheduled every 5 minutes")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
