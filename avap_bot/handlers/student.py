@@ -42,7 +42,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     user = update.effective_user
     
     # Check if user is already verified
-        verified_user = check_verified_user(user.id)
+    verified_user = check_verified_user(user.id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
         return ConversationHandler.END
@@ -580,7 +580,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     username = user.username or "unknown"
     
     # Check if user is verified
-        verified_user = check_verified_user(user.id)
+    verified_user = check_verified_user(user.id)
     if not verified_user:
         await update.message.reply_text(
             "❌ You must be a verified student to ask questions.\n"
