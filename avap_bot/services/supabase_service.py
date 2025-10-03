@@ -229,6 +229,11 @@ def remove_verified_user(identifier: str) -> bool:
         return False
 
 
+def remove_verified_by_identifier(identifier: str) -> bool:
+    """Alias for remove_verified_user for backward compatibility"""
+    return remove_verified_user(identifier)
+
+
 def get_all_verified_users() -> List[Dict[str, Any]]:
     """Get all verified users"""
     client = get_supabase()
