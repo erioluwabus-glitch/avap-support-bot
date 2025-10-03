@@ -1,0 +1,35 @@
+[1mdiff --git a/avap_bot/bot.py b/avap_bot/bot.py[m
+[1mindex 9e5d84b..e613d8a 100644[m
+[1m--- a/avap_bot/bot.py[m
+[1m+++ b/avap_bot/bot.py[m
+[36m@@ -54,7 +54,8 @@[m [masync def telegram_webhook(request: Request):[m
+         logger.error(f"Error in webhook: {e}", exc_info=True)[m
+         return Response(status_code=500)[m
+ [m
+[31m-app.post("/webhook")(telegram_webhook)[m
+[32m+[m[32m# Handle webhook with bot token in path (Telegram standard format)[m
+[32m+[m[32mapp.post("/webhook/{bot_token}")(telegram_webhook)[m
+ app.get("/health")(health_check)[m
+ [m
+ [m
+[36m@@ -85,10 +86,18 @@[m [masync def main_polling():[m
+ async def on_startup():[m
+     """Actions to perform on application startup."""[m
+     await initialize_services()[m
+[31m-    webhook_url = os.getenv("WEBHOOK_URL")[m
+[31m-    if webhook_url:[m
+[32m+[m
+[32m+[m[32m    # Set webhook URL - construct proper Telegram webhook URL[m
+[32m+[m[32m    webhook_base = os.getenv("WEBHOOK_URL")[m
+[32m+[m[32m    bot_token = os.getenv("BOT_TOKEN")[m
+[32m+[m
+[32m+[m[32m    if webhook_base and bot_token:[m
+[32m+[m[32m        # Construct proper webhook URL: https://your-app.com/webhook/BOT_TOKEN[m
+[32m+[m[32m        webhook_url = f"{webhook_base.rstrip('/')}/webhook/{bot_token}"[m
+         logger.info(f"Setting webhook to {webhook_url}")[m
+         await bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])[m
+[32m+[m[32m    elif webhook_base:[m
+[32m+[m[32m        logger.warning("WEBHOOK_URL set but BOT_TOKEN missing. Webhook not configured.")[m
+     else:[m
+         logger.warning("WEBHOOK_URL not set. Bot will not receive updates unless webhook is set manually.")[m
+ [m
