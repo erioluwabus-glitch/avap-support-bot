@@ -391,7 +391,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
 
-def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
+async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, phone, or name in the verified_users table."""
     # Try as email first
     if validate_email(identifier):

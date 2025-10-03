@@ -48,38 +48,41 @@ def validate_supabase_credentials():
         raise ValueError("Supabase key appears to be too short")
 
 
-def check_tables_exist():
+async def check_tables_exist():
     """Check if all required tables exist"""
     required_tables = ['verified_users', 'pending_verifications', 'match_requests']
-    
+
     for table in required_tables:
         try:
             client = get_supabase()
-            client.table(table).select('*').limit(1).execute()
+            await client.table(table).select('*').limit(1).execute()
         except Exception as e:
             logger.warning(f"Table {table} may not exist: {e}")
 
 
-def init_supabase() -> Client:
+async def init_supabase() -> Client:
     """Initialize Supabase client with optimized startup"""
     global supabase_client
-    
+
     if supabase_client:
         return supabase_client
-        
+
     try:
         validate_supabase_credentials()
-        
+
         logger.info("🚀 Initializing Supabase connection...")
         test_client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        
+
         # Quick connection test
-        test_client.table('verified_users').select('count', count='exact').limit(1).execute()
-        
+        await test_client.table('verified_users').select('count', count='exact').limit(1).execute()
+
+        # Check if required tables exist
+        await check_tables_exist()
+
         supabase_client = test_client
         logger.info("✅ Supabase connected successfully")
         return supabase_client
-            
+
     except Exception as e:
         logger.error(f"❌ Supabase connection failed: {str(e)}")
         raise
@@ -547,4 +550,1047 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
         return res.data[0] if res.data else None
     except Exception as e:
         logger.exception("Supabase get_assignment_by_id error: %s", e)
+        return None
+        if res.data and len(res.data) > 0:
+
+            return res.data[0]
+
+        return None
+
+    except Exception as e:
+
+        logger.exception("Supabase check_verified_user error: %s", e)
+
+        return None
+
+
+
+
+
+def add_assignment_submission(telegram_id: int, username: str, module: str, file_id: str, file_name: str, submission_type: str) -> Dict[str, Any]:
+
+    """Add a new assignment submission"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "module": module,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "submission_type": submission_type,
+
+            "status": "submitted",
+
+            "submitted_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("assignments").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_assignment_submission error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all assignments for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("assignments").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_assignments error: %s", e)
+
+        return []
+
+
+
+
+
+def update_assignment_grade(submission_id: int, grade: int, comment: Optional[str] = None) -> bool:
+
+    """Update assignment with grade and comments"""
+
+    client = get_supabase()
+
+    try:
+
+        update_data = {
+
+            "grade": grade,
+
+            "status": "graded",
+
+            "graded_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        if comment:
+
+            update_data["comment"] = comment
+
+        
+
+        res = client.table("assignments").update(update_data).eq("id", submission_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_assignment_grade error: %s", e)
+
+        return False
+
+
+
+
+
+def add_win(telegram_id: int, username: str, file_id: str, file_name: str, win_type: str) -> Dict[str, Any]:
+
+    """Add a new win"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "win_type": win_type,
+
+            "shared_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("wins").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_win error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all wins for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("wins").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_wins error: %s", e)
+
+        return []
+
+
+
+
+
+def add_question(telegram_id: int, username: str, question_text: str, file_id: Optional[str] = None, file_name: Optional[str] = None) -> Dict[str, Any]:
+
+    """Add a new question"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "question_text": question_text,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "status": "pending",
+
+            "asked_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("questions").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_question error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all questions for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_questions error: %s", e)
+
+        return []
+
+
+
+
+
+def update_question_answer(question_id: int, answer: str) -> bool:
+
+    """Update question with answer"""
+
+    client = get_supabase()
+
+    try:
+
+        update_data = {
+
+            "answer": answer,
+
+            "status": "answered",
+
+            "answered_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("questions").update(update_data).eq("id", question_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_question_answer error: %s", e)
+
+        return False
+
+
+
+
+
+def get_faqs() -> List[Dict[str, Any]]:
+
+    """Get all FAQs for AI matching"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("faqs").select("*").execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_faqs error: %s", e)
+
+        return []
+
+
+
+
+
+def add_faq(question: str, answer: str) -> Dict[str, Any]:
+
+    """Add a new FAQ"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "question": question,
+
+            "answer": answer,
+
+            "created_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("faqs").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_faq error: %s", e)
+
+        raise
+
+
+
+
+
+def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
+
+    """Get tip for specific day of week"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1).execute()
+
+        return res.data[0] if res.data else None
+
+    except Exception as e:
+
+        logger.exception("Supabase get_tip_for_day error: %s", e)
+
+        return None
+
+
+
+
+
+def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
+
+    """Add a manual tip for specific day"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "content": content,
+
+            "day_of_week": day_of_week,
+
+            "tip_type": "manual",
+
+            "created_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("tips").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_manual_tip error: %s", e)
+
+        raise
+
+
+
+
+
+def get_top_students() -> List[Dict[str, Any]]:
+
+    """Get students with 3+ assignments and 3+ wins"""
+
+    client = get_supabase()
+
+    
+
+    # Get all verified users
+
+    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
+
+    try:
+
+        users = users_res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_top_students error: %s", e)
+
+        return []
+
+    
+
+    top_students = []
+
+    for user in users:
+
+        telegram_id = user.get("telegram_id")
+
+        if not telegram_id:
+
+            continue
+
+        
+
+        # Count assignments
+
+        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
+
+        assignment_count = assignments_res.count or 0
+
+        
+
+        # Count wins
+
+        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id).execute()
+
+        wins_count = wins_res.count or 0
+
+        
+
+        if assignment_count >= 3 and wins_count >= 3:
+
+            top_students.append({
+
+                "telegram_id": telegram_id,
+
+                "username": user.get("username", "unknown"),
+
+                "name": user.get("name", "Unknown"),
+
+                "assignments": assignment_count,
+
+                "wins": wins_count,
+
+                "joined_at": user.get("verified_at", "Unknown")
+
+            })
+
+    
+
+    return top_students
+
+
+
+
+
+def get_all_verified_telegram_ids() -> List[int]:
+
+    """Get all verified user telegram IDs for broadcasting"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("verified_users").select("telegram_id").eq("status", "verified").execute()
+
+        return [user["telegram_id"] for user in (res.data or []) if user.get("telegram_id")]
+
+    except Exception as e:
+
+        logger.exception("Supabase get_all_verified_telegram_ids error: %s", e)
+
+        return []
+
+
+
+
+
+def update_user_badge(telegram_id: int, badge: str) -> bool:
+
+    """Update user badge"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_user_badge error: %s", e)
+
+        return False
+
+
+
+
+
+def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
+
+    """Get assignment by ID"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("assignments").select("*").eq("id", assignment_id).execute()
+
+        return res.data[0] if res.data else None
+
+    except Exception as e:
+
+        logger.exception("Supabase get_assignment_by_id error: %s", e)
+
+        return None
+
+        if res.data and len(res.data) > 0:
+
+            return res.data[0]
+
+        return None
+
+    except Exception as e:
+
+        logger.exception("Supabase check_verified_user error: %s", e)
+
+        return None
+
+
+
+
+
+def add_assignment_submission(telegram_id: int, username: str, module: str, file_id: str, file_name: str, submission_type: str) -> Dict[str, Any]:
+
+    """Add a new assignment submission"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "module": module,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "submission_type": submission_type,
+
+            "status": "submitted",
+
+            "submitted_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("assignments").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_assignment_submission error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all assignments for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("assignments").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_assignments error: %s", e)
+
+        return []
+
+
+
+
+
+def update_assignment_grade(submission_id: int, grade: int, comment: Optional[str] = None) -> bool:
+
+    """Update assignment with grade and comments"""
+
+    client = get_supabase()
+
+    try:
+
+        update_data = {
+
+            "grade": grade,
+
+            "status": "graded",
+
+            "graded_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        if comment:
+
+            update_data["comment"] = comment
+
+        
+
+        res = client.table("assignments").update(update_data).eq("id", submission_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_assignment_grade error: %s", e)
+
+        return False
+
+
+
+
+
+def add_win(telegram_id: int, username: str, file_id: str, file_name: str, win_type: str) -> Dict[str, Any]:
+
+    """Add a new win"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "win_type": win_type,
+
+            "shared_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("wins").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_win error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all wins for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("wins").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_wins error: %s", e)
+
+        return []
+
+
+
+
+
+def add_question(telegram_id: int, username: str, question_text: str, file_id: Optional[str] = None, file_name: Optional[str] = None) -> Dict[str, Any]:
+
+    """Add a new question"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "telegram_id": telegram_id,
+
+            "username": username,
+
+            "question_text": question_text,
+
+            "file_id": file_id,
+
+            "file_name": file_name,
+
+            "status": "pending",
+
+            "asked_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("questions").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_question error: %s", e)
+
+        raise
+
+
+
+
+
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all questions for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_questions error: %s", e)
+
+        return []
+
+
+
+
+
+def update_question_answer(question_id: int, answer: str) -> bool:
+
+    """Update question with answer"""
+
+    client = get_supabase()
+
+    try:
+
+        update_data = {
+
+            "answer": answer,
+
+            "status": "answered",
+
+            "answered_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("questions").update(update_data).eq("id", question_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_question_answer error: %s", e)
+
+        return False
+
+
+
+
+
+def get_faqs() -> List[Dict[str, Any]]:
+
+    """Get all FAQs for AI matching"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("faqs").select("*").execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_faqs error: %s", e)
+
+        return []
+
+
+
+
+
+def add_faq(question: str, answer: str) -> Dict[str, Any]:
+
+    """Add a new FAQ"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "question": question,
+
+            "answer": answer,
+
+            "created_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("faqs").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_faq error: %s", e)
+
+        raise
+
+
+
+
+
+def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
+
+    """Get tip for specific day of week"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1).execute()
+
+        return res.data[0] if res.data else None
+
+    except Exception as e:
+
+        logger.exception("Supabase get_tip_for_day error: %s", e)
+
+        return None
+
+
+
+
+
+def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
+
+    """Add a manual tip for specific day"""
+
+    client = get_supabase()
+
+    try:
+
+        payload = {
+
+            "content": content,
+
+            "day_of_week": day_of_week,
+
+            "tip_type": "manual",
+
+            "created_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
+        res = client.table("tips").insert(payload).execute()
+
+        return res.data[0]
+
+    except Exception as e:
+
+        logger.exception("Supabase add_manual_tip error: %s", e)
+
+        raise
+
+
+
+
+
+def get_top_students() -> List[Dict[str, Any]]:
+
+    """Get students with 3+ assignments and 3+ wins"""
+
+    client = get_supabase()
+
+    
+
+    # Get all verified users
+
+    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
+
+    try:
+
+        users = users_res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_top_students error: %s", e)
+
+        return []
+
+    
+
+    top_students = []
+
+    for user in users:
+
+        telegram_id = user.get("telegram_id")
+
+        if not telegram_id:
+
+            continue
+
+        
+
+        # Count assignments
+
+        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
+
+        assignment_count = assignments_res.count or 0
+
+        
+
+        # Count wins
+
+        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id).execute()
+
+        wins_count = wins_res.count or 0
+
+        
+
+        if assignment_count >= 3 and wins_count >= 3:
+
+            top_students.append({
+
+                "telegram_id": telegram_id,
+
+                "username": user.get("username", "unknown"),
+
+                "name": user.get("name", "Unknown"),
+
+                "assignments": assignment_count,
+
+                "wins": wins_count,
+
+                "joined_at": user.get("verified_at", "Unknown")
+
+            })
+
+    
+
+    return top_students
+
+
+
+
+
+def get_all_verified_telegram_ids() -> List[int]:
+
+    """Get all verified user telegram IDs for broadcasting"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("verified_users").select("telegram_id").eq("status", "verified").execute()
+
+        return [user["telegram_id"] for user in (res.data or []) if user.get("telegram_id")]
+
+    except Exception as e:
+
+        logger.exception("Supabase get_all_verified_telegram_ids error: %s", e)
+
+        return []
+
+
+
+
+
+def update_user_badge(telegram_id: int, badge: str) -> bool:
+
+    """Update user badge"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
+
+        return bool(res.data)
+
+    except Exception as e:
+
+        logger.exception("Supabase update_user_badge error: %s", e)
+
+        return False
+
+
+
+
+
+def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
+
+    """Get assignment by ID"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("assignments").select("*").eq("id", assignment_id).execute()
+
+        return res.data[0] if res.data else None
+
+    except Exception as e:
+
+        logger.exception("Supabase get_assignment_by_id error: %s", e)
+
         return None
