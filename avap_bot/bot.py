@@ -67,10 +67,15 @@ async def initialize_services():
     try:
         # Initialize Supabase
         init_supabase()
-        
+
+        # Initialize the Telegram Application
+        logger.info("Initializing Telegram Application...")
+        await bot_app.initialize()
+        logger.info("Telegram Application initialized successfully")
+
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
-        
+
         logger.info("Services initialized successfully.")
     except Exception as e:
         logger.critical(f"Failed to initialize services: {e}", exc_info=True)
@@ -87,6 +92,7 @@ async def main_polling():
 @app.on_event("startup")
 async def on_startup():
     """Actions to perform on application startup."""
+    # Initialize services first (including Telegram Application)
     await initialize_services()
 
     # Set webhook URL - construct proper Telegram webhook URL
