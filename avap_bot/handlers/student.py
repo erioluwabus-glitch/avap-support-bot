@@ -42,7 +42,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     user = update.effective_user
     
     # Check if user is already verified
-    verified_user = await check_verified_user(user.id)
+        verified_user = check_verified_user(user.id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
         return ConversationHandler.END
@@ -75,7 +75,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         # Find a pending verification record
         email = identifier if is_email else None
         phone = identifier if is_phone else None
-        pending_records = await find_pending_by_email_or_phone(email=email, phone=phone)
+        pending_records = find_pending_by_email_or_phone(email=email, phone=phone)
 
         if not pending_records:
             await update.message.reply_text(
@@ -88,7 +88,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
-        verified_user = await promote_pending_to_verified(pending_id, user.id)
+        verified_user = promote_pending_to_verified(pending_id, user.id)
         if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
@@ -580,7 +580,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     username = user.username or "unknown"
     
     # Check if user is verified
-    verified_user = await check_verified_user(user.id)
+        verified_user = check_verified_user(user.id)
     if not verified_user:
         await update.message.reply_text(
             "❌ You must be a verified student to ask questions.\n"
@@ -659,7 +659,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
-    return await check_verified_user(update.effective_user.id) is not None
+    return check_verified_user(update.effective_user.id) is not None
 
 
 # Conversation handlers

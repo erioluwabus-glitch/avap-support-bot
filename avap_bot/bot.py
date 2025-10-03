@@ -46,7 +46,7 @@ async def keep_alive_check(bot):
         # Perform a simple database check to keep connection alive
         from avap_bot.services.supabase_service import get_supabase
         client = get_supabase()
-        await client.table("verified_users").select("id").limit(1).execute()
+        client.table("verified_users").select("id").limit(1).execute()
 
         # Log activity to show the bot is active
         logger.info("Keep-alive check completed - Bot is active and responsive")
@@ -56,7 +56,7 @@ async def keep_alive_check(bot):
         # Try to reinitialize if there are issues
         try:
             from avap_bot.services.supabase_service import init_supabase
-            await init_supabase()
+            init_supabase()
             logger.info("Reinitialized Supabase connection")
         except Exception as reinit_error:
             logger.error(f"Failed to reinitialize Supabase: {reinit_error}")
@@ -68,7 +68,7 @@ async def health_check():
         # Check if Supabase is still connected
         from avap_bot.services.supabase_service import get_supabase
         client = get_supabase()
-        await client.table("verified_users").select("id").limit(1).execute()
+        client.table("verified_users").select("id").limit(1).execute()
 
         # Check if bot application is initialized
         if not bot_app or not hasattr(bot_app, 'bot'):
@@ -124,7 +124,7 @@ async def initialize_services():
     logger.info("Initializing services...")
     try:
         # Initialize Supabase
-        await init_supabase()
+        init_supabase()
 
         # Initialize the Telegram Application
         logger.info("Initializing Telegram Application...")

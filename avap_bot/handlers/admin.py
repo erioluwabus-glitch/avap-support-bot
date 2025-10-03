@@ -102,10 +102,10 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     try:
         # IMPORTANT: Check for duplicates in both pending and verified tables
         # This prevents multiple students from using the same email or phone
-        pending_by_email = await find_pending_by_email_or_phone(email=email, phone=None)
-        pending_by_phone = await find_pending_by_email_or_phone(email=None, phone=phone)
-        verified_by_email = await find_verified_by_email_or_phone(email=email, phone=None)
-        verified_by_phone = await find_verified_by_email_or_phone(email=None, phone=phone)
+        pending_by_email = find_pending_by_email_or_phone(email=email, phone=None)
+        pending_by_phone = find_pending_by_email_or_phone(email=None, phone=phone)
+        verified_by_email = find_verified_by_email_or_phone(email=email, phone=None)
+        verified_by_phone = find_verified_by_email_or_phone(email=None, phone=phone)
         
         # Combine all potential duplicates
         all_existing = []
@@ -285,7 +285,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
     
     # Find student
     try:
-        student = await _find_student_by_identifier(identifier)
+        student = _find_student_by_identifier(identifier)
         if not student:
             await update.message.reply_text(
                 f"❌ No student found with identifier: {identifier}"
@@ -338,7 +338,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
             return ConversationHandler.END
         
         # Remove from all systems
-        success = await remove_verified_by_identifier(identifier)
+        success = remove_verified_by_identifier(identifier)
         if not success:
             raise Exception("Failed to remove from Supabase")
         
@@ -391,22 +391,22 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         return ConversationHandler.END
 
 
-async def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
+def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, phone, or name in the verified_users table."""
     # Try as email first
     if validate_email(identifier):
-        results = await find_verified_by_email_or_phone(email=identifier)
+        results = find_verified_by_email_or_phone(email=identifier)
         if results:
             return results[0]
 
     # Try as phone
     if validate_phone(identifier):
-        results = await find_verified_by_email_or_phone(phone=identifier)
+        results = find_verified_by_email_or_phone(phone=identifier)
         if results:
             return results[0]
 
     # Try as name
-    results = await find_verified_by_name(identifier)
+    results = find_verified_by_name(identifier)
     if results:
         return results[0]
 

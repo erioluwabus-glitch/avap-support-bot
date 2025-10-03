@@ -48,19 +48,19 @@ def validate_supabase_credentials():
         raise ValueError("Supabase key appears to be too short")
 
 
-async def check_tables_exist():
+def check_tables_exist():
     """Check if all required tables exist"""
     required_tables = ['verified_users', 'pending_verifications', 'match_requests']
 
     for table in required_tables:
         try:
             client = get_supabase()
-            await client.table(table).select('*').limit(1).execute()
+            client.table(table).select('*').limit(1).execute()
         except Exception as e:
             logger.warning(f"Table {table} may not exist: {e}")
 
 
-async def init_supabase() -> Client:
+def init_supabase() -> Client:
     """Initialize Supabase client with optimized startup"""
     global supabase_client
 
@@ -74,10 +74,10 @@ async def init_supabase() -> Client:
         test_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
         # Quick connection test
-        await test_client.table('verified_users').select('count', count='exact').limit(1).execute()
+        test_client.table('verified_users').select('count', count='exact').limit(1).execute()
 
         # Check if required tables exist
-        await check_tables_exist()
+        check_tables_exist()
 
         supabase_client = test_client
         logger.info("✅ Supabase connected successfully")
@@ -113,11 +113,11 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
         raise
 
 
-async def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
+def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Find verified user by telegram ID"""
     try:
         client = get_supabase()
-        res = await client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
+        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
         if res.data and len(res.data) > 0:
             return res.data[0]
         return None
@@ -126,19 +126,19 @@ async def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]
         return None
 
 
-async def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
+def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
     """Search pending_verifications by email or phone"""
     try:
         client = get_supabase()
         results = []
 
         if email:
-            res = await client.table("pending_verifications").select("*").eq("email", email).execute()
+            res = client.table("pending_verifications").select("*").eq("email", email).execute()
             if res.data:
                 results.extend(res.data)
 
         if phone:
-            res = await client.table("pending_verifications").select("*").eq("phone", phone).execute()
+            res = client.table("pending_verifications").select("*").eq("phone", phone).execute()
             if res.data:
                 results.extend(res.data)
 
@@ -148,19 +148,19 @@ async def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Opt
         return []
 
 
-async def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
+def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
     """Search verified_users by email or phone"""
     try:
         client = get_supabase()
         results = []
 
         if email:
-            res = await client.table("verified_users").select("*").eq("email", email).eq("status", "verified").execute()
+            res = client.table("verified_users").select("*").eq("email", email).eq("status", "verified").execute()
             if res.data:
                 results.extend(res.data)
 
         if phone:
-            res = await client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified").execute()
+            res = client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified").execute()
             if res.data:
                 results.extend(res.data)
 
@@ -170,23 +170,23 @@ async def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Op
         return []
 
 
-async def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
+def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
     """Search verified_users by name (case-insensitive)"""
     client = get_supabase()
     try:
-        res = await client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified").execute()
+        res = client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified").execute()
         return res.data or []
     except Exception as e:
         logger.exception("Supabase find_verified_by_name error: %s", e)
         return []
 
 
-async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, Any]:
+def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, Any]:
     """Promote pending verification to verified user"""
     client = get_supabase()
     try:
         # Fetch pending row
-        r = await client.table("pending_verifications").select("*").eq("id", pending_id).execute()
+        r = client.table("pending_verifications").select("*").eq("id", pending_id).execute()
         if not r.data:
             raise Exception("Pending verification not found")
 
@@ -199,10 +199,10 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
             "status": "verified",
             "verified_at": datetime.now(timezone.utc).isoformat()
         }
-        ins = await client.table("verified_users").insert(verified_payload).execute()
+        ins = client.table("verified_users").insert(verified_payload).execute()
 
         # Optionally delete pending row:
-        await client.table("pending_verifications").delete().eq("id", pending_id).execute()
+        client.table("pending_verifications").delete().eq("id", pending_id).execute()
 
         return ins.data[0]
     except Exception as e:
@@ -210,31 +210,31 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
         raise
 
 
-async def remove_verified_user(identifier: str) -> bool:
+def remove_verified_user(identifier: str) -> bool:
     """Identifier may be email, phone, or full name. Return True if deleted."""
     client = get_supabase()
     try:
         # Try email exact match
-        res = await client.table("verified_users").delete().eq("email", identifier).execute()
+        res = client.table("verified_users").delete().eq("email", identifier).execute()
         if res.data:
             return True
 
         # Try phone
-        res = await client.table("verified_users").delete().eq("phone", identifier).execute()
+        res = client.table("verified_users").delete().eq("phone", identifier).execute()
         if res.data:
             return True
 
         # Try name (less exact)
-        res = await client.table("verified_users").delete().eq("name", identifier).execute()
+        res = client.table("verified_users").delete().eq("name", identifier).execute()
         return bool(res.data)
     except Exception as e:
         logger.exception("Supabase remove_verified_user error: %s", e)
         return False
 
 
-async def remove_verified_by_identifier(identifier: str) -> bool:
+def remove_verified_by_identifier(identifier: str) -> bool:
     """Alias for remove_verified_user for backward compatibility"""
-    return await remove_verified_user(identifier)
+    return remove_verified_user(identifier)
 
 
 def get_all_verified_users() -> List[Dict[str, Any]]:
@@ -248,7 +248,7 @@ def get_all_verified_users() -> List[Dict[str, Any]]:
         return []
 
 
-async def add_match_request(telegram_id: int, username: str) -> str:
+def add_match_request(telegram_id: int, username: str) -> str:
     """Add match request and return match_id"""
     client = get_supabase()
     match_id = str(uuid.uuid4())
@@ -259,7 +259,7 @@ async def add_match_request(telegram_id: int, username: str) -> str:
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    res = await client.table("match_requests").insert(payload).execute()
+    res = client.table("match_requests").insert(payload).execute()
     try:
         return match_id
     except Exception as e:
@@ -267,29 +267,29 @@ async def add_match_request(telegram_id: int, username: str) -> str:
         raise
 
 
-async def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
+def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     """Pop a match request excluding the given telegram_id"""
     client = get_supabase()
     try:
         # Get a random pending request that's not from the same user
-        res = await client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1).execute()
+        res = client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1).execute()
         if not res.data:
             return None
 
         match_request = res.data[0]
         # Mark as matched
-        await client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
+        client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
         return match_request
     except Exception as e:
         logger.exception("Supabase pop_match_request error: %s", e)
         return None
 
 
-async def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
+def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Check if user is verified by telegram_id"""
     try:
         client = get_supabase()
-        res = await client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
+        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
         if res.data and len(res.data) > 0:
             return res.data[0]
         return None
