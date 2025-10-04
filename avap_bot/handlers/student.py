@@ -892,7 +892,7 @@ submit_conv = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r"📝 Submit Assignment"), submit_handler)],
     states={
         SUBMIT_MODULE: [MessageHandler(filters.Regex(r"Module \d+") | filters.Regex(r"❌ Cancel"), submit_module)],
-        SUBMIT_TYPE: [MessageHandler(filters.Regex(r"📄 Document|📷 Photo|🎵 Audio|🎬 Video|❌ Cancel"), submit_type)],
+        SUBMIT_TYPE: [MessageHandler(filters.Regex(r"📝 Text|🎤 Audio|🎥 Video|❌ Cancel"), submit_type)],
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
@@ -902,7 +902,7 @@ submit_conv = ConversationHandler(
 share_win_conv = ConversationHandler(
     entry_points=[MessageHandler(filters.Regex(r"🏆 Share Win"), share_win_handler)],
     states={
-        SHARE_WIN_TYPE: [MessageHandler(filters.Regex(r"📝 Text|📷 Image|🎵 Audio|🎬 Video|❌ Cancel"), share_win_type)],
+        SHARE_WIN_TYPE: [MessageHandler(filters.Regex(r"📝 Text|🎤 Audio|🎥 Video|❌ Cancel"), share_win_type)],
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
