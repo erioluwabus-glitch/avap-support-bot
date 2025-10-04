@@ -133,7 +133,7 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
         ["📝 Submit Assignment", "🏆 Share Win"],
         ["📊 Check Status", "❓ Ask Question"]
     ], resize_keyboard=True, one_time_keyboard=False)
-
+    
     await update.message.reply_text(
         f"🎉 **Welcome back, {verified_user['name']}!**\n\n"
         "Choose an option below:",
@@ -147,7 +147,7 @@ async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not await _is_verified(update):
         await update.message.reply_text("❌ You need to be verified to submit assignments.")
         return ConversationHandler.END
-
+    
     from telegram import ReplyKeyboardMarkup
 
     keyboard = ReplyKeyboardMarkup([
@@ -168,11 +168,11 @@ async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle module selection"""
     message_text = update.message.text
-
+    
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-
+    
     module = message_text.split()[-1]  # Extract number from "Module X"
     context.user_data['submit_module'] = module
     
@@ -195,15 +195,15 @@ async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle submission type selection"""
     message_text = update.message.text
-
+    
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-
+    
     # Extract type from button text (remove emoji)
     submission_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['submit_type'] = submission_type
-
+    
     await update.message.reply_text(
         f"📝 **Module {context.user_data['submit_module']} - {submission_type.title()}**\n\n"
         "Please send your assignment file or text:",
@@ -233,10 +233,16 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         elif update.message.video:
             file_id = update.message.video.file_id
             file_name = update.message.video.file_name or f"video_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.mp4"
-        elif update.message.text:
-            # Text submission
+        elif update.message.text and update.message.text.strip():
+            # Text submission - use the actual text content
             file_id = None
             file_name = f"text_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
+            # Store the text content for later use
+            context.user_data['text_content'] = update.message.text.strip()
+        elif update.message.text and not update.message.text.strip():
+            # Empty text message
+            await update.message.reply_text("❌ Please send your text content. Don't send empty messages.")
+            return SUBMIT_FILE
         else:
             await update.message.reply_text("❌ Unsupported file type. Please send text, document, audio, or video.")
             return SUBMIT_FILE
@@ -252,12 +258,28 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             'submitted_at': datetime.now(timezone.utc),
             'status': 'Pending'
         }
+
+        # Add text content for text submissions
+        if submission_type == 'text' and 'text_content' in context.user_data:
+            submission_data['text_content'] = context.user_data['text_content']
         
         # Save to Google Sheets
         await run_blocking(append_submission, submission_data)
         
         # Forward to assignment group
         if ASSIGNMENT_GROUP_ID:
+            if submission_type == 'text' and 'text_content' in context.user_data:
+                # For text submissions, include the actual content
+                forward_text = (
+                    f"📝 **New Assignment Submission**\n\n"
+                    f"Student: @{username}\n"
+                    f"Telegram ID: {user_id}\n"
+                    f"Module: {module}\n"
+                    f"Type: {submission_type.title()}\n\n"
+                    f"**Content:**\n{context.user_data['text_content'][:500]}{'...' if len(context.user_data['text_content']) > 500 else ''}"
+                )
+            else:
+                # For file submissions, show file info
             forward_text = (
                 f"📝 **New Assignment Submission**\n\n"
                 f"Student: @{username}\n"
@@ -265,15 +287,14 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 f"Module: {module}\n"
                 f"Type: {submission_type.title()}\n"
                 f"File: {file_name}\n"
-                f"File ID: `{file_id}`" if file_id else "Text submission"
+                    f"File ID: `{file_id}`"
             )
             
             if file_id:
-                if submission_type == "text":
-                    await context.bot.send_message(ASSIGNMENT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
-                else:
+                # For file submissions, send the file with caption
                     await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
+                # For text submissions, send the text message
                 await context.bot.send_message(ASSIGNMENT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
         
         await update.message.reply_text(
@@ -285,12 +306,23 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             parse_mode=ParseMode.MARKDOWN
         )
         
+        # Show main menu after successful submission
+        verified_user = check_verified_user(user_id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+        
         return ConversationHandler.END
         
     except Exception as e:
         logger.exception("Failed to submit assignment: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Assignment submission failed: {str(e)}")
         await update.message.reply_text("❌ Failed to submit assignment. Please try again.")
+
+        # Show main menu after failure
+        verified_user = check_verified_user(update.effective_user.id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+
         return ConversationHandler.END
 
 
@@ -299,7 +331,7 @@ async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if not await _is_verified(update):
         await update.message.reply_text("❌ You need to be verified to share wins.")
         return ConversationHandler.END
-
+    
     from telegram import ReplyKeyboardMarkup
 
     keyboard = ReplyKeyboardMarkup([
@@ -319,15 +351,15 @@ async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win type selection"""
     message_text = update.message.text
-
+    
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Win sharing cancelled.")
         return ConversationHandler.END
-
+    
     # Extract type from button text (remove emoji)
     win_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['win_type'] = win_type
-
+    
     await update.message.reply_text(
         f"🏆 **Share {win_type.title()} Win**\n\n"
         "Please share your win (text, audio, or video):",
@@ -347,7 +379,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         file_id = None
         file_name = None
         text_content = None
-
+        
         if update.message.document:
             file_id = update.message.document.file_id
             file_name = update.message.document.file_name
@@ -364,7 +396,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             await update.message.reply_text("❌ Unsupported file type. Please send text, document, audio, or video.")
             return SHARE_WIN_FILE
-
+        
         # Prepare win data
         win_data = {
             'username': username,
@@ -391,17 +423,17 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             else:
                 # For file wins, show file info
-                forward_text = (
-                    f"🏆 **New Win Shared**\n\n"
-                    f"Student: @{username}\n"
-                    f"Type: {win_type.title()}\n"
-                    f"File: {file_name}\n"
+            forward_text = (
+                f"🏆 **New Win Shared**\n\n"
+                f"Student: @{username}\n"
+                f"Type: {win_type.title()}\n"
+                f"File: {file_name}\n"
                     f"File ID: `{file_id}`"
-                )
+            )
             
             if file_id:
                 # For file wins, send the file with caption
-                await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                    await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
                 # For text wins, send the text message
                 await context.bot.send_message(SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
@@ -413,12 +445,23 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode=ParseMode.MARKDOWN
         )
         
+        # Show main menu after successful win sharing
+        verified_user = check_verified_user(user_id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+        
         return ConversationHandler.END
         
     except Exception as e:
         logger.exception("Failed to share win: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Win sharing failed: {str(e)}")
         await update.message.reply_text("❌ Failed to share win. Please try again.")
+
+        # Show main menu after failure
+        verified_user = check_verified_user(update.effective_user.id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+
         return ConversationHandler.END
 
 
@@ -427,16 +470,16 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await _is_verified(update):
         await update.message.reply_text("❌ You need to be verified to check status.")
         return
-
+    
     try:
         user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
-
+        
         # Get student data with error handling
         try:
-            submissions = await run_blocking(get_student_submissions, username)
-            wins = await run_blocking(get_student_wins, username)
-            questions = await run_blocking(get_student_questions, username)
+        submissions = await run_blocking(get_student_submissions, username)
+        wins = await run_blocking(get_student_wins, username)
+        questions = await run_blocking(get_student_questions, username)
         except Exception as e:
             logger.warning(f"Failed to get data from Google Sheets: {e}")
             # Use empty lists as fallback
@@ -444,18 +487,21 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wins = []
             questions = []
 
+            # Show a warning in the status message
+            status_text += "\n\n⚠️ **Note:** Some data may not be available due to system maintenance."
+        
         # Calculate stats
         total_submissions = len(submissions)
         total_wins = len(wins)
         total_questions = len(questions)
-
+        
         # Check badge eligibility
         badge_status = "🥉 New Student"
         if total_submissions >= 3 and total_wins >= 3:
             badge_status = "🥇 Top Student"
         elif total_submissions >= 1 or total_wins >= 1:
             badge_status = "🥈 Active Student"
-
+        
         # Calculate modules left
         completed_modules = set()
         for sub in submissions:
@@ -465,7 +511,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         all_modules = set(str(i) for i in range(1, 13))
         modules_left = all_modules - completed_modules
-
+        
         # Create status text
         status_text = (
             f"📊 **Your Status**\n\n"
@@ -484,7 +530,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_text += f"\n📖 Left to complete: {', '.join(sorted(modules_left)) if modules_left else 'All done! 🎉'}"
 
         await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
-
+        
     except Exception as e:
         logger.exception("Failed to get status: %s", e)
         await update.message.reply_text(
@@ -498,7 +544,7 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if not await _is_verified(update):
         await update.message.reply_text("❌ You need to be verified to ask questions.")
         return ConversationHandler.END
-
+    
     await update.message.reply_text(
         "❓ **Ask a Question**\n\n"
         "Please type your question (text, audio, or video):",
@@ -556,7 +602,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
-
+            
             if file_id:
                 # For voice and video, try to forward the original message first
                 if question_text == "Voice question":
@@ -631,18 +677,35 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             parse_mode=ParseMode.MARKDOWN
         )
         
+        # Show main menu after successful question submission
+        verified_user = check_verified_user(user_id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+        
         return ConversationHandler.END
         
     except Exception as e:
         logger.exception("Failed to submit question: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Question submission failed: {str(e)}")
         await update.message.reply_text("❌ Failed to submit question. Please try again.")
+
+        # Show main menu after failure
+        verified_user = check_verified_user(update.effective_user.id)
+        if verified_user:
+            await _show_main_menu(update, context, verified_user)
+
         return ConversationHandler.END
 
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle cancel command"""
     await update.message.reply_text("❌ Operation cancelled.")
+
+    # Show main menu after cancellation
+    verified_user = check_verified_user(update.effective_user.id)
+    if verified_user:
+        await _show_main_menu(update, context, verified_user)
+
     return ConversationHandler.END
 
 

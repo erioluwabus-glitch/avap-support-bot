@@ -60,7 +60,11 @@ def _get_sheets_client():
                 creds = Credentials.from_service_account_file("credentials.json")
             except FileNotFoundError:
                 logger.warning("credentials.json not found. Set GOOGLE_CREDENTIALS_JSON environment variable with base64 encoded credentials.")
-                raise RuntimeError("Google credentials not configured. Set GOOGLE_CREDENTIALS_JSON environment variable.")
+                # For production, we'll use CSV fallback instead of failing completely
+                logger.info("Using CSV fallback for Google Sheets operations")
+                # Set a flag to indicate we're in fallback mode
+                os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
+                return None  # Return None to indicate no client available
         
         _sheets_client = gspread.authorize(creds)
     
@@ -72,17 +76,22 @@ def _get_spreadsheet():
     global _spreadsheet
     if _spreadsheet is None:
         client = _get_sheets_client()
-        
+
+        # If client is None, we're in fallback mode
+        if client is None:
+            logger.info("Using CSV fallback mode - no spreadsheet operations available")
+            return None
+
         if GOOGLE_SHEET_ID:
             _spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
         elif GOOGLE_SHEET_URL:
             _spreadsheet = client.open_by_url(GOOGLE_SHEET_URL)
         else:
             raise RuntimeError("GOOGLE_SHEET_ID or GOOGLE_SHEET_URL must be set")
-        
+
         # Ensure all required worksheets exist
         _ensure_worksheets()
-    
+
     return _spreadsheet
 
 
@@ -168,6 +177,7 @@ def append_submission(payload: Dict[str, Any]) -> bool:
             payload.get("type", ""),
             payload.get("file_id", ""),
             payload.get("file_name", ""),
+            payload.get("text_content", ""),
             payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
             payload.get("status", "Pending"),
             "",  # Grade column
@@ -189,6 +199,7 @@ def append_submission(payload: Dict[str, Any]) -> bool:
             payload.get("type", ""),
             payload.get("file_id", ""),
             payload.get("file_name", ""),
+            payload.get("text_content", ""),
             payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
             payload.get("status", "Pending"),
             "",
