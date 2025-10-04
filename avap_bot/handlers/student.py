@@ -477,9 +477,9 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Get student data with error handling
         try:
-        submissions = await run_blocking(get_student_submissions, username)
-        wins = await run_blocking(get_student_wins, username)
-        questions = await run_blocking(get_student_questions, username)
+            submissions = await run_blocking(get_student_submissions, username)
+            wins = await run_blocking(get_student_wins, username)
+            questions = await run_blocking(get_student_questions, username)
         except Exception as e:
             logger.warning(f"Failed to get data from Google Sheets: {e}")
             # Use empty lists as fallback
@@ -489,19 +489,19 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             # Show a warning in the status message
             status_text += "\n\n⚠️ **Note:** Some data may not be available due to system maintenance."
-        
+
         # Calculate stats
         total_submissions = len(submissions)
         total_wins = len(wins)
         total_questions = len(questions)
-        
+
         # Check badge eligibility
         badge_status = "🥉 New Student"
         if total_submissions >= 3 and total_wins >= 3:
             badge_status = "🥇 Top Student"
         elif total_submissions >= 1 or total_wins >= 1:
             badge_status = "🥈 Active Student"
-        
+
         # Calculate modules left
         completed_modules = set()
         for sub in submissions:
@@ -511,7 +511,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         all_modules = set(str(i) for i in range(1, 13))
         modules_left = all_modules - completed_modules
-        
+
         # Create status text
         status_text = (
             f"📊 **Your Status**\n\n"
@@ -530,7 +530,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             status_text += f"\n📖 Left to complete: {', '.join(sorted(modules_left)) if modules_left else 'All done! 🎉'}"
 
         await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
-        
+
     except Exception as e:
         logger.exception("Failed to get status: %s", e)
         await update.message.reply_text(
