@@ -178,7 +178,7 @@ answer_conv = ConversationHandler(
         ANSWER_TEXT: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, answer_text)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False
+    per_message=True
 )
 
 

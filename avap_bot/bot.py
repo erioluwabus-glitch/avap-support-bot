@@ -127,6 +127,29 @@ async def ping_self():
         pass  # Silent fail to avoid log spam
 
 
+async def generate_activity():
+    """Generate additional activity to prevent Render timeout."""
+    try:
+        import socket
+        import random
+        import time
+
+        # Generate some network activity
+        try:
+            socket.gethostbyname(f'activity-{random.randint(1, 1000)}.example.com')
+        except:
+            pass
+
+        # Generate some CPU activity
+        _ = sum(i * i for i in range(100))
+
+        # Small delay to simulate work
+        await asyncio.sleep(0.01)
+
+    except:
+        pass  # Silent fail
+
+
 async def health_check():
     """Comprehensive health check endpoint with keep-alive functionality."""
     try:
@@ -211,26 +234,36 @@ async def initialize_services():
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
 
-        # Schedule ultra-aggressive keep-alive health checks every 20 seconds
+        # Schedule ultra-aggressive keep-alive health checks every 15 seconds
         scheduler.add_job(
             keep_alive_check,
             'interval',
-            seconds=20,
+            seconds=15,
             args=[bot_app.bot],
             id='keep_alive',
             replace_existing=True
         )
-        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 20 seconds")
+        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 15 seconds")
 
-        # Schedule simple ping every 10 seconds
+        # Schedule simple ping every 8 seconds
         scheduler.add_job(
             ping_self,
             'interval',
-            seconds=10,
+            seconds=8,
             id='ping_self',
             replace_existing=True
         )
-        logger.debug("Simple ping scheduled every 10 seconds")
+        logger.debug("Simple ping scheduled every 8 seconds")
+
+        # Schedule additional activity every 5 seconds to prevent Render timeout
+        scheduler.add_job(
+            generate_activity,
+            'interval',
+            seconds=5,
+            id='activity_generator',
+            replace_existing=True
+        )
+        logger.debug("Activity generator scheduled every 5 seconds")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
@@ -279,7 +312,7 @@ async def background_keepalive():
         except Exception as e:
             logger.debug(f"Background keepalive error: {e}")
         finally:
-            await asyncio.sleep(3)  # Ping every 3 seconds for more aggressive keepalive
+            await asyncio.sleep(2)  # Ping every 2 seconds for ultra-aggressive keepalive
 
 
 # --- FastAPI event handlers ---
