@@ -366,6 +366,7 @@ You automatically receive notifications for:
 2. **Check logs regularly** - Catch issues early
 3. **Test new features** - Verify changes work before students use them
 4. **Backup important data** - Google Sheets serves this purpose
+5. **Bot stability** - Bot now uses ultra-aggressive keepalive (3-second intervals) to prevent sleep issues
 
 ---
 
@@ -462,10 +463,11 @@ You automatically receive notifications for:
 4. **Use daily tips effectively** - Mix motivation with tactics
 
 ### Build Community
-1. **Encourage win sharing** - Celebrate all progress
+1. **Encourage win sharing** - Celebrate all progress (now shows actual text content!)
 2. **Promote student matching** - Help students connect
 3. **Acknowledge questions** - Thank students for asking
 4. **Feature excellent work** - Highlight great submissions
+5. **Direct students to new features** - `/faq` and `/help` commands for better self-service
 
 ### Track Metrics
 - Verification rate (how many added students verify?)

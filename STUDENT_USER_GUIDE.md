@@ -31,13 +31,13 @@ After verification:
 
 ## 🎯 Main Features (4 Core Features)
 
-Once verified, you'll see these four buttons in your chat with the bot:
+Once verified, you'll see these four buttons as **bottom keyboard options** in your DM with the bot (features only work in DMs, not in groups):
 
 ### 1. 📝 Submit Assignment
 
 **How to use:**
-1. Click "📝 Submit Assignment"
-2. Select your module (1-12)
+1. Click "📝 Submit Assignment" from the bottom keyboard
+2. Select your module (1-12) from the options
 3. Choose submission type:
    - **Text** - For written assignments
    - **Audio** - For voice recordings
@@ -62,9 +62,9 @@ Once verified, you'll see these four buttons in your chat with the bot:
 A win is any success, achievement, or milestone you want to celebrate! It helps motivate other students.
 
 **How to share:**
-1. Click "🏆 Share Win"
+1. Click "🏆 Share Win" from the bottom keyboard
 2. Choose format:
-   - **Text** - Write about your achievement
+   - **Text** - Write about your achievement (your actual text will be shared)
    - **Audio** - Record a voice message
    - **Video** - Share a video
 3. Send your win
@@ -76,20 +76,28 @@ A win is any success, achievement, or milestone you want to celebrate! It helps 
 - "Finally understood how X works!"
 - "Helped another student solve a problem!"
 
+> 💡 **Note:** Text wins now display your actual content (not generic "TEXT WIN") when shared in the support group!
+
 ---
 
 ### 3. 📊 Check Status
 
+**How to use:**
+1. Click "📊 Check Status" from the bottom keyboard
+2. View your comprehensive progress report
+
 **What you'll see:**
 - Total assignments submitted (X/12)
-- List of modules you've completed
-- Modules you still need to complete
 - Total wins shared
-- Questions asked
+- Total questions asked
 - **Your badge:**
   - 🥉 **New Student** - Just getting started
   - 🥈 **Active Student** - Submitted 1+ assignment or win
   - 🥇 **Top Student** - Submitted 3+ assignments AND 3+ wins
+- **Modules Progress:**
+  - ✅ Completed modules (with numbers)
+  - ⏳ Remaining modules count
+  - 📖 Specific modules left (if 6 or fewer)
 
 **How to qualify as an AVAP Supporter:**
 You need:
@@ -103,7 +111,7 @@ You need:
 ### 4. ❓ Ask Question
 
 **How to ask:**
-1. Click "❓ Ask Question"
+1. Click "❓ Ask Question" from the bottom keyboard
 2. Type your question or send audio/video
 3. Your question is forwarded to the support team
 4. You'll receive an answer in your DM
@@ -118,6 +126,8 @@ You need:
 - Technical issues
 - Assignment clarifications
 - General learning questions
+
+> 💡 **Voice/Video Questions:** Now properly forwarded as original messages (not converted to documents) for better clarity!
 
 ---
 
@@ -161,6 +171,49 @@ Want to find a study partner? Use the `/match` command!
 - Study together
 - Share insights and tips
 - Motivate each other
+
+---
+
+## 📚 Additional Features
+
+### 📖 Browse FAQ - `/faq`
+
+**How to use:**
+1. Send `/faq` to the bot in your DM
+2. View frequently asked questions and answers
+3. Shows the first 5 FAQs available
+
+**What you'll see:**
+- Common questions and their answers
+- Helpful information about the course and bot features
+
+**Perfect for:**
+- Quick answers to common questions
+- Understanding how features work
+- Getting started information
+
+---
+
+### ❓ Get Help - `/help`
+
+**How to use:**
+1. Send `/help` to the bot in your DM
+2. Get contextual help based on your verification status
+
+**For Verified Students:**
+- Complete feature overview
+- Usage tips and best practices
+- Contact information for support
+
+**For Unverified Users:**
+- Verification instructions
+- List of features you'll unlock after verification
+- Admin contact information
+
+**Great for:**
+- Understanding all available features
+- Getting usage guidance
+- Troubleshooting common issues
 
 ---
 
@@ -332,6 +385,8 @@ Want to find a study partner? Use the `/match` command!
 | `/start` | Bot DM | Start/verify your account |
 | `/cancel` | Bot DM | Cancel current operation |
 | `/match` | Bot DM | Find a study partner |
+| `/faq` | Bot DM | Browse frequently asked questions |
+| `/help` | Bot DM | Get contextual help and guidance |
 | `/ask <question>` | Support Group | Ask a question |
 
 | Button | Where | What It Does |
@@ -340,6 +395,8 @@ Want to find a study partner? Use the `/match` command!
 | 🏆 Share Win | Bot DM | Share achievements |
 | 📊 Check Status | Bot DM | View your progress |
 | ❓ Ask Question | Bot DM | Get help from support team |
+
+> 💡 **Important:** All main features now use **bottom keyboards** and work **only in DMs** (not in groups) for better user experience!
 
 ---
 
@@ -362,6 +419,8 @@ Want to find a study partner? Use the `/match` command!
 - [ ] Share your first win
 - [ ] Ask a question (practice using the feature)
 - [ ] Check your status
+- [ ] Try `/faq` to browse available questions
+- [ ] Use `/help` to understand all features
 
 ### This Month:
 - [ ] Submit at least 3 assignments
