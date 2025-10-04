@@ -49,7 +49,7 @@ register_test_handlers(bot_app)
 # Create scheduler for daily tips
 scheduler = AsyncIOScheduler()
 scheduler.start()
-        logger.debug("Scheduler started for daily tips")
+logger.debug("Scheduler started for daily tips")
 
 # --- Webhook and Health Check ---
 async def keep_alive_check(bot):
