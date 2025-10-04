@@ -38,6 +38,7 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("telegram").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     

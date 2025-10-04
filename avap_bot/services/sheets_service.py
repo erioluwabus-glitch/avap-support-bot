@@ -138,7 +138,7 @@ def append_pending_verification(record: Dict[str, Any]) -> bool:
         return True
         
     except Exception as e:
-        logger.exception("Failed to append pending verification to sheets: %s", e)
+        logger.warning("Failed to append pending verification to sheets (using CSV fallback): %s", e)
         # CSV fallback
         return _csv_fallback("verification_pending.csv", [
             record.get("name", ""),
@@ -174,7 +174,7 @@ def append_submission(payload: Dict[str, Any]) -> bool:
         return True
         
     except Exception as e:
-        logger.exception("Failed to append submission to sheets: %s", e)
+        logger.warning("Failed to append submission to sheets (using CSV fallback): %s", e)
         # CSV fallback
         return _csv_fallback("submissions.csv", [
             payload.get("submission_id", ""),
@@ -235,7 +235,7 @@ def append_win(payload: Dict[str, Any]) -> bool:
         return True
         
     except Exception as e:
-        logger.exception("Failed to append win to sheets: %s", e)
+        logger.warning("Failed to append win to sheets (using CSV fallback): %s", e)
         # CSV fallback
         return _csv_fallback("wins.csv", [
             payload.get("win_id", ""),
@@ -271,7 +271,7 @@ def append_question(payload: Dict[str, Any]) -> bool:
         return True
         
     except Exception as e:
-        logger.exception("Failed to append question to sheets: %s", e)
+        logger.warning("Failed to append question to sheets (using CSV fallback): %s", e)
         # CSV fallback
         return _csv_fallback("questions.csv", [
             payload.get("question_id", ""),
@@ -410,7 +410,7 @@ def append_tip(tip_data: Dict[str, Any]) -> bool:
         return True
         
     except Exception as e:
-        logger.exception("Failed to append tip to sheets: %s", e)
+        logger.warning("Failed to append tip to sheets (using CSV fallback): %s", e)
         # CSV fallback
         return _csv_fallback("tips_manual.csv", [
             tip_data.get("content", ""),
