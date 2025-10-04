@@ -280,19 +280,19 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 )
             else:
                 # For file submissions, show file info
-            forward_text = (
-                f"📝 **New Assignment Submission**\n\n"
-                f"Student: @{username}\n"
-                f"Telegram ID: {user_id}\n"
-                f"Module: {module}\n"
-                f"Type: {submission_type.title()}\n"
-                f"File: {file_name}\n"
+                forward_text = (
+                    f"📝 **New Assignment Submission**\n\n"
+                    f"Student: @{username}\n"
+                    f"Telegram ID: {user_id}\n"
+                    f"Module: {module}\n"
+                    f"Type: {submission_type.title()}\n"
+                    f"File: {file_name}\n"
                     f"File ID: `{file_id}`"
-            )
-            
+                )
+
             if file_id:
                 # For file submissions, send the file with caption
-                    await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
                 # For text submissions, send the text message
                 await context.bot.send_message(ASSIGNMENT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
@@ -423,17 +423,17 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             else:
                 # For file wins, show file info
-            forward_text = (
-                f"🏆 **New Win Shared**\n\n"
-                f"Student: @{username}\n"
-                f"Type: {win_type.title()}\n"
-                f"File: {file_name}\n"
+                forward_text = (
+                    f"🏆 **New Win Shared**\n\n"
+                    f"Student: @{username}\n"
+                    f"Type: {win_type.title()}\n"
+                    f"File: {file_name}\n"
                     f"File ID: `{file_id}`"
-            )
-            
+                )
+
             if file_id:
                 # For file wins, send the file with caption
-                    await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
                 # For text wins, send the text message
                 await context.bot.send_message(SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
