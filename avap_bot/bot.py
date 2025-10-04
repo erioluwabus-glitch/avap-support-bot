@@ -63,7 +63,8 @@ async def keep_alive_check(bot):
         # Make multiple HTTP requests to simulate heavy activity
         import httpx
         import asyncio
-        
+        import socket
+
         # Make several concurrent requests to show activity
         async def make_request(url, timeout=2.0):
             try:
@@ -72,19 +73,30 @@ async def keep_alive_check(bot):
                     return response.status_code
             except:
                 return None
-        
+
         # Fire multiple requests concurrently
         tasks = [
             make_request("http://localhost:8080/health"),
             make_request("http://localhost:8080/health"),
-            make_request("http://localhost:8080/health")
+            make_request("http://localhost:8080/health"),
+            make_request("http://localhost:8080/ping"),
+            make_request("http://localhost:8080/"),
         ]
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
         successful_requests = sum(1 for r in results if r == 200)
-        
+
+        # Additional network activity
+        try:
+            socket.gethostbyname('api.telegram.org')
+        except:
+            pass
+
+        # Additional CPU activity
+        _ = sum(i * i for i in range(1000))
+
         if successful_requests > 0:
-            logger.debug(f"Keep-alive: {successful_requests}/3 requests successful")
+            logger.debug(f"Keep-alive: {successful_requests}/5 requests successful")
         else:
             logger.debug("Keep-alive: All requests failed (expected during startup)")
 
@@ -103,8 +115,14 @@ async def ping_self():
     """Simple ping to keep the service alive."""
     try:
         import httpx
+        import socket
         async with httpx.AsyncClient() as client:
             await client.get("http://localhost:8080/ping", timeout=1.0)
+            # Additional activity
+            try:
+                socket.gethostbyname('telegram.org')
+            except:
+                pass
     except:
         pass  # Silent fail to avoid log spam
 
@@ -193,26 +211,26 @@ async def initialize_services():
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
 
-        # Schedule ultra-aggressive keep-alive health checks every 30 seconds
+        # Schedule ultra-aggressive keep-alive health checks every 20 seconds
         scheduler.add_job(
             keep_alive_check,
             'interval',
-            seconds=30,
+            seconds=20,
             args=[bot_app.bot],
             id='keep_alive',
             replace_existing=True
         )
-        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 30 seconds")
-        
-        # Schedule simple ping every 15 seconds
+        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 20 seconds")
+
+        # Schedule simple ping every 10 seconds
         scheduler.add_job(
             ping_self,
             'interval',
-            seconds=15,
+            seconds=10,
             id='ping_self',
             replace_existing=True
         )
-        logger.debug("Simple ping scheduled every 15 seconds")
+        logger.debug("Simple ping scheduled every 10 seconds")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
@@ -231,20 +249,37 @@ async def background_keepalive():
     """Background task that continuously pings the health endpoint."""
     import asyncio
     import httpx
-    
+    import socket
+
     while True:
         try:
-            async with httpx.AsyncClient() as client:
-                # Ping multiple endpoints to show activity
-                await asyncio.gather(
-                    client.get("http://localhost:8080/ping", timeout=1.0),
-                    client.get("http://localhost:8080/", timeout=1.0),
-                    client.get("http://localhost:8080/health", timeout=1.0),
-                    return_exceptions=True
+            # Try multiple approaches to keep the service alive
+            tasks = []
+
+            # 1. HTTP ping to our own endpoints (if server is running locally)
+            try:
+                tasks.append(
+                    httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
                 )
-        except:
-            pass  # Silent fail
-        await asyncio.sleep(5)  # Ping every 5 seconds
+            except:
+                pass
+
+            # 2. DNS resolution to generate network activity
+            try:
+                socket.gethostbyname('google.com')
+            except:
+                pass
+
+            # 3. Simple memory allocation to show CPU activity
+            _ = [i for i in range(1000)]
+
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        except Exception as e:
+            logger.debug(f"Background keepalive error: {e}")
+        finally:
+            await asyncio.sleep(3)  # Ping every 3 seconds for more aggressive keepalive
 
 
 # --- FastAPI event handlers ---

@@ -48,14 +48,19 @@ def _get_sheets_client():
                 except:
                     # If not base64, use as raw JSON
                     creds_json = GOOGLE_CREDENTIALS_JSON
-                
+
                 creds_dict = json.loads(creds_json)
                 creds = Credentials.from_service_account_info(creds_dict)
             except Exception as e:
                 logger.warning("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
                 raise RuntimeError("Invalid Google credentials")
         else:
-            creds = Credentials.from_service_account_file("credentials.json")
+            # Try to load credentials from file, but handle gracefully if not found
+            try:
+                creds = Credentials.from_service_account_file("credentials.json")
+            except FileNotFoundError:
+                logger.warning("credentials.json not found. Set GOOGLE_CREDENTIALS_JSON environment variable with base64 encoded credentials.")
+                raise RuntimeError("Google credentials not configured. Set GOOGLE_CREDENTIALS_JSON environment variable.")
         
         _sheets_client = gspread.authorize(creds)
     
@@ -219,7 +224,7 @@ def append_win(payload: Dict[str, Any]) -> bool:
     try:
         spreadsheet = _get_spreadsheet()
         sheet = spreadsheet.worksheet("wins")
-        
+
         row = [
             payload.get("win_id", ""),
             payload.get("username", ""),
@@ -227,6 +232,7 @@ def append_win(payload: Dict[str, Any]) -> bool:
             payload.get("type", ""),
             payload.get("file_id", ""),
             payload.get("file_name", ""),
+            payload.get("text_content", ""),
             payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         ]
         
@@ -244,6 +250,7 @@ def append_win(payload: Dict[str, Any]) -> bool:
             payload.get("type", ""),
             payload.get("file_id", ""),
             payload.get("file_name", ""),
+            payload.get("text_content", ""),
             payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         ])
 

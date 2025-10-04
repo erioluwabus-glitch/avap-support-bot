@@ -123,13 +123,17 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, verified_user: Dict[str, Any]):
     """Display the main menu for verified users."""
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Submit Assignment", callback_data="submit")],
-        [InlineKeyboardButton("🏆 Share Win", callback_data="share_win")],
-        [InlineKeyboardButton("📊 Check Status", callback_data="status")],
-        [InlineKeyboardButton("❓ Ask Question", callback_data="ask")]
-    ])
-    
+    # Only show menu in private chats (DMs), not in groups
+    if update.effective_chat.type != ChatType.PRIVATE:
+        return
+
+    from telegram import ReplyKeyboardMarkup
+
+    keyboard = ReplyKeyboardMarkup([
+        ["📝 Submit Assignment", "🏆 Share Win"],
+        ["📊 Check Status", "❓ Ask Question"]
+    ], resize_keyboard=True, one_time_keyboard=False)
+
     await update.message.reply_text(
         f"🎉 **Welcome back, {verified_user['name']}!**\n\n"
         "Choose an option below:",
@@ -138,22 +142,21 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
     )
 
 
-async def submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle submit assignment callback"""
-    query = update.callback_query
-    await query.answer()
-    
+async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle submit assignment message"""
     if not await _is_verified(update):
-        await query.edit_message_text("❌ You need to be verified to submit assignments.")
+        await update.message.reply_text("❌ You need to be verified to submit assignments.")
         return ConversationHandler.END
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"Module {i}", callback_data=f"module_{i}") for i in range(1, 7)],
-        [InlineKeyboardButton(f"Module {i}", callback_data=f"module_{i}") for i in range(7, 13)],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
-    ])
-    
-    await query.edit_message_text(
+
+    from telegram import ReplyKeyboardMarkup
+
+    keyboard = ReplyKeyboardMarkup([
+        [f"Module {i}" for i in range(1, 7)],
+        [f"Module {i}" for i in range(7, 13)],
+        ["❌ Cancel"]
+    ], resize_keyboard=True, one_time_keyboard=True)
+
+    await update.message.reply_text(
         "📝 **Submit Assignment**\n\n"
         "Select the module for your assignment:",
         parse_mode=ParseMode.MARKDOWN,
@@ -164,24 +167,23 @@ async def submit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle module selection"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "cancel":
-        await query.edit_message_text("❌ Submission cancelled.")
+    message_text = update.message.text
+
+    if message_text == "❌ Cancel":
+        await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-    
-    module = query.data.split("_")[1]
+
+    module = message_text.split()[-1]  # Extract number from "Module X"
     context.user_data['submit_module'] = module
     
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Text", callback_data="type_text")],
-        [InlineKeyboardButton("🎤 Audio", callback_data="type_audio")],
-        [InlineKeyboardButton("🎥 Video", callback_data="type_video")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
-    ])
-    
-    await query.edit_message_text(
+    from telegram import ReplyKeyboardMarkup
+
+    keyboard = ReplyKeyboardMarkup([
+        ["📝 Text", "🎤 Audio"],
+        ["🎥 Video", "❌ Cancel"]
+    ], resize_keyboard=True, one_time_keyboard=True)
+
+    await update.message.reply_text(
         f"📝 **Module {module} Assignment**\n\n"
         "What type of submission is this?",
         parse_mode=ParseMode.MARKDOWN,
@@ -192,17 +194,17 @@ async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle submission type selection"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "cancel":
-        await query.edit_message_text("❌ Submission cancelled.")
+    message_text = update.message.text
+
+    if message_text == "❌ Cancel":
+        await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-    
-    submission_type = query.data.split("_")[1]
+
+    # Extract type from button text (remove emoji)
+    submission_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['submit_type'] = submission_type
-    
-    await query.edit_message_text(
+
+    await update.message.reply_text(
         f"📝 **Module {context.user_data['submit_module']} - {submission_type.title()}**\n\n"
         "Please send your assignment file or text:",
         parse_mode=ParseMode.MARKDOWN
@@ -292,23 +294,20 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         return ConversationHandler.END
 
 
-async def share_win_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle share win callback"""
-    query = update.callback_query
-    await query.answer()
-    
+async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle share win message"""
     if not await _is_verified(update):
-        await query.edit_message_text("❌ You need to be verified to share wins.")
+        await update.message.reply_text("❌ You need to be verified to share wins.")
         return ConversationHandler.END
-    
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Text", callback_data="win_text")],
-        [InlineKeyboardButton("🎤 Audio", callback_data="win_audio")],
-        [InlineKeyboardButton("🎥 Video", callback_data="win_video")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")]
-    ])
-    
-    await query.edit_message_text(
+
+    from telegram import ReplyKeyboardMarkup
+
+    keyboard = ReplyKeyboardMarkup([
+        ["📝 Text", "🎤 Audio"],
+        ["🎥 Video", "❌ Cancel"]
+    ], resize_keyboard=True, one_time_keyboard=True)
+
+    await update.message.reply_text(
         "🏆 **Share Your Win**\n\n"
         "What type of win are you sharing?",
         parse_mode=ParseMode.MARKDOWN,
@@ -319,17 +318,17 @@ async def share_win_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win type selection"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == "cancel":
-        await query.edit_message_text("❌ Win sharing cancelled.")
+    message_text = update.message.text
+
+    if message_text == "❌ Cancel":
+        await update.message.reply_text("❌ Win sharing cancelled.")
         return ConversationHandler.END
-    
-    win_type = query.data.split("_")[1]
+
+    # Extract type from button text (remove emoji)
+    win_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['win_type'] = win_type
-    
-    await query.edit_message_text(
+
+    await update.message.reply_text(
         f"🏆 **Share {win_type.title()} Win**\n\n"
         "Please share your win (text, audio, or video):",
         parse_mode=ParseMode.MARKDOWN
@@ -347,7 +346,8 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Get file info
         file_id = None
         file_name = None
-        
+        text_content = None
+
         if update.message.document:
             file_id = update.message.document.file_id
             file_name = update.message.document.file_name
@@ -358,12 +358,13 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             file_id = update.message.video.file_id
             file_name = update.message.video.file_name or f"win_video_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.mp4"
         elif update.message.text:
+            text_content = update.message.text
             file_id = None
             file_name = f"win_text_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.txt"
         else:
             await update.message.reply_text("❌ Unsupported file type. Please send text, document, audio, or video.")
             return SHARE_WIN_FILE
-        
+
         # Prepare win data
         win_data = {
             'username': username,
@@ -371,6 +372,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             'type': win_type,
             'file_id': file_id,
             'file_name': file_name,
+            'text_content': text_content,
             'shared_at': datetime.now(timezone.utc)
         }
         
@@ -379,20 +381,29 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Forward to support group
         if SUPPORT_GROUP_ID:
-            forward_text = (
-                f"🏆 **New Win Shared**\n\n"
-                f"Student: @{username}\n"
-                f"Type: {win_type.title()}\n"
-                f"File: {file_name}\n"
-                f"File ID: `{file_id}`" if file_id else "Text win"
-            )
+            if text_content:
+                # For text wins, include the actual text content
+                forward_text = (
+                    f"🏆 **New Win Shared**\n\n"
+                    f"Student: @{username}\n"
+                    f"Type: {win_type.title()}\n\n"
+                    f"**Content:**\n{text_content}"
+                )
+            else:
+                # For file wins, show file info
+                forward_text = (
+                    f"🏆 **New Win Shared**\n\n"
+                    f"Student: @{username}\n"
+                    f"Type: {win_type.title()}\n"
+                    f"File: {file_name}\n"
+                    f"File ID: `{file_id}`"
+                )
             
             if file_id:
-                if win_type == "text":
-                    await context.bot.send_message(SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
-                else:
-                    await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                # For file wins, send the file with caption
+                await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
+                # For text wins, send the text message
                 await context.bot.send_message(SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
         
         await update.message.reply_text(
@@ -411,41 +422,51 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return ConversationHandler.END
 
 
-async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle status check callback"""
-    query = update.callback_query
-    await query.answer()
-    
+async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle status check message"""
     if not await _is_verified(update):
-        await query.edit_message_text("❌ You need to be verified to check status.")
+        await update.message.reply_text("❌ You need to be verified to check status.")
         return
-    
+
     try:
         user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
-        
-        # Get student data
-        submissions = await run_blocking(get_student_submissions, username)
-        wins = await run_blocking(get_student_wins, username)
-        questions = await run_blocking(get_student_questions, username)
-        
+
+        # Get student data with error handling
+        try:
+            submissions = await run_blocking(get_student_submissions, username)
+            wins = await run_blocking(get_student_wins, username)
+            questions = await run_blocking(get_student_questions, username)
+        except Exception as e:
+            logger.warning(f"Failed to get data from Google Sheets: {e}")
+            # Use empty lists as fallback
+            submissions = []
+            wins = []
+            questions = []
+
         # Calculate stats
         total_submissions = len(submissions)
         total_wins = len(wins)
         total_questions = len(questions)
-        
+
         # Check badge eligibility
         badge_status = "🥉 New Student"
         if total_submissions >= 3 and total_wins >= 3:
             badge_status = "🥇 Top Student"
         elif total_submissions >= 1 or total_wins >= 1:
             badge_status = "🥈 Active Student"
-        
+
         # Calculate modules left
-        completed_modules = set(sub['module'] for sub in submissions)
+        completed_modules = set()
+        for sub in submissions:
+            module = sub.get('module', '')
+            if module and module.isdigit():
+                completed_modules.add(module)
+
         all_modules = set(str(i) for i in range(1, 13))
         modules_left = all_modules - completed_modules
-        
+
+        # Create status text
         status_text = (
             f"📊 **Your Status**\n\n"
             f"👤 Student: @{username}\n"
@@ -453,28 +474,32 @@ async def status_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📝 Assignments: {total_submissions}/12\n"
             f"🏆 Wins Shared: {total_wins}\n"
             f"❓ Questions Asked: {total_questions}\n\n"
-            f"📚 Modules Left: {len(modules_left)}\n"
-            f"Completed: {', '.join(sorted(completed_modules)) if completed_modules else 'None'}\n"
-            f"Remaining: {', '.join(sorted(modules_left)) if modules_left else 'All done!'}"
+            f"📚 Modules Progress:\n"
+            f"✅ Completed: {', '.join(sorted(completed_modules)) if completed_modules else 'None'}\n"
+            f"⏳ Remaining: {len(modules_left)} modules"
         )
-        
-        await query.edit_message_text(status_text, parse_mode=ParseMode.MARKDOWN)
-        
+
+        # Add modules left details if not too many
+        if len(modules_left) <= 6:
+            status_text += f"\n📖 Left to complete: {', '.join(sorted(modules_left)) if modules_left else 'All done! 🎉'}"
+
+        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+
     except Exception as e:
         logger.exception("Failed to get status: %s", e)
-        await query.edit_message_text("❌ Failed to get status. Please try again.")
+        await update.message.reply_text(
+            "❌ Failed to get status. Please try again.\n"
+            "If the problem persists, contact an admin."
+        )
 
 
-async def ask_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle ask question callback"""
-    query = update.callback_query
-    await query.answer()
-    
+async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle ask question message"""
     if not await _is_verified(update):
-        await query.edit_message_text("❌ You need to be verified to ask questions.")
+        await update.message.reply_text("❌ You need to be verified to ask questions.")
         return ConversationHandler.END
-    
-    await query.edit_message_text(
+
+    await update.message.reply_text(
         "❓ **Ask a Question**\n\n"
         "Please type your question (text, audio, or video):",
         parse_mode=ParseMode.MARKDOWN
@@ -528,26 +553,76 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         
         # Forward to questions group
         if QUESTIONS_GROUP_ID:
-            forward_text = (
-                f"❓ **New Question**\n\n"
-                f"Student: @{username}\n"
-                f"Telegram ID: {user_id}\n"
-                f"Question: {question_text}\n"
-            )
-            if file_id:
-                forward_text += f"File: {file_name}\nFile ID: `{file_id}`"
-            
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
-            
+
             if file_id:
-                if question_text == "Voice question" or question_text == "Video question":
-                    await context.bot.send_document(QUESTIONS_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+                # For voice and video, try to forward the original message first
+                if question_text == "Voice question":
+                    try:
+                        # Forward the voice message to preserve the original
+                        await update.message.forward(QUESTIONS_GROUP_ID)
+                        # Send the answer button as a separate message
+                        await context.bot.send_message(QUESTIONS_GROUP_ID,
+                            f"❓ **New Voice Question**\n\n"
+                            f"Student: @{username}\n"
+                            f"Telegram ID: {user_id}\n"
+                            f"Voice message forwarded above.",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=keyboard
+                        )
+                    except Exception as e:
+                        # Fallback to sending as voice if forwarding fails
+                        await context.bot.send_voice(QUESTIONS_GROUP_ID, file_id,
+                            caption=f"❓ **New Voice Question**\n\n"
+                                   f"Student: @{username}\n"
+                                   f"Telegram ID: {user_id}",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=keyboard
+                        )
+                elif question_text == "Video question":
+                    try:
+                        # Forward the video message to preserve the original
+                        await update.message.forward(QUESTIONS_GROUP_ID)
+                        # Send the answer button as a separate message
+                        await context.bot.send_message(QUESTIONS_GROUP_ID,
+                            f"❓ **New Video Question**\n\n"
+                            f"Student: @{username}\n"
+                            f"Telegram ID: {user_id}\n"
+                            f"Video message forwarded above.",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=keyboard
+                        )
+                    except Exception as e:
+                        # Fallback to sending as video if forwarding fails
+                        await context.bot.send_video(QUESTIONS_GROUP_ID, file_id,
+                            caption=f"❓ **New Video Question**\n\n"
+                                   f"Student: @{username}\n"
+                                   f"Telegram ID: {user_id}",
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=keyboard
+                        )
                 else:
-                    await context.bot.send_message(QUESTIONS_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+                    # Send as document for other file types with inline keyboard
+                    await context.bot.send_document(QUESTIONS_GROUP_ID, file_id,
+                        caption=f"❓ **New Question**\n\n"
+                               f"Student: @{username}\n"
+                               f"Telegram ID: {user_id}\n"
+                               f"Question: Document: {file_name}",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=keyboard
+                    )
             else:
-                await context.bot.send_message(QUESTIONS_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+                # Text question - send as message
+                await context.bot.send_message(QUESTIONS_GROUP_ID,
+                    f"❓ **New Question**\n\n"
+                    f"Student: @{username}\n"
+                    f"Telegram ID: {user_id}\n"
+                    f"Question: {question_text}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
         
         await update.message.reply_text(
             f"✅ **Question Submitted!**\n\n"
@@ -663,6 +738,81 @@ async def _is_verified(update: Update) -> bool:
     return check_verified_user(update.effective_user.id) is not None
 
 
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command"""
+    user = update.effective_user
+
+    # Check if user is verified
+    verified_user = check_verified_user(user.id)
+
+    if verified_user:
+        help_text = (
+            "🎯 **AVAP Support Bot Help**\n\n"
+            "📝 **Submit Assignment** - Submit your course assignments\n"
+            "🏆 **Share Win** - Share your achievements and wins\n"
+            "📊 **Check Status** - View your progress and statistics\n"
+            "❓ **Ask Question** - Get help from support team\n\n"
+            "💡 **Tips:**\n"
+            "- Use the buttons below to navigate\n"
+            "- For questions, you can send text, voice, or video messages\n"
+            "- Your progress is automatically tracked\n\n"
+            "Need more help? Contact an admin!"
+        )
+    else:
+        help_text = (
+            "👋 **AVAP Support Bot Help**\n\n"
+            "To get started, you need to verify your account.\n"
+            "Please send your email or phone number that you used during registration.\n\n"
+            "Once verified, you'll have access to:\n"
+            "📝 Submit assignments\n"
+            "🏆 Share your wins\n"
+            "📊 Check your status\n"
+            "❓ Ask questions\n\n"
+            "Contact an admin if you need help with verification!"
+        )
+
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def faq_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /faq command"""
+    if not await _is_verified(update):
+        await update.message.reply_text("❌ You need to be verified to access FAQs.")
+        return
+
+    try:
+        from avap_bot.services.supabase_service import get_faqs
+
+        # Get FAQs from database
+        faqs = get_faqs()
+
+        if not faqs:
+            await update.message.reply_text(
+                "📚 **FAQ**\n\n"
+                "No FAQs are available at the moment.\n"
+                "Please contact an admin if you need help!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Show first few FAQs with option to browse more
+        faq_text = "📚 **Frequently Asked Questions**\n\n"
+
+        for i, faq in enumerate(faqs[:5], 1):  # Show first 5 FAQs
+            faq_text += f"**{i}. {faq['question']}**\n"
+            faq_text += f"{faq['answer'][:100]}{'...' if len(faq['answer']) > 100 else ''}\n\n"
+
+        if len(faqs) > 5:
+            faq_text += f"📖 And {len(faqs) - 5} more FAQs available.\n"
+            faq_text += "Contact admin for specific questions!"
+
+        await update.message.reply_text(faq_text, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logger.exception("Failed to get FAQs: %s", e)
+        await update.message.reply_text("❌ Failed to load FAQs. Please try again later.")
+
+
 # Conversation handlers
 
 # Main verification and start conversation
@@ -676,10 +826,10 @@ start_conv = ConversationHandler(
 )
 
 submit_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(submit_callback, pattern="^submit$")],
+    entry_points=[MessageHandler(filters.Regex(r"📝 Submit Assignment"), submit_handler)],
     states={
-        SUBMIT_MODULE: [CallbackQueryHandler(submit_module, pattern="^module_|^cancel$")],
-        SUBMIT_TYPE: [CallbackQueryHandler(submit_type, pattern="^type_|^cancel$")],
+        SUBMIT_MODULE: [MessageHandler(filters.Regex(r"Module \d+") | filters.Regex(r"❌ Cancel"), submit_module)],
+        SUBMIT_TYPE: [MessageHandler(filters.Regex(r"📄 Document|📷 Photo|🎵 Audio|🎬 Video|❌ Cancel"), submit_type)],
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
@@ -687,9 +837,9 @@ submit_conv = ConversationHandler(
 )
 
 share_win_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(share_win_callback, pattern="^share_win$")],
+    entry_points=[MessageHandler(filters.Regex(r"🏆 Share Win"), share_win_handler)],
     states={
-        SHARE_WIN_TYPE: [CallbackQueryHandler(share_win_type, pattern="^win_|^cancel$")],
+        SHARE_WIN_TYPE: [MessageHandler(filters.Regex(r"📝 Text|📷 Image|🎵 Audio|🎬 Video|❌ Cancel"), share_win_type)],
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
@@ -697,7 +847,7 @@ share_win_conv = ConversationHandler(
 )
 
 ask_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(ask_callback, pattern="^ask$")],
+    entry_points=[MessageHandler(filters.Regex(r"❓ Ask Question"), ask_handler)],
     states={
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
@@ -709,6 +859,8 @@ ask_conv = ConversationHandler(
 def register_handlers(application):
     """Register all student handlers with the application"""
     # Add command handlers
+    application.add_handler(CommandHandler("help", help_handler))
+    application.add_handler(CommandHandler("faq", faq_handler))
     application.add_handler(start_conv)
     
     # Add conversation handlers
@@ -716,8 +868,8 @@ def register_handlers(application):
     application.add_handler(share_win_conv)
     application.add_handler(ask_conv)
     
-    # Add callback query handlers
-    application.add_handler(CallbackQueryHandler(status_callback, pattern="^status$"))
+    # Add message handlers for status
+    application.add_handler(MessageHandler(filters.Regex(r"📊 Check Status"), status_handler))
     
     # Add support group /ask handler (only processes messages from support group)
     application.add_handler(CommandHandler("ask", support_group_ask_handler, filters=filters.ChatType.SUPERGROUP | filters.ChatType.GROUP))
