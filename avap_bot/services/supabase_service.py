@@ -218,8 +218,7 @@ def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, 
             "email": row["email"],
             "phone": row["phone"],
             "telegram_id": telegram_id,
-            "status": "verified",
-            "verified_at": datetime.now(timezone.utc).isoformat()
+            "status": "verified"
         }
         ins = client.table("verified_users").insert(verified_payload).execute()
 
@@ -536,7 +535,7 @@ def get_top_students() -> List[Dict[str, Any]]:
                 "name": user.get("name", "Unknown"),
                 "assignments": assignment_count,
                 "wins": wins_count,
-                "joined_at": user.get("verified_at", "Unknown")
+                "joined_at": user.get("created_at", "Unknown")
             })
     
     return top_students
@@ -1021,7 +1020,7 @@ def get_top_students() -> List[Dict[str, Any]]:
 
                 "wins": wins_count,
 
-                "joined_at": user.get("verified_at", "Unknown")
+                "joined_at": user.get("created_at", "Unknown")
 
             })
 
@@ -1543,7 +1542,7 @@ def get_top_students() -> List[Dict[str, Any]]:
 
                 "wins": wins_count,
 
-                "joined_at": user.get("verified_at", "Unknown")
+                "joined_at": user.get("created_at", "Unknown")
 
             })
 
