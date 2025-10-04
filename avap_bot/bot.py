@@ -15,6 +15,8 @@ from avap_bot.utils.logging_config import setup_logging
 from avap_bot.services.supabase_service import init_supabase
 from avap_bot.handlers import register_all
 from avap_bot.handlers.tips import schedule_daily_tips
+from avap_bot.utils.cancel_registry import CancelRegistry
+from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 
 # Initialize logging
 setup_logging()
@@ -31,35 +33,80 @@ app = FastAPI()
 # Create the Telegram bot application
 bot_app = Application.builder().token(BOT_TOKEN).build()
 
+# Initialize cancel registry and store in bot data
+cancel_registry = CancelRegistry()
+bot_app.bot_data['cancel_registry'] = cancel_registry
+
 # Register all handlers
 register_all(bot_app)
+
+# Register cancel handlers
+register_cancel_handlers(bot_app)
+
+# Register test handlers (development only)
+register_test_handlers(bot_app)
 
 # Create scheduler for daily tips
 scheduler = AsyncIOScheduler()
 scheduler.start()
-logger.info("Scheduler started for daily tips")
+        logger.debug("Scheduler started for daily tips")
 
 # --- Webhook and Health Check ---
 async def keep_alive_check(bot):
-    """Background keep-alive check to prevent Render timeouts."""
+    """Ultra-aggressive keep-alive check to prevent Render timeouts."""
     try:
-        # Perform a simple database check to keep connection alive
+        # Perform database check to keep connection alive
         from avap_bot.services.supabase_service import get_supabase
         client = get_supabase()
         client.table("verified_users").select("id").limit(1).execute()
 
-        # Log activity to show the bot is active
-        logger.info("Keep-alive check completed - Bot is active and responsive")
+        # Make multiple HTTP requests to simulate heavy activity
+        import httpx
+        import asyncio
+        
+        # Make several concurrent requests to show activity
+        async def make_request(url, timeout=2.0):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, timeout=timeout)
+                    return response.status_code
+            except:
+                return None
+        
+        # Fire multiple requests concurrently
+        tasks = [
+            make_request("http://localhost:8080/health"),
+            make_request("http://localhost:8080/health"),
+            make_request("http://localhost:8080/health")
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        successful_requests = sum(1 for r in results if r == 200)
+        
+        if successful_requests > 0:
+            logger.debug(f"Keep-alive: {successful_requests}/3 requests successful")
+        else:
+            logger.debug("Keep-alive: All requests failed (expected during startup)")
 
     except Exception as e:
-        logger.error(f"Keep-alive check failed: {e}")
+        logger.debug(f"Keep-alive check failed: {e}")
         # Try to reinitialize if there are issues
         try:
             from avap_bot.services.supabase_service import init_supabase
             init_supabase()
-            logger.info("Reinitialized Supabase connection")
+            logger.debug("Reinitialized Supabase connection")
         except Exception as reinit_error:
-            logger.error(f"Failed to reinitialize Supabase: {reinit_error}")
+            logger.debug(f"Failed to reinitialize Supabase: {reinit_error}")
+
+
+async def ping_self():
+    """Simple ping to keep the service alive."""
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            await client.get("http://localhost:8080/ping", timeout=1.0)
+    except:
+        pass  # Silent fail to avoid log spam
 
 
 async def health_check():
@@ -78,8 +125,8 @@ async def health_check():
         if not scheduler or scheduler.state == 0:
             logger.warning("Scheduler may not be running properly")
 
-        # Log health check activity to prevent timeouts
-        logger.info("Health check passed - Bot is alive and responsive")
+        # Log health check activity to prevent timeouts (less verbose)
+        logger.debug("Health check passed - Bot is alive and responsive")
 
         return {
             "status": "healthy",
@@ -104,11 +151,11 @@ async def health_check():
 async def telegram_webhook(request: Request):
     """Handle incoming Telegram updates."""
     try:
-        logger.info(f"Received webhook request to: {request.url.path}")
+        logger.debug(f"Received webhook request to: {request.url.path}")
         data = await request.json()
         update = Update.de_json(data, bot_app.bot)
         await bot_app.process_update(update)
-        logger.info("Successfully processed webhook update")
+        logger.debug("Successfully processed webhook update")
         return Response(status_code=200)
     except Exception as e:
         logger.error(f"Error in webhook: {e}", exc_info=True)
@@ -118,32 +165,54 @@ async def telegram_webhook(request: Request):
 app.post("/webhook/{bot_token}")(telegram_webhook)
 app.get("/health")(health_check)
 
+# Simple ping endpoint for keep-alive
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint for keep-alive."""
+    return {"status": "pong", "timestamp": time.time()}
+
+# Root endpoint for basic health check
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {"status": "ok", "service": "avap-support-bot"}
+
 
 async def initialize_services():
     """Initializes services and sets up the bot."""
-    logger.info("Initializing services...")
+    logger.debug("Initializing services...")
     try:
         # Initialize Supabase
         init_supabase()
 
         # Initialize the Telegram Application
-        logger.info("Initializing Telegram Application...")
+        logger.debug("Initializing Telegram Application...")
         await bot_app.initialize()
-        logger.info("Telegram Application initialized successfully")
+        logger.debug("Telegram Application initialized successfully")
 
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
 
-        # Schedule keep-alive health checks every 5 minutes
+        # Schedule ultra-aggressive keep-alive health checks every 30 seconds
         scheduler.add_job(
             keep_alive_check,
             'interval',
-            minutes=5,
+            seconds=30,
             args=[bot_app.bot],
             id='keep_alive',
             replace_existing=True
         )
-        logger.info("Keep-alive health checks scheduled every 5 minutes")
+        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 30 seconds")
+        
+        # Schedule simple ping every 15 seconds
+        scheduler.add_job(
+            ping_self,
+            'interval',
+            seconds=15,
+            id='ping_self',
+            replace_existing=True
+        )
+        logger.debug("Simple ping scheduled every 15 seconds")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
@@ -157,12 +226,37 @@ async def main_polling():
     logger.info("Starting bot in polling mode for local development...")
     await bot_app.run_polling(allowed_updates=["message", "callback_query"])
 
+# Background task to continuously ping health endpoint
+async def background_keepalive():
+    """Background task that continuously pings the health endpoint."""
+    import asyncio
+    import httpx
+    
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                # Ping multiple endpoints to show activity
+                await asyncio.gather(
+                    client.get("http://localhost:8080/ping", timeout=1.0),
+                    client.get("http://localhost:8080/", timeout=1.0),
+                    client.get("http://localhost:8080/health", timeout=1.0),
+                    return_exceptions=True
+                )
+        except:
+            pass  # Silent fail
+        await asyncio.sleep(5)  # Ping every 5 seconds
+
+
 # --- FastAPI event handlers ---
 @app.on_event("startup")
 async def on_startup():
     """Actions to perform on application startup."""
     # Initialize services first (including Telegram Application)
     await initialize_services()
+
+    # Start background keepalive task
+    asyncio.create_task(background_keepalive())
+    logger.info("Background keepalive task started")
 
     # Set webhook URL - construct proper Telegram webhook URL
     webhook_base = os.getenv("WEBHOOK_URL")

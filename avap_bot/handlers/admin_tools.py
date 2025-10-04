@@ -16,6 +16,7 @@ from avap_bot.services.sheets_service import get_student_submissions, list_achie
 from avap_bot.services.supabase_service import get_supabase
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +286,12 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     return ConversationHandler.END
 
 
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancel command"""
+    await update.message.reply_text("❌ Operation cancelled.")
+    return ConversationHandler.END
+
+
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
@@ -304,7 +311,7 @@ message_achievers_conv = ConversationHandler(
     states={
         MESSAGE_ACHIEVERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, message_achievers)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 

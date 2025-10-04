@@ -15,6 +15,7 @@ from avap_bot.services.sheets_service import update_submission_grade, add_grade_
 from avap_bot.services.supabase_service import update_assignment_grade, get_assignment_by_id
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,12 @@ def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancel command"""
+    await update.message.reply_text("❌ Operation cancelled.")
+    return ConversationHandler.END
+
+
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
@@ -262,7 +269,7 @@ grade_conv = ConversationHandler(
             MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, add_comment)
         ],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 

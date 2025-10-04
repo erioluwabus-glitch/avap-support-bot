@@ -24,7 +24,7 @@ def register_all(application: Application):
         try:
             if hasattr(module, 'register_handlers'):
                 module.register_handlers(application)
-                logger.info(f"✅ Registered handlers from {module.__name__}")
+                logger.debug(f"✅ Registered handlers from {module.__name__}")
         except Exception as e:
             logger.error(f"❌ Failed to register handlers from {module.__name__}: {str(e)}")
             raise

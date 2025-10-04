@@ -22,6 +22,7 @@ from avap_bot.services.systeme_service import create_contact_and_tag, untag_or_r
 from avap_bot.utils.validators import validate_email, validate_phone
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +149,11 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         pending_data = {
             'name': name,
             'email': email,
-            'phone': phone,
-            'status': 'Pending'
+            'phone': phone
+            # Note: status column may not exist in database, using default value
         }
         
-        result = await add_pending_verification(pending_data)
+        result = add_pending_verification(pending_data)
         if not result:
             raise Exception("Failed to add pending verification to Supabase")
         
@@ -226,7 +227,7 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pending_id = query.data.split("_")[1]
         
         # Promote to verified (telegram_id will be None for admin verification until student does /start)
-        verified_data = await promote_pending_to_verified(pending_id=pending_id, telegram_id=None)
+        verified_data = promote_pending_to_verified(pending_id=pending_id, telegram_id=None)
         if not verified_data:
             await query.edit_message_text("❌ Failed to verify student.")
             return
@@ -413,6 +414,12 @@ def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle cancel command"""
+    await update.message.reply_text("❌ Operation cancelled.")
+    return ConversationHandler.END
+
+
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
@@ -427,7 +434,7 @@ add_student_conv = ConversationHandler(
         ADD_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
         ADD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
@@ -437,7 +444,7 @@ remove_student_conv = ConversationHandler(
         REMOVE_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_identifier)],
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],
     },
-    fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 

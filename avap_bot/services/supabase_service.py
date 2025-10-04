@@ -102,7 +102,29 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
     """Insert a row into pending_verifications"""
     client = get_supabase()
     try:
-        res = client.table("pending_verifications").insert(data).execute()
+        # First try with status column
+        insert_data = {
+            'name': data.get('name'),
+            'email': data.get('email'),
+            'phone': data.get('phone'),
+            'status': data.get('status', 'Pending')
+        }
+        
+        try:
+            res = client.table("pending_verifications").insert(insert_data).execute()
+        except Exception as status_error:
+            # If status column doesn't exist, try without it
+            if "status" in str(status_error) and "column" in str(status_error).lower():
+                logger.warning("Status column not found, inserting without status field")
+                insert_data_without_status = {
+                    'name': data.get('name'),
+                    'email': data.get('email'),
+                    'phone': data.get('phone')
+                }
+                res = client.table("pending_verifications").insert(insert_data_without_status).execute()
+            else:
+                raise status_error
+        
         if res.data:
             logger.info(f"Added pending verification: {data.get('name', 'Unknown')}")
             return res.data[0]

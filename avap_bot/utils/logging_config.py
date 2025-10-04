@@ -34,10 +34,15 @@ def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> None:
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
     
-    # Set specific logger levels
+    # Set specific logger levels to reduce noise
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("telegram").setLevel(logging.INFO)
+    logging.getLogger("telegram").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    
+    # Reduce keep-alive logging noise
+    logging.getLogger("avap_bot.bot").setLevel(logging.INFO)
     
     logging.info("Logging configured successfully")
 

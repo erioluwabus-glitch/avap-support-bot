@@ -22,6 +22,7 @@ from avap_bot.services.sheets_service import (
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
+from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
 
@@ -670,7 +671,7 @@ start_conv = ConversationHandler(
     states={
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
@@ -681,7 +682,7 @@ submit_conv = ConversationHandler(
         SUBMIT_TYPE: [CallbackQueryHandler(submit_type, pattern="^type_|^cancel$")],
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
@@ -691,7 +692,7 @@ share_win_conv = ConversationHandler(
         SHARE_WIN_TYPE: [CallbackQueryHandler(share_win_type, pattern="^win_|^cancel$")],
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
@@ -700,7 +701,7 @@ ask_conv = ConversationHandler(
     states={
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
-    fallbacks=[CommandHandler("cancel", cancel_handler)],
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
