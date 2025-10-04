@@ -24,6 +24,9 @@ from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
+# Get cancel fallback handler, but handle case where it might be None
+_cancel_fallback_handler = get_cancel_fallback_handler()
+
 logger = logging.getLogger(__name__)
 
 # Conversation states
@@ -427,6 +430,7 @@ def _is_admin(update: Update) -> bool:
 
 
 # Conversation handlers
+fallbacks = [get_cancel_fallback_handler()] if get_cancel_fallback_handler() else []
 add_student_conv = ConversationHandler(
     entry_points=[CommandHandler("addstudent", add_student_start, filters=filters.Chat(chat_id=VERIFICATION_GROUP_ID))],
     states={
@@ -434,7 +438,7 @@ add_student_conv = ConversationHandler(
         ADD_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_phone)],
         ADD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
     },
-    fallbacks=[get_cancel_fallback_handler()],
+    fallbacks=fallbacks,
     per_message=False
 )
 
@@ -444,7 +448,7 @@ remove_student_conv = ConversationHandler(
         REMOVE_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, remove_student_identifier)],
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],
     },
-    fallbacks=[get_cancel_fallback_handler()],
+    fallbacks=fallbacks,
     per_message=False
 )
 

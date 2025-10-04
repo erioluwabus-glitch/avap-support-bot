@@ -13,7 +13,13 @@ from telegram import Update
 from telegram.ext import ContextTypes, CommandHandler, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.utils.cancel_registry import CancelRegistry
+# Defensive import for cancel_registry to handle import timing issues
+try:
+    from avap_bot.utils.cancel_registry import CancelRegistry
+except ImportError:
+    # Fallback for cases where module isn't available during import
+    CancelRegistry = None
+
 from avap_bot.services.notifier import notify_admin_telegram
 
 logger = logging.getLogger(__name__)
@@ -79,8 +85,8 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Get cancel registry from bot data
     cancel_registry: Optional[CancelRegistry] = context.bot_data.get('cancel_registry')
-    if not cancel_registry:
-        logger.error("CancelRegistry not found in bot_data")
+    if not cancel_registry or CancelRegistry is None:
+        logger.error("CancelRegistry not available or not initialized")
         await update.message.reply_text(
             "❌ Cancel system not available. Please try again later."
         )
@@ -209,7 +215,7 @@ async def conversation_cancel_fallback(update: Update, context: ContextTypes.DEF
     
     # Get cancel registry from bot data
     cancel_registry: Optional[CancelRegistry] = context.bot_data.get('cancel_registry')
-    if cancel_registry:
+    if cancel_registry and CancelRegistry is not None:
         try:
             # Request cancellation for the user
             await cancel_registry.request_cancel(user_id)
@@ -233,10 +239,15 @@ async def conversation_cancel_fallback(update: Update, context: ContextTypes.DEF
 def register_cancel_handlers(application) -> None:
     """
     Register cancel command handlers with the application.
-    
+
     Args:
         application: Telegram Application instance
     """
+    # Only register handlers if CancelRegistry is available
+    if CancelRegistry is None:
+        logger.warning("CancelRegistry not available, skipping cancel handler registration")
+        return
+
     # Register global cancel handler
     application.add_handler(CommandHandler("cancel", cancel_handler))
     logger.info("Registered cancel command handlers")
@@ -245,10 +256,13 @@ def register_cancel_handlers(application) -> None:
 def get_cancel_fallback_handler() -> CommandHandler:
     """
     Get a cancel fallback handler for use in ConversationHandler instances.
-    
+
     Returns:
-        CommandHandler for /cancel in conversations
+        CommandHandler for /cancel in conversations, or None if CancelRegistry unavailable
     """
+    if CancelRegistry is None:
+        logger.warning("CancelRegistry not available, returning None for cancel fallback handler")
+        return None
     return CommandHandler("cancel", conversation_cancel_fallback)
 
 
@@ -264,7 +278,7 @@ async def longop_test_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     # Get cancel registry
     cancel_registry: Optional[CancelRegistry] = context.bot_data.get('cancel_registry')
-    if not cancel_registry:
+    if not cancel_registry or CancelRegistry is None:
         await update.message.reply_text("❌ Cancel system not available.")
         return
     
@@ -275,8 +289,12 @@ async def longop_test_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
     
     try:
+        if CancelRegistry is None:
+            await update.message.reply_text("❌ Cancel system not available.")
+            return
+
         from avap_bot.utils.cancel_helpers import CancellableOperation
-        
+
         async with CancellableOperation(cancel_registry, user_id, "longop_test") as op:
             for i in range(10):
                 await op.checkpoint()  # Check for cancellation
