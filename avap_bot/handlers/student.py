@@ -1104,7 +1104,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             # Continue with normal flow if auto-answer fails
 
         # Store question in database for future FAQ matching
-                await run_blocking(add_question, user.id, username, question_text, file_id=None, file_name=None, answer=ai_answer, status='answered')
+        await run_blocking(add_question, user.id, username, question_text, file_id=None, file_name=None, answer=ai_answer, status='answered')
 
         # Prepare question data for forwarding to admins
         question_data = {
