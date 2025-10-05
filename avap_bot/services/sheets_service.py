@@ -114,7 +114,7 @@ def _ensure_worksheets():
                 logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
 
 
-def _csv_fallback(filename: str, data: List[List[str]]):
+def _csv_fallback(filename: str, data: List[List[str]], headers: List[str] = None):
     """Fallback to CSV when Sheets is not available"""
     # IMPORTANT: /tmp/ is ephemeral on many hosting platforms like Render.
     # For persistent backups, set the STABLE_BACKUP_DIR environment variable.
@@ -123,8 +123,15 @@ def _csv_fallback(filename: str, data: List[List[str]]):
 
     filepath = os.path.join(CSV_DIR, filename)
     try:
+        file_exists = os.path.exists(filepath)
+
         with open(filepath, 'a', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
+
+            # Write headers if file doesn't exist and headers provided
+            if not file_exists and headers:
+                writer.writerow(headers)
+
             writer.writerow(data)
         logger.info("CSV fallback: wrote to %s", filepath)
         return True
@@ -219,7 +226,7 @@ def append_submission(payload: Dict[str, Any]) -> bool:
             payload.get("status", "Pending"),
             "",
             ""
-        ])
+        ], ["submission_id", "username", "telegram_id", "module", "type", "file_id", "file_name", "text_content", "submitted_at", "status", "graded_at", "grade"])
 
 
 def update_submission_status(submission_id: str, status: str, score: Optional[int] = None) -> bool:
@@ -278,7 +285,7 @@ def append_win(payload: Dict[str, Any]) -> bool:
             payload.get("file_name", ""),
             payload.get("text_content", ""),
             payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
-        ])
+        ], ["win_id", "username", "telegram_id", "type", "file_id", "file_name", "text_content", "shared_at"])
 
 
 def append_question(payload: Dict[str, Any]) -> bool:
@@ -316,7 +323,7 @@ def append_question(payload: Dict[str, Any]) -> bool:
             payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
             payload.get("status", "Pending"),
             ""
-        ])
+        ], ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
 
 
 def get_student_submissions(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:

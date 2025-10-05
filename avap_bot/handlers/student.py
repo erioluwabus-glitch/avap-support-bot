@@ -438,22 +438,28 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Forward to support group with engaging comments
         if SUPPORT_GROUP_ID:
-            # Generate engaging comment based on win type
+            # Generate deeply inspiring and humane comments based on win type
             win_comments = {
                 "text": [
-                    f"🎉 Amazing progress from @{username}! This {win_type} achievement shows real dedication! 🌟",
-                    f"💪 @{username} is crushing it with this {win_type} win! Keep up the fantastic work! 🚀",
-                    f"🏆 What an incredible {win_type} accomplishment by @{username}! This community is lucky to have such motivated learners! ⭐"
+                    f"💖 **Heartfelt Congratulations @{username}!** Your {win_type} achievement touches our hearts and reminds us all that perseverance creates miracles. Every word you share carries the weight of your incredible journey! 🌟✨",
+                    f"🌈 **@{username}, you are a true inspiration!** This {win_type} victory shows the beautiful transformation that happens when passion meets persistence. Your story will light the path for countless others! 💫❤️",
+                    f"🎯 **@{username}, your dedication moves us deeply!** Every {win_type} accomplishment like yours proves that dreams become reality through consistent effort. You make this community stronger and more beautiful! 🌹💪",
+                    f"🔥 **@{username}, you are absolutely incredible!** This {win_type} achievement isn't just a win - it's a testament to your beautiful spirit and unshakeable determination. We are so proud to witness your growth! ⭐🎉",
+                    f"💝 **@{username}, your courage inspires us all!** This {win_type} milestone represents so much more than success - it shows the power of believing in yourself. Thank you for sharing your light with us! 🌟💖"
                 ],
                 "audio": [
-                    f"🎵 @{username} shared an inspiring {win_type} story! Let's listen and get motivated! 🔥",
-                    f"🎤 Hear @{username}'s amazing {win_type} journey - pure motivation! 💪",
-                    f"🔊 @{username} is sharing their {win_type} success through audio! This is going to inspire everyone! 🌟"
+                    f"🎵 **@{username}, your voice carries magic!** This {win_type} audio story speaks directly to our souls, reminding us that every journey has its own beautiful melody. Your courage to share touches us deeply! 🎤💖",
+                    f"🎶 **@{username}, you have a gift that moves hearts!** This {win_type} audio achievement isn't just heard - it's felt in the deepest parts of our spirits. Thank you for this beautiful moment of inspiration! 🌟🎵",
+                    f"🎧 **@{username}, your story resonates with pure authenticity!** This {win_type} audio share creates ripples of inspiration that will touch lives far beyond this moment. You are making a difference! 💫🎤",
+                    f"🎵 **@{username}, your voice is a beacon of hope!** This {win_type} achievement shows us that vulnerability and strength can coexist beautifully. Your courage inspires us all to share our own stories! 💖🌟",
+                    f"🎤 **@{username}, you are creating magic with every word!** This {win_type} audio accomplishment reminds us that our stories have the power to heal, inspire, and transform. Thank you for your beautiful authenticity! 🌈💝"
                 ],
                 "video": [
-                    f"🎬 @{username} created an amazing {win_type} showcase! This visual story is incredible! 👏",
-                    f"📹 @{username} is sharing their {win_type} journey through video - what an inspiration! 🌟",
-                    f"🎥 Check out @{username}'s {win_type} achievement in this fantastic video! Pure motivation! 💫"
+                    f"🎬 **@{username}, your visual story moves us to tears!** This {win_type} video achievement captures the raw beauty of human perseverance and growth. You are a living inspiration! 💖✨",
+                    f"📹 **@{username}, you paint pictures with your spirit!** This {win_type} video showcases not just an accomplishment, but the beautiful journey of a soul committed to growth. We are deeply moved! 🌟🎥",
+                    f"🎥 **@{username}, your courage shines through every frame!** This {win_type} video achievement reminds us that true success is measured in courage, not just results. You inspire us profoundly! 💫💖",
+                    f"🎬 **@{username}, you are a masterpiece in motion!** This {win_type} video captures the essence of what makes us human - the courage to grow, learn, and share our authentic selves. Thank you! 🌹🎵",
+                    f"📹 **@{username}, your story touches the deepest parts of our hearts!** This {win_type} video achievement shows us that every challenge overcome becomes a gift to others. You are changing lives! 💝🌟"
                 ]
             }
 
@@ -710,8 +716,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
 
-        # Forward to questions group
-        if QUESTIONS_GROUP_ID:
+        # Forward to assignment group (where admins monitor)
+        if ASSIGNMENT_GROUP_ID:
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
@@ -721,9 +727,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 if question_text == "Voice question":
                     try:
                         # Forward the voice message to preserve the original
-                        await update.message.forward(QUESTIONS_GROUP_ID)
+                        await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
-                        await context.bot.send_message(QUESTIONS_GROUP_ID,
+                        await context.bot.send_message(ASSIGNMENT_GROUP_ID,
                             f"❓ **New Voice Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -733,7 +739,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                     except Exception as e:
                         # Fallback to sending as voice if forwarding fails
-                        await context.bot.send_voice(QUESTIONS_GROUP_ID, file_id,
+                        await context.bot.send_voice(ASSIGNMENT_GROUP_ID, file_id,
                             caption=f"❓ **New Voice Question**\n\n"
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
@@ -743,9 +749,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 elif question_text == "Video question":
                     try:
                         # Forward the video message to preserve the original
-                        await update.message.forward(QUESTIONS_GROUP_ID)
+                        await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
-                        await context.bot.send_message(QUESTIONS_GROUP_ID,
+                        await context.bot.send_message(ASSIGNMENT_GROUP_ID,
                             f"❓ **New Video Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -755,7 +761,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                     except Exception as e:
                         # Fallback to sending as video if forwarding fails
-                        await context.bot.send_video(QUESTIONS_GROUP_ID, file_id,
+                        await context.bot.send_video(ASSIGNMENT_GROUP_ID, file_id,
                             caption=f"❓ **New Video Question**\n\n"
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
@@ -764,7 +770,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                 else:
                     # Send as document for other file types with inline keyboard
-                    await context.bot.send_document(QUESTIONS_GROUP_ID, file_id,
+                    await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id,
                         caption=f"❓ **New Question**\n\n"
                                f"Student: @{username}\n"
                                f"Telegram ID: {user_id}\n"
@@ -774,7 +780,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     )
             else:
                 # Text question - send as message
-                await context.bot.send_message(QUESTIONS_GROUP_ID,
+                await context.bot.send_message(ASSIGNMENT_GROUP_ID,
                     f"❓ **New Question**\n\n"
                     f"Student: @{username}\n"
                     f"Telegram ID: {user_id}\n"
@@ -942,24 +948,24 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
 
-        # Forward to questions group
-        if QUESTIONS_GROUP_ID:
+        # Forward to assignment group (where admins monitor)
+        if ASSIGNMENT_GROUP_ID:
             forward_text = (
                 f"❓ **New Question from Support Group**\n\n"
                 f"Student: @{username}\n"
                 f"Telegram ID: {user.id}\n"
                 f"Question: {question_text}\n"
             )
-            
+
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user.id}_{username}")
             ]])
-            
-            # Send to questions group for admin to answer
+
+            # Send to assignment group for admin to answer
             await context.bot.send_message(
-                QUESTIONS_GROUP_ID, 
-                forward_text, 
-                parse_mode=ParseMode.MARKDOWN, 
+                ASSIGNMENT_GROUP_ID,
+                forward_text,
+                parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard
             )
         
