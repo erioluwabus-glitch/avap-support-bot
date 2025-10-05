@@ -127,6 +127,8 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
     """Insert a row into pending_verifications"""
     client = get_supabase()
     try:
+        logger.debug(f"Attempting to add pending verification for: {data.get('email', 'unknown')}")
+
         # First try with status column
         insert_data = {
             'name': data.get('name'),
@@ -134,17 +136,22 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
             'phone': data.get('phone'),
             'status': data.get('status', 'Pending')
         }
-        
+
+        logger.debug(f"Insert data: {insert_data}")
+
         try:
             res = client.table("pending_verifications").insert(insert_data).execute()
             # Handle different response formats
-            data = getattr(res, 'data', res) if res else None
-            if data:
-                logger.info(f"Added pending verification: {data.get('name', 'Unknown')}")
-                return data
+            response_data = _get_response_data(res)
+            if response_data:
+                logger.info(f"Added pending verification: {response_data[0].get('name', 'Unknown') if response_data else 'Unknown'}")
+                return response_data[0] if response_data else None
             else:
+                logger.error("No data returned from insert operation")
                 raise Exception("No data returned from insert")
+
         except Exception as status_error:
+            logger.warning(f"Status column error: {status_error}")
             # If status column doesn't exist, try without it
             if "status" in str(status_error) and "column" in str(status_error).lower():
                 logger.warning("Status column not found, inserting without status field")
@@ -155,17 +162,28 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
                 }
                 res = client.table("pending_verifications").insert(insert_data_without_status).execute()
                 if res:
-                    data = _get_response_data(res)
-                    if data:
-                        logger.info(f"Added pending verification: {data.get('name', 'Unknown')}")
-                        return data[0] if data else None
+                    response_data = _get_response_data(res)
+                    if response_data:
+                        logger.info(f"Added pending verification: {response_data[0].get('name', 'Unknown')}")
+                        return response_data[0] if response_data else None
                     else:
+                        logger.error("No data returned from insert operation without status")
                         raise Exception("No data returned from insert")
                 else:
+                    logger.error("Insert operation returned no response")
                     raise status_error
-        
+            else:
+                # Re-raise the original error if it's not a column issue
+                raise status_error
+
     except Exception as e:
         logger.error(f"❌ Error adding pending verification: {str(e)}")
+        logger.error(f"Data that failed to insert: {data}")
+        logger.error("Possible causes:")
+        logger.error("1. Connection issues with Supabase")
+        logger.error("2. Table 'pending_verifications' doesn't exist")
+        logger.error("3. Required columns (name, email, phone) don't exist")
+        logger.error("4. Invalid data types or constraints")
         raise
 
 

@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 def handle_sigterm(signum, frame):
     """Handle SIGTERM signal for graceful shutdown."""
     logger.info("SIGTERM received — shutting down gracefully")
-    sys.exit(0)
+    # Don't call sys.exit() here - let FastAPI shutdown handle cleanup
+    # The signal will be handled by the event loop
 
 # Register SIGTERM handler
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -392,35 +393,48 @@ async def background_keepalive():
     import httpx
     import socket
 
-    while True:
-        try:
-            # Try multiple approaches to keep the service alive
-            tasks = []
-
-            # 1. HTTP ping to our own endpoints (if server is running locally)
+    try:
+        while True:
             try:
-                tasks.append(
-                    httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
-                )
-            except:
-                pass
+                # Try multiple approaches to keep the service alive
+                tasks = []
 
-            # 2. DNS resolution to generate network activity
-            try:
-                socket.gethostbyname('google.com')
-            except:
-                pass
+                # 1. HTTP ping to our own endpoints (if server is running locally)
+                try:
+                    tasks.append(
+                        httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
+                    )
+                except:
+                    pass
 
-            # 3. Simple memory allocation to show CPU activity
-            _ = [i for i in range(1000)]
+                # 2. DNS resolution to generate network activity
+                try:
+                    socket.gethostbyname('google.com')
+                except:
+                    pass
 
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
+                # 3. Simple memory allocation to show CPU activity
+                _ = [i for i in range(1000)]
 
-        except Exception as e:
-            logger.debug(f"Background keepalive error: {e}")
-        finally:
-            await asyncio.sleep(2)  # Ping every 2 seconds for ultra-aggressive keepalive
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+
+            except asyncio.CancelledError:
+                logger.info("Background keepalive task cancelled - shutting down gracefully")
+                break
+            except Exception as e:
+                logger.debug(f"Background keepalive error: {e}")
+            finally:
+                try:
+                    await asyncio.sleep(2)  # Ping every 2 seconds for ultra-aggressive keepalive
+                except asyncio.CancelledError:
+                    logger.info("Background keepalive sleep cancelled - shutting down")
+                    break
+
+    except asyncio.CancelledError:
+        logger.info("Background keepalive task cancelled during startup - shutting down")
+    except Exception as e:
+        logger.error(f"Unexpected error in background keepalive: {e}")
 
 
 # --- FastAPI event handlers ---
@@ -458,16 +472,32 @@ async def on_shutdown():
 
     # Stop the job queue first
     try:
-        bot_app.job_queue.stop()
+        await bot_app.job_queue.stop()
         logger.info("Job queue stopped successfully")
+    except asyncio.CancelledError:
+        logger.info("Job queue stop cancelled during shutdown")
     except Exception as e:
         logger.warning(f"Error stopping job queue: {e}")
 
     # Enhanced memory monitoring to prevent Render restarts - cleanup resources
-    await cleanup_resources()
+    try:
+        await cleanup_resources()
+    except asyncio.CancelledError:
+        logger.info("Resource cleanup cancelled during shutdown")
+    except Exception as e:
+        logger.warning(f"Error during resource cleanup: {e}")
 
+    # Delete webhook if configured
     if os.getenv("WEBHOOK_URL"):
-        await bot_app.bot.delete_webhook()
+        try:
+            await bot_app.bot.delete_webhook()
+            logger.info("Webhook deleted successfully")
+        except asyncio.CancelledError:
+            logger.info("Webhook deletion cancelled during shutdown")
+        except Exception as e:
+            logger.warning(f"Error deleting webhook: {e}")
+
+    logger.info("Shutdown complete")
 
 if __name__ == "__main__":
     # This block is for local development with polling

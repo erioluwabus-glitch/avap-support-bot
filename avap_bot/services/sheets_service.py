@@ -89,16 +89,47 @@ def _get_sheets_client():
                 # Try base64 decode first
                 try:
                     creds_json = base64.b64decode(GOOGLE_CREDENTIALS_JSON).decode('utf-8')
-                except:
+                    logger.debug("Successfully decoded base64 credentials")
+                except Exception as b64_error:
+                    logger.debug(f"Base64 decode failed: {b64_error}, trying as raw JSON")
                     # If not base64, use as raw JSON
                     creds_json = GOOGLE_CREDENTIALS_JSON
 
-                creds_dict = json.loads(creds_json)
-                creds = Credentials.from_service_account_info(creds_dict)
+                # Validate JSON structure before parsing
+                try:
+                    creds_dict = json.loads(creds_json)
+                    logger.debug("JSON parsed successfully")
+
+                    # Check if required fields exist
+                    if not creds_dict.get('type') == 'service_account':
+                        logger.error("Credentials JSON does not appear to be a service account")
+                        logger.error("Expected 'type': 'service_account'")
+                        raise ValueError("Invalid credentials type")
+
+                    if not creds_dict.get('project_id'):
+                        logger.error("Service account credentials missing project_id")
+                        raise ValueError("Missing project_id in credentials")
+
+                    if not creds_dict.get('private_key'):
+                        logger.error("Service account credentials missing private_key")
+                        raise ValueError("Missing private_key in credentials")
+
+                except json.JSONDecodeError as json_error:
+                    logger.error(f"Invalid JSON in GOOGLE_CREDENTIALS_JSON: {json_error}")
+                    logger.error("Please ensure GOOGLE_CREDENTIALS_JSON contains valid JSON")
+                    raise
+
+                # Create credentials with proper scopes for Google Sheets
+                scopes = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+                logger.debug(f"Creating credentials with scopes: {scopes}")
+
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 logger.info("Google credentials loaded successfully")
+
             except Exception as e:
-                logger.error("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
-                logger.error("Make sure GOOGLE_CREDENTIALS_JSON contains valid JSON (base64 encoded or raw)")
+                logger.error(f"Failed to parse GOOGLE_CREDENTIALS_JSON: {e}")
+                logger.error("Make sure GOOGLE_CREDENTIALS_JSON contains valid service account JSON")
+                logger.error("Required format: base64-encoded JSON with type='service_account', project_id, and private_key")
                 logger.error("CSV fallback active - all data stored locally")
                 os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
                 return None  # Return None to indicate no client available
@@ -116,8 +147,23 @@ def _get_sheets_client():
         try:
             _sheets_client = gspread.authorize(creds)
             logger.info("Google Sheets client initialized successfully")
+
+            # Test the connection by trying to access the spreadsheet
+            if GOOGLE_SHEET_ID:
+                try:
+                    test_spreadsheet = _sheets_client.open_by_key(GOOGLE_SHEET_ID)
+                    logger.info(f"Successfully connected to spreadsheet: {test_spreadsheet.title}")
+                except Exception as test_error:
+                    logger.warning(f"Could not access spreadsheet {GOOGLE_SHEET_ID}: {test_error}")
+                    logger.warning("This may be due to insufficient permissions or incorrect spreadsheet ID")
+
         except Exception as e:
-            logger.error("Failed to authenticate with Google Sheets: %s", e)
+            logger.error(f"Failed to authenticate with Google Sheets: {e}")
+            logger.error("Common causes:")
+            logger.error("1. Service account doesn't have proper permissions for the spreadsheet")
+            logger.error("2. Spreadsheet ID is incorrect")
+            logger.error("3. Service account key has expired or been revoked")
+            logger.error("4. Google Sheets API is not enabled in the project")
             logger.error("CSV fallback active - all data stored locally")
             os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
             return None  # Return None to indicate no client available
