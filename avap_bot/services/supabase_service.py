@@ -437,7 +437,6 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         raise
 
 
-    """Get all questions for a student"""
     client = get_supabase()
     try:
         res = client.table("questions").select("*").eq("telegram_id", telegram_id)
@@ -448,7 +447,6 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         return []
 
 
-    """Update question with answer"""
     client = get_supabase()
     try:
         update_data = {
@@ -464,7 +462,6 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         return False
 
 
-    """Get all FAQs for AI matching"""
     client = get_supabase()
     try:
         res = client.table("faqs").select("*")
@@ -487,7 +484,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         return []
 
 
-    """Add a new FAQ"""
     client = get_supabase()
     try:
         payload = {
@@ -503,7 +499,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         raise
 
 
-    """Get tip for specific day of week"""
     client = get_supabase()
     try:
         res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1)
@@ -514,7 +509,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         return None
 
 
-    """Add a manual tip for specific day"""
     client = get_supabase()
     try:
         payload = {
@@ -531,7 +525,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         raise
 
 
-    """Get students with 3+ assignments and 3+ wins"""
     client = get_supabase()
     
     # Get all verified users
@@ -551,7 +544,7 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         # Count assignments
         assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id)
         assignment_count = assignments_res.count or 0
-
+        
         # Count wins
         wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id)
         wins_count = wins_res.count or 0
@@ -569,7 +562,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
     return top_students
 
 
-    """Get all verified user telegram IDs for broadcasting"""
     client = get_supabase()
     try:
         res = client.table("verified_users").select("telegram_id").eq("status", "verified")
@@ -580,7 +572,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         return []
 
 
-    """Update user badge"""
     client = get_supabase()
     try:
         res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id)
@@ -591,7 +582,6 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         return False
 
 
-def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
     """Get assignment by ID"""
     client = get_supabase()
     try:
@@ -605,11 +595,170 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def add_broadcast_record(broadcast_type: str, content: str, content_type: str, admin_id: int,
+                        admin_username: str, file_name: str = None) -> Dict[str, Any]:
+    """Add a broadcast record to history"""
+    client = get_supabase()
+    try:
+        payload = {
+            "broadcast_type": broadcast_type,
+            "content": content,
+            "content_type": content_type,
+            "admin_id": admin_id,
+            "admin_username": admin_username,
+            "file_name": file_name
+        }
+        res = client.table("broadcast_history").insert(payload)
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase add_broadcast_record error: %s", e)
+        raise
+
+
+def get_broadcast_history(limit: int = 50) -> List[Dict[str, Any]]:
+    """Get recent broadcast history"""
+    client = get_supabase()
+    try:
+        res = client.table("broadcast_history").select("*").order("sent_at", desc=True).limit(limit)
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_broadcast_history error: %s", e)
+        return []
+
+
+def update_broadcast_stats(broadcast_id: str, sent_to_count: int, failed_count: int, message_ids: List[Dict]) -> bool:
+    """Update broadcast statistics"""
+    client = get_supabase()
+    try:
+        update_data = {
+            "sent_to_count": sent_to_count,
+            "failed_count": failed_count,
+            "message_ids": message_ids
+        }
+        res = client.table("broadcast_history").update(update_data).eq("id", broadcast_id)
+        data = _get_response_data(res)
+        return bool(data)
+    except Exception as e:
+        logger.exception("Supabase update_broadcast_stats error: %s", e)
+        return False
+
+
+def delete_broadcast_messages(broadcast_id: str, bot) -> bool:
+    """Delete all messages from a broadcast"""
+    client = get_supabase()
+    try:
+        # Get broadcast record
+        res = client.table("broadcast_history").select("*").eq("id", broadcast_id)
+        data = _get_response_data(res)
+        if not data:
+            return False
+
+        broadcast = data[0]
+        message_ids = broadcast.get("message_ids", [])
+
+        # Delete each message
+        deleted_count = 0
+        for msg_info in message_ids:
+            user_id = msg_info.get("user_id")
+            message_id = msg_info.get("message_id")
+            if user_id and message_id:
+                try:
+                    bot.delete_message(chat_id=user_id, message_id=message_id)
+                    deleted_count += 1
+                except Exception as e:
+                    logger.exception(f"Failed to delete message {message_id} for user {user_id}: {e}")
+
+        # Update broadcast record to mark as deleted
+        client.table("broadcast_history").update({"message_ids": []}).eq("id", broadcast_id)
+
+        logger.info(f"Deleted {deleted_count} messages from broadcast {broadcast_id}")
+        return True
+
+    except Exception as e:
+        logger.exception("Supabase delete_broadcast_messages error: %s", e)
+        return False
+
+
+def update_assignment_grade(submission_id: int, grade: int, comment: Optional[str] = None) -> bool:
+    client = get_supabase()
+    try:
+        update_data = {
+            "grade": grade,
+            "status": "graded",
+            "graded_at": datetime.now(timezone.utc).isoformat()
+        }
+        if comment:
+            update_data["comment"] = comment
+
+        res = client.table("assignments").update(update_data).eq("id", submission_id)
+        data = _get_response_data(res)
+        return bool(data)
+    except Exception as e:
+        logger.exception("Supabase update_assignment_grade error: %s", e)
+        return False
+
+
+def update_question_answer(question_id: int, answer: str) -> bool:
+    client = get_supabase()
+    try:
+        update_data = {
+            "answer": answer,
+            "status": "answered",
+            "answered_at": datetime.now(timezone.utc).isoformat()
+        }
+        res = client.table("questions").update(update_data).eq("id", question_id)
+        data = _get_response_data(res)
+        return bool(data)
+    except Exception as e:
+        logger.exception("Supabase update_question_answer error: %s", e)
+        return False
+
+
+def get_faqs() -> List[Dict[str, Any]]:
+    client = get_supabase()
+    try:
+        res = client.table("faqs").select("*")
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_faqs error: %s", e)
+        return []
+
+
+def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
+    client = get_supabase()
+    try:
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1)
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase get_tip_for_day error: %s", e)
+        return None
+
+
+def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
+    client = get_supabase()
+    try:
+        payload = {
+            "content": content,
+            "day_of_week": day_of_week,
+            "tip_type": "manual",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        res = client.table("tips").insert(payload)
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase add_manual_tip error: %s", e)
+        raise
 
 
 
 
-    """Add a new assignment submission"""
+
+
 
     client = get_supabase()
 
@@ -650,7 +799,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all assignments for a student"""
 
     client = get_supabase()
 
@@ -671,7 +819,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Update assignment with grade and comments"""
 
     client = get_supabase()
 
@@ -708,7 +855,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a new win"""
 
     client = get_supabase()
 
@@ -745,7 +891,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all wins for a student"""
 
     client = get_supabase()
 
@@ -766,7 +911,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all questions for a student"""
 
     client = get_supabase()
 
@@ -787,7 +931,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Update question with answer"""
 
     client = get_supabase()
 
@@ -818,7 +961,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all FAQs for AI matching"""
 
     client = get_supabase()
 
@@ -839,7 +981,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a new FAQ"""
 
     client = get_supabase()
 
@@ -870,7 +1011,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get tip for specific day of week"""
 
     client = get_supabase()
 
@@ -891,7 +1031,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a manual tip for specific day"""
 
     client = get_supabase()
 
@@ -924,7 +1063,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get students with 3+ assignments and 3+ wins"""
 
     client = get_supabase()
 
@@ -998,7 +1136,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all verified user telegram IDs for broadcasting"""
 
     client = get_supabase()
 
@@ -1019,7 +1156,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Update user badge"""
 
     client = get_supabase()
 
@@ -1039,7 +1175,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
     """Get assignment by ID"""
 
@@ -1074,7 +1209,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a new assignment submission"""
 
     client = get_supabase()
 
@@ -1115,7 +1249,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all assignments for a student"""
 
     client = get_supabase()
 
@@ -1136,7 +1269,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Update assignment with grade and comments"""
 
     client = get_supabase()
 
@@ -1173,7 +1305,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a new win"""
 
     client = get_supabase()
 
@@ -1210,7 +1341,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all wins for a student"""
 
     client = get_supabase()
 
@@ -1249,7 +1379,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all FAQs for AI matching"""
 
     client = get_supabase()
 
@@ -1270,7 +1399,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a new FAQ"""
 
     client = get_supabase()
 
@@ -1301,7 +1429,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get tip for specific day of week"""
 
     client = get_supabase()
 
@@ -1322,7 +1449,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Add a manual tip for specific day"""
 
     client = get_supabase()
 
@@ -1355,7 +1481,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get students with 3+ assignments and 3+ wins"""
 
     client = get_supabase()
 
@@ -1429,7 +1554,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Get all verified user telegram IDs for broadcasting"""
 
     client = get_supabase()
 
@@ -1450,7 +1574,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-    """Update user badge"""
 
     client = get_supabase()
 
@@ -1470,7 +1593,6 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
 
 
-def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
     """Get assignment by ID"""
 
@@ -1487,44 +1609,3 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
         logger.exception("Supabase get_assignment_by_id error: %s", e)
 
         return None
-
-def add_broadcast_message(broadcast_type: str, content: str, admin_id: int) -> Dict[str, Any]:
-    """Add a broadcast message record for deletion tracking"""
-    client = get_supabase()
-    try:
-        payload = {
-            "broadcast_type": broadcast_type,
-            "content": content,
-            "admin_id": admin_id,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        res = client.table("broadcast_messages").insert(payload)
-        data = _get_response_data(res)
-        return data[0] if data else None
-    except Exception as e:
-        logger.exception("Supabase add_broadcast_message error: %s", e)
-        raise
-
-
-def get_broadcast_messages() -> List[Dict[str, Any]]:
-    """Get all broadcast messages for admin management"""
-    client = get_supabase()
-    try:
-        res = client.table("broadcast_messages").select("*").order("created_at", desc=True)
-        data = _get_response_data(res)
-        return data or []
-    except Exception as e:
-        logger.exception("Supabase get_broadcast_messages error: %s", e)
-        return []
-
-
-def delete_broadcast_message(broadcast_id: int) -> bool:
-    """Delete a broadcast message record"""
-    client = get_supabase()
-    try:
-        res = client.table("broadcast_messages").delete().eq("id", broadcast_id)
-        data = _get_response_data(res)
-        return bool(data)
-    except Exception as e:
-        logger.exception("Supabase delete_broadcast_message error: %s", e)
-        return False
