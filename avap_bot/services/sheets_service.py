@@ -30,7 +30,18 @@ _spreadsheet = None
 # IMPORTANT: /tmp/ is ephemeral on many hosting platforms like Render.
 # For persistent backups, set the STABLE_BACKUP_DIR environment variable.
 CSV_DIR = os.getenv("STABLE_BACKUP_DIR", "/tmp/avap_sheets")
-os.makedirs(CSV_DIR, exist_ok=True)
+# Create directory if it doesn't exist
+try:
+    os.makedirs(CSV_DIR, exist_ok=True)
+except Exception as e:
+    logger.warning(f"Failed to create CSV directory {CSV_DIR}: {e}")
+    # Fallback to current directory
+    CSV_DIR = "./csv_backup"
+    try:
+        os.makedirs(CSV_DIR, exist_ok=True)
+    except Exception as e2:
+        logger.error(f"Failed to create fallback CSV directory {CSV_DIR}: {e2}")
+        CSV_DIR = "./"
 
 
 def _get_sheets_client():
@@ -159,8 +170,20 @@ def append_pending_verification(record: Dict[str, Any]) -> bool:
     """Append pending verification to Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # If spreadsheet is None, use CSV fallback
+        if spreadsheet is None:
+            logger.info("Using CSV fallback for pending verification")
+            return _csv_fallback("verification_pending.csv", [
+                record.get("name", ""),
+                record.get("email", ""),
+                record.get("phone", ""),
+                record.get("status", "Pending"),
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            ], ["name", "email", "phone", "status", "created_at"])
+
         sheet = spreadsheet.worksheet("verification")
-        
+
         row = [
             record.get("name", ""),
             record.get("email", ""),
@@ -168,11 +191,11 @@ def append_pending_verification(record: Dict[str, Any]) -> bool:
             record.get("status", "Pending"),
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         ]
-        
+
         sheet.append_row(row)
         logger.info("Added pending verification to sheets: %s", record.get('email'))
         return True
-        
+
     except Exception as e:
         logger.warning("Failed to append pending verification to sheets (using CSV fallback): %s", e)
         # CSV fallback
@@ -182,15 +205,34 @@ def append_pending_verification(record: Dict[str, Any]) -> bool:
             record.get("phone", ""),
             record.get("status", "Pending"),
             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-        ])
+        ], ["name", "email", "phone", "status", "created_at"])
 
 
 def append_submission(payload: Dict[str, Any]) -> bool:
     """Append assignment submission to Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # If spreadsheet is None, use CSV fallback
+        if spreadsheet is None:
+            logger.info("Using CSV fallback for submission")
+            return _csv_fallback("submissions.csv", [
+                payload.get("submission_id", ""),
+                payload.get("username", ""),
+                payload.get("telegram_id", ""),
+                payload.get("module", ""),
+                payload.get("type", ""),
+                payload.get("file_id", ""),
+                payload.get("file_name", ""),
+                payload.get("text_content", ""),
+                payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+                payload.get("status", "Pending"),
+                "",
+                ""
+            ], ["submission_id", "username", "telegram_id", "module", "type", "file_id", "file_name", "text_content", "submitted_at", "status", "graded_at", "grade"])
+
         sheet = spreadsheet.worksheet("submissions")
-        
+
         row = [
             payload.get("submission_id", ""),
             payload.get("username", ""),
@@ -205,11 +247,11 @@ def append_submission(payload: Dict[str, Any]) -> bool:
             "",  # Grade column
             ""   # Comments column
         ]
-        
+
         sheet.append_row(row)
         logger.info("Added submission to sheets: %s - Module %s", payload.get('username'), payload.get('module'))
         return True
-        
+
     except Exception as e:
         logger.warning("Failed to append submission to sheets (using CSV fallback): %s", e)
         # CSV fallback
@@ -256,6 +298,21 @@ def append_win(payload: Dict[str, Any]) -> bool:
     """Append win to Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # If spreadsheet is None, use CSV fallback
+        if spreadsheet is None:
+            logger.info("Using CSV fallback for win")
+            return _csv_fallback("wins.csv", [
+                payload.get("win_id", ""),
+                payload.get("username", ""),
+                payload.get("telegram_id", ""),
+                payload.get("type", ""),
+                payload.get("file_id", ""),
+                payload.get("file_name", ""),
+                payload.get("text_content", ""),
+                payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+            ], ["win_id", "username", "telegram_id", "type", "file_id", "file_name", "text_content", "shared_at"])
+
         sheet = spreadsheet.worksheet("wins")
 
         row = [
@@ -268,11 +325,11 @@ def append_win(payload: Dict[str, Any]) -> bool:
             payload.get("text_content", ""),
             payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
         ]
-        
+
         sheet.append_row(row)
         logger.info("Added win to sheets: %s - %s", payload.get('username'), payload.get('type'))
         return True
-        
+
     except Exception as e:
         logger.warning("Failed to append win to sheets (using CSV fallback): %s", e)
         # CSV fallback
@@ -292,8 +349,24 @@ def append_question(payload: Dict[str, Any]) -> bool:
     """Append question to Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # If spreadsheet is None, use CSV fallback
+        if spreadsheet is None:
+            logger.info("Using CSV fallback for question")
+            return _csv_fallback("questions.csv", [
+                payload.get("question_id", ""),
+                payload.get("username", ""),
+                payload.get("telegram_id", ""),
+                payload.get("question_text", ""),
+                payload.get("file_id", ""),
+                payload.get("file_name", ""),
+                payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+                payload.get("status", "Pending"),
+                ""
+            ], ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+
         sheet = spreadsheet.worksheet("questions")
-        
+
         row = [
             payload.get("question_id", ""),
             payload.get("username", ""),
@@ -305,11 +378,11 @@ def append_question(payload: Dict[str, Any]) -> bool:
             payload.get("status", "Pending"),
             ""  # Answer column
         ]
-        
+
         sheet.append_row(row)
         logger.info("Added question to sheets: %s", payload.get('username'))
         return True
-        
+
     except Exception as e:
         logger.warning("Failed to append question to sheets (using CSV fallback): %s", e)
         # CSV fallback
@@ -346,6 +419,7 @@ def get_student_submissions(username: str, module: Optional[str] = None) -> List
                 logger.warning("Failed to get submissions from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
+        logger.info("Using CSV fallback for submissions")
         return _get_student_submissions_csv(username, module)
 
     except Exception as e:
@@ -366,6 +440,15 @@ def _get_student_submissions_csv(username: str, module: Optional[str] = None) ->
         student_submissions = [record for record in records if record.get("username") == username]
         if module:
             student_submissions = [s for s in student_submissions if s.get("module") == module]
+
+        # Convert string values to appropriate types if needed
+        for submission in student_submissions:
+            # Convert telegram_id to int if it's a string
+            if 'telegram_id' in submission and submission['telegram_id']:
+                try:
+                    submission['telegram_id'] = int(submission['telegram_id'])
+                except (ValueError, TypeError):
+                    pass
 
         return student_submissions
 
@@ -666,6 +749,7 @@ def get_student_wins(username: str) -> List[Dict[str, Any]]:
                 logger.warning("Failed to get wins from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
+        logger.info("Using CSV fallback for wins")
         return _get_student_wins_csv(username)
 
     except Exception as e:
@@ -684,6 +768,15 @@ def _get_student_wins_csv(username: str) -> List[Dict[str, Any]]:
 
         # Filter by username
         student_wins = [record for record in records if record.get("username") == username]
+
+        # Convert string values to appropriate types if needed
+        for win in student_wins:
+            # Convert telegram_id to int if it's a string
+            if 'telegram_id' in win and win['telegram_id']:
+                try:
+                    win['telegram_id'] = int(win['telegram_id'])
+                except (ValueError, TypeError):
+                    pass
 
         return student_wins
 
@@ -710,6 +803,7 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                 logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
+        logger.info("Using CSV fallback for questions")
         return _get_student_questions_csv(username)
 
     except Exception as e:
@@ -729,6 +823,15 @@ def _get_student_questions_csv(username: str) -> List[Dict[str, Any]]:
         # Filter by username
         student_questions = [record for record in records if record.get("username") == username]
 
+        # Convert string values to appropriate types if needed
+        for question in student_questions:
+            # Convert telegram_id to int if it's a string
+            if 'telegram_id' in question and question['telegram_id']:
+                try:
+                    question['telegram_id'] = int(question['telegram_id'])
+                except (ValueError, TypeError):
+                    pass
+
         return student_questions
 
     except Exception as e:
@@ -740,8 +843,14 @@ def update_question_status(username: str, answer: str) -> bool:
     """Update question status and add answer in Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # If spreadsheet is None, we can't update (CSV fallback doesn't support updates)
+        if spreadsheet is None:
+            logger.warning("Cannot update question status in CSV fallback mode")
+            return False
+
         sheet = spreadsheet.worksheet("questions")
-        
+
         # Find row by username (get the most recent question)
         all_records = sheet.get_all_records()
         for i, record in enumerate(reversed(all_records), start=1):
@@ -752,10 +861,10 @@ def update_question_status(username: str, answer: str) -> bool:
                 sheet.update_cell(actual_row, 9, answer)  # Answer column
                 logger.info(f"Updated question status for {username} to Answered")
                 return True
-        
+
         logger.warning(f"No pending question found for {username}")
         return False
-        
+
     except Exception as e:
         logger.exception("Failed to update question status: %s", e)
         return False

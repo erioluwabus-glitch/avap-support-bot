@@ -471,6 +471,17 @@ def get_faqs() -> List[Dict[str, Any]]:
         return []
 
 
+def get_answered_questions() -> List[Dict[str, Any]]:
+    """Get all answered questions"""
+    try:
+        client = get_supabase()
+        res = client.table("questions").select("*").not_("answer", "is", None).execute()
+        return res.data or []
+    except Exception as e:
+        logger.exception("Supabase get_answered_questions error: %s", e)
+        return []
+
+
 def add_faq(question: str, answer: str) -> Dict[str, Any]:
     """Add a new FAQ"""
     client = get_supabase()

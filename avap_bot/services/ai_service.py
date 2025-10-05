@@ -33,29 +33,64 @@ async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict
         faqs = get_faqs()
         if not faqs:
             return None
-        
+
         # Get sentence transformer model
         transformer = get_model()
-        
+
         # Encode question and FAQ questions
         question_embedding = transformer.encode([question])
         faq_questions = [faq['question'] for faq in faqs]
         faq_embeddings = transformer.encode(faq_questions)
-        
+
         # Calculate similarities
         similarities = np.dot(question_embedding, faq_embeddings.T)[0]
-        
+
         # Find best match
         best_idx = np.argmax(similarities)
         best_similarity = similarities[best_idx]
-        
+
         if best_similarity >= threshold:
             return faqs[best_idx]
-        
+
         return None
-        
+
     except Exception as e:
         logger.exception("Failed to find FAQ match: %s", e)
+        return None
+
+
+async def find_similar_answered_question(question: str, threshold: float = 0.75) -> Optional[Dict[str, Any]]:
+    """Find similar previously answered questions using semantic similarity"""
+    try:
+        from avap_bot.services.supabase_service import get_answered_questions
+
+        # Get previously answered questions
+        answered_questions = get_answered_questions()
+        if not answered_questions:
+            return None
+
+        # Get sentence transformer model
+        transformer = get_model()
+
+        # Encode question and answered questions
+        question_embedding = transformer.encode([question])
+        answered_texts = [q['question_text'] for q in answered_questions]
+        answered_embeddings = transformer.encode(answered_texts)
+
+        # Calculate similarities
+        similarities = np.dot(question_embedding, answered_embeddings.T)[0]
+
+        # Find best match
+        best_idx = np.argmax(similarities)
+        best_similarity = similarities[best_idx]
+
+        if best_similarity >= threshold:
+            return answered_questions[best_idx]
+
+        return None
+
+    except Exception as e:
+        logger.exception("Failed to find similar answered question: %s", e)
         return None
 
 
@@ -136,9 +171,13 @@ async def transcribe_audio(file_id: str, bot) -> Optional[str]:
         # Use OpenAI for transcription
         import openai
         openai.api_key = os.getenv("OPENAI_API_KEY")
-        
+        client = openai.OpenAI(api_key=openai.api_key)
+
         with open(file_path, "rb") as audio_file:
-            transcript = openai.Audio.transcribe("whisper-1", audio_file)
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file
+            )
         
         # Clean up
         import os
@@ -184,7 +223,9 @@ async def answer_question_with_ai(question: str) -> Optional[str]:
             "Be encouraging and supportive in your responses."
         )
 
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI(api_key=openai_key)
+
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_prompt},

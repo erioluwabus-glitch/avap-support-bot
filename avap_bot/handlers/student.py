@@ -19,7 +19,7 @@ from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
 )
-from avap_bot.services.ai_service import answer_question_with_ai, find_faq_match
+from avap_bot.services.ai_service import answer_question_with_ai, find_faq_match, find_similar_answered_question
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
@@ -116,6 +116,8 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
                 error_msg = str(e)
                 if "User_already_participant" in error_msg:
                     logger.info(f"User {user.id} is already a participant in the support group (expected).")
+                elif "Hide_requester_missing" in error_msg:
+                    logger.info(f"User {user.id} didn't request to join the support group, or request already processed.")
                 else:
                     logger.error(f"Failed to approve join request for user {user.id}: {e}")
 
@@ -218,19 +220,21 @@ async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle submission type selection"""
     message_text = update.message.text
-    
+
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-    
+
     # Extract type from button text (remove emoji)
     submission_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['submit_type'] = submission_type
-    
+
+    # Remove keyboard and ask for content
     await update.message.reply_text(
         f"📝 **Module {context.user_data['submit_module']} - {submission_type.title()}**\n\n"
         "Please send your assignment file or text:",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=None  # Remove keyboard
     )
     return SUBMIT_FILE
 
@@ -375,19 +379,21 @@ async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win type selection"""
     message_text = update.message.text
-    
+
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Win sharing cancelled.")
         return ConversationHandler.END
-    
+
     # Extract type from button text (remove emoji)
     win_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['win_type'] = win_type
-    
+
+    # Remove keyboard and ask for content
     await update.message.reply_text(
         f"🏆 **Share {win_type.title()} Win**\n\n"
         "Please share your win (text, audio, or video):",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=None  # Remove keyboard
     )
     return SHARE_WIN_FILE
 
@@ -537,6 +543,8 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             submissions = []
             wins = []
             questions = []
+            # Initialize status_text for the warning case
+            status_text = ""
 
             # Show a warning in the status message
             status_text += "\n\n⚠️ **Note:** Unable to retrieve some data. Please try again later."
@@ -636,7 +644,39 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         
         # Check for similar questions and auto-answer if found
         try:
-            # Try FAQ matching first
+            # Try previously answered questions first (pattern matching)
+            similar_answer = await find_similar_answered_question(question_text)
+            if similar_answer:
+                # Send previously answered question's answer
+                await context.bot.send_message(
+                    user_id,
+                    f"🔄 **Similar Question Found!**\n\n"
+                    f"**Your Question:** {question_text}\n\n"
+                    f"**Similar Question:** {similar_answer['question_text']}\n\n"
+                    f"**Previous Answer:** {similar_answer['answer']}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await update.message.reply_text(
+                    f"✅ **Question answered automatically!**\n\n"
+                    f"I found a similar question that was previously answered and provided that answer above.\n"
+                    f"If this doesn't fully address your question, please ask again for admin assistance.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+                # Still save the question for tracking but mark as auto-answered
+                question_data = {
+                    'username': username,
+                    'telegram_id': user_id,
+                    'question_text': question_text,
+                    'file_id': file_id,
+                    'file_name': file_name,
+                    'asked_at': datetime.now(timezone.utc),
+                    'status': 'Auto-answered'
+                }
+                await run_blocking(append_question, question_data)
+                return ConversationHandler.END
+
+            # Try FAQ matching
             faq_match = await find_faq_match(question_text)
             if faq_match:
                 # Send FAQ answer immediately

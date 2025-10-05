@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
 SYSTEME_ACHIEVER_TAG_ID = os.getenv("SYSTEME_ACHIEVER_TAG_ID")
-SYSTEME_BASE_URL = os.getenv("SYSTEME_BASE_URL", "https://api.systeme.io/api/v1")
+SYSTEME_BASE_URL = os.getenv("SYSTEME_BASE_URL", "https://api.systeme.io/api")
 
 
 async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
@@ -33,8 +33,9 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             "phoneNumber": contact_data.get("phone", ""),
             "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
         }
-        
+
         async with httpx.AsyncClient() as client:
+            # Try the correct Systeme.io API endpoint format
             response = await client.post(
                 f"{SYSTEME_BASE_URL}/contacts",
                 headers=headers,
