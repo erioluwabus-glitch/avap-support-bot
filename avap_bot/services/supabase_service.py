@@ -76,13 +76,14 @@ def check_tables_exist():
     for table in required_tables:
         try:
             client = get_supabase()
-            # Use newer Supabase API (no  needed)
+            # Use newer Supabase API (no .execute() needed)
             try:
                 client.table(table).select('*').limit(1)
             except AttributeError:
+                # Fallback for older API
                 client.table(table).select('*').limit(1).execute()
-            except Exception as e:
-                logger.warning(f"Table {table} may not exist: {e}")
+        except Exception as e:
+            logger.warning(f"Table {table} may not exist: {e}")
 
 
 def init_supabase() -> Client:
