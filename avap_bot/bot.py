@@ -286,6 +286,7 @@ async def initialize_services():
         # Enhanced memory monitoring to prevent Render restarts
         enable_detailed_memory_monitoring()
         bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)
+        bot_app.job_queue.start()  # Start the job queue
         logger.info("Memory monitoring scheduled every 5 minutes (starting in 1 minute)")
 
         # Schedule daily tips
@@ -438,6 +439,13 @@ async def on_startup():
 async def on_shutdown():
     """Actions to perform on application shutdown."""
     logger.info("Shutting down...")
+
+    # Stop the job queue first
+    try:
+        bot_app.job_queue.stop()
+        logger.info("Job queue stopped successfully")
+    except Exception as e:
+        logger.warning(f"Error stopping job queue: {e}")
 
     # Enhanced memory monitoring to prevent Render restarts - cleanup resources
     await cleanup_resources()
