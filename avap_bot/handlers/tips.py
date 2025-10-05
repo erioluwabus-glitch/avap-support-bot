@@ -102,7 +102,7 @@ async def schedule_daily_tips(bot, scheduler):
 async def send_daily_tip(bot):
     """Send daily tip to support group"""
     try:
-        if not SUPPORT_GROUP_ID or SUPPORT_GROUP_ID <= 0:
+        if not SUPPORT_GROUP_ID or SUPPORT_GROUP_ID == 0:
             logger.warning(f"SUPPORT_GROUP_ID not properly configured: {SUPPORT_GROUP_ID}, cannot send daily tip")
             # Try to send to admin as fallback
             if ADMIN_USER_ID and ADMIN_USER_ID > 0:

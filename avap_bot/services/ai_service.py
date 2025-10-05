@@ -253,30 +253,42 @@ async def transcribe_audio(file_id: str, bot) -> Optional[str]:
 
         try:
             client = openai.OpenAI(api_key=openai_key)
-        except TypeError as e:
-            if "proxies" in str(e):
+        except (TypeError, AttributeError) as e:
+            if "proxies" in str(e) or "unexpected keyword" in str(e):
                 # Handle version compatibility issue
                 logger.warning(f"OpenAI client init error: {e}. Trying without proxies parameter.")
-                # Try the older initialization method
-                openai.api_key = openai_key
-                client = openai
+                try:
+                    # Try the older initialization method
+                    openai.api_key = openai_key
+                    client = openai
+                except Exception as fallback_error:
+                    logger.error(f"OpenAI fallback also failed: {fallback_error}")
+                    return None
             else:
-                raise
+                logger.error(f"OpenAI initialization failed: {e}")
+                return None
 
-        with open(file_path, "rb") as audio_file:
-            if hasattr(client, 'audio'):
-                # New OpenAI client style
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file
-                )
-            else:
-                # Old OpenAI API style
-                transcript = client.Audio.transcribe("whisper-1", audio_file)
-        
-        # Clean up
-        import os
-        os.remove(file_path)
+        try:
+            with open(file_path, "rb") as audio_file:
+                if hasattr(client, 'audio'):
+                    # New OpenAI client style
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file
+                    )
+                else:
+                    # Old OpenAI API style
+                    transcript = client.Audio.transcribe("whisper-1", audio_file)
+        except AttributeError as e:
+            logger.error(f"OpenAI audio transcription methods not available: {e}")
+            import os
+            os.remove(file_path)
+            return None
+        except Exception as e:
+            logger.error(f"OpenAI audio transcription failed: {e}")
+            import os
+            os.remove(file_path)
+            return None
         
         return transcript.text
         
@@ -320,38 +332,50 @@ async def answer_question_with_ai(question: str) -> Optional[str]:
 
         try:
             client = openai.OpenAI(api_key=openai_key)
-        except TypeError as e:
-            if "proxies" in str(e):
+        except (TypeError, AttributeError) as e:
+            if "proxies" in str(e) or "unexpected keyword" in str(e):
                 # Handle version compatibility issue
                 logger.warning(f"OpenAI client init error: {e}. Trying without proxies parameter.")
-                # Try the older initialization method
-                openai.api_key = openai_key
-                client = openai
+                try:
+                    # Try the older initialization method
+                    openai.api_key = openai_key
+                    client = openai
+                except Exception as fallback_error:
+                    logger.error(f"OpenAI fallback also failed: {fallback_error}")
+                    return None
             else:
-                raise
+                logger.error(f"OpenAI initialization failed: {e}")
+                return None
 
-        if hasattr(client, 'chat'):
-            # New OpenAI client style
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
-                ],
-            max_tokens=300,
-            temperature=0.7
-        )
-        else:
-            # Old OpenAI API style
-            response = client.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
-                ],
-                max_tokens=300,
-                temperature=0.7
-            )
+        try:
+            if hasattr(client, 'chat'):
+                # New OpenAI client style
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+            else:
+                # Old OpenAI API style
+                response = client.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
+                    ],
+                    max_tokens=300,
+                    temperature=0.7
+                )
+        except AttributeError as e:
+            logger.error(f"OpenAI API methods not available: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"OpenAI API call failed: {e}")
+            return None
 
         answer = response.choices[0].message.content.strip() if hasattr(response.choices[0].message, 'content') else response.choices[0].message['content'].strip()
         if answer:
