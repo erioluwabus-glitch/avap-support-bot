@@ -11,6 +11,27 @@ from supabase import create_client, Client
 
 logger = logging.getLogger(__name__)
 
+def _get_response_data(response):
+    """Get data from Supabase response, handling different API versions"""
+    if response is None:
+        return None
+
+    # Try new API format first (no .data attribute needed)
+    if hasattr(response, 'data'):
+        return response.data
+
+    # Fallback to direct access for newer API
+    try:
+        # In newer Supabase API, response might be the data directly
+        if isinstance(response, list):
+            return response
+        elif isinstance(response, dict) and 'data' in response:
+            return response['data']
+        else:
+            return response
+    except:
+        return response
+
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -55,8 +76,11 @@ def check_tables_exist():
     for table in required_tables:
         try:
             client = get_supabase()
-            client.table(table).select('*').limit(1).execute()
-        except Exception as e:
+            # Use newer Supabase API (no  needed)
+            try:
+                client.table(table).select('*').limit(1)
+            except AttributeError:
+                client.table(table).select('*').limit(1)        except Exception as e:
             logger.warning(f"Table {table} may not exist: {e}")
 
 
@@ -74,8 +98,7 @@ def init_supabase() -> Client:
         test_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
         # Quick connection test
-        test_client.table('verified_users').select('count', count='exact').limit(1).execute()
-
+        test_client.table('verified_users').select('count', count='exact').limit(1)
         # Check if required tables exist
         check_tables_exist()
 
@@ -111,7 +134,14 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
         }
         
         try:
-            res = client.table("pending_verifications").insert(insert_data).execute()
+            res = client.table("pending_verifications").insert(insert_data)
+            # Handle different response formats
+            data = getattr(res, 'data', res) if res else None
+            if data:
+                logger.info(f"Added pending verification: {data.get('name', 'Unknown')}")
+                return data
+            else:
+                raise Exception("No data returned from insert")
         except Exception as status_error:
             # If status column doesn't exist, try without it
             if "status" in str(status_error) and "column" in str(status_error).lower():
@@ -121,13 +151,12 @@ def add_pending_verification(data: Dict[str, Any]) -> Dict[str, Any]:
                     'email': data.get('email'),
                     'phone': data.get('phone')
                 }
-                res = client.table("pending_verifications").insert(insert_data_without_status).execute()
-            else:
+                res = client.table("pending_verifications").insert(insert_data_without_status)            else:
                 raise status_error
         
-        if res.data:
+        data = _get_response_data(res); if data:
             logger.info(f"Added pending verification: {data.get('name', 'Unknown')}")
-            return res.data[0]
+            data = _get_response_data(res); return data[0] if data else None
         else:
             raise Exception("No data returned from insert")
     except Exception as e:
@@ -139,9 +168,10 @@ def find_verified_by_telegram(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Find verified user by telegram ID"""
     try:
         client = get_supabase()
-        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
-        if res.data and len(res.data) > 0:
-            return res.data[0]
+        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified")
+        data = _get_response_data(res)
+        if data and len(data) > 0:
+            return data[0]
         return None
     except Exception as e:
         logger.exception("Supabase find_verified_by_telegram error: %s", e)
@@ -155,14 +185,12 @@ def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[
         results = []
 
         if email:
-            res = client.table("pending_verifications").select("*").eq("email", email).execute()
-            if res.data:
-                results.extend(res.data)
+            res = client.table("pending_verifications").select("*").eq("email", email)            data = _get_response_data(res); if data:
+                data = _get_response_data(res); results.extend(data or [])
 
         if phone:
-            res = client.table("pending_verifications").select("*").eq("phone", phone).execute()
-            if res.data:
-                results.extend(res.data)
+            res = client.table("pending_verifications").select("*").eq("phone", phone)            data = _get_response_data(res); if data:
+                data = _get_response_data(res); results.extend(data or [])
 
         return results
     except Exception as e:
@@ -177,14 +205,12 @@ def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional
         results = []
 
         if email:
-            res = client.table("verified_users").select("*").eq("email", email).eq("status", "verified").execute()
-            if res.data:
-                results.extend(res.data)
+            res = client.table("verified_users").select("*").eq("email", email).eq("status", "verified")            data = _get_response_data(res); if data:
+                data = _get_response_data(res); results.extend(data or [])
 
         if phone:
-            res = client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified").execute()
-            if res.data:
-                results.extend(res.data)
+            res = client.table("verified_users").select("*").eq("phone", phone).eq("status", "verified")            data = _get_response_data(res); if data:
+                data = _get_response_data(res); results.extend(data or [])
 
         return results
     except Exception as e:
@@ -196,8 +222,7 @@ def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
     """Search verified_users by name (case-insensitive)"""
     client = get_supabase()
     try:
-        res = client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified").execute()
-        return res.data or []
+        res = client.table("verified_users").select("*").ilike("name", f"%{name}%").eq("status", "verified")        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase find_verified_by_name error: %s", e)
         return []
@@ -208,8 +233,7 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
     client = get_supabase()
     try:
         # Fetch pending row
-        r = client.table("pending_verifications").select("*").eq("id", pending_id).execute()
-        if not r.data:
+        r = client.table("pending_verifications").select("*").eq("id", pending_id)        if not r.data:
             raise Exception("Pending verification not found")
 
         row = r.data[0]
@@ -224,8 +248,7 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
         }
 
         logger.info(f"Inserting verified user payload: {verified_payload}")
-        ins = client.table("verified_users").insert(verified_payload).execute()
-
+        ins = client.table("verified_users").insert(verified_payload)
         if not ins.data:
             logger.error("Failed to insert verified user - no data returned")
             raise Exception("Failed to insert verified user")
@@ -250,8 +273,7 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
             # Don't fail the verification if Systeme.io update fails
 
         # Optionally delete pending row:
-        client.table("pending_verifications").delete().eq("id", pending_id).execute()
-
+        client.table("pending_verifications").delete().eq("id", pending_id)
         return verified_user
     except Exception as e:
         logger.exception("Supabase promote_pending_to_verified error: %s", e)
@@ -263,18 +285,15 @@ def remove_verified_user(identifier: str) -> bool:
     client = get_supabase()
     try:
         # Try email exact match
-        res = client.table("verified_users").delete().eq("email", identifier).execute()
-        if res.data:
+        res = client.table("verified_users").delete().eq("email", identifier)        data = _get_response_data(res); if data:
             return True
 
         # Try phone
-        res = client.table("verified_users").delete().eq("phone", identifier).execute()
-        if res.data:
+        res = client.table("verified_users").delete().eq("phone", identifier)        data = _get_response_data(res); if data:
             return True
 
         # Try name (less exact)
-        res = client.table("verified_users").delete().eq("name", identifier).execute()
-        return bool(res.data)
+        res = client.table("verified_users").delete().eq("name", identifier)        data = _get_response_data(res); return bool(data)
     except Exception as e:
         logger.exception("Supabase remove_verified_user error: %s", e)
         return False
@@ -289,8 +308,7 @@ def get_all_verified_users() -> List[Dict[str, Any]]:
     """Get all verified users"""
     client = get_supabase()
     try:
-        res = client.table("verified_users").select("*").eq("status", "verified").execute()
-        return res.data or []
+        res = client.table("verified_users").select("*").eq("status", "verified")        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase get_all_verified_users error: %s", e)
         return []
@@ -309,8 +327,7 @@ def add_match_request(telegram_id: int, username: str) -> str:
     }
 
     try:
-        res = client.table("match_requests").insert(payload).execute()
-        return match_id
+        res = client.table("match_requests").insert(payload)        return match_id
     except Exception as e:
         # If username column doesn't exist, try without it
         if "username" in str(e) and "column" in str(e).lower():
@@ -321,8 +338,7 @@ def add_match_request(telegram_id: int, username: str) -> str:
                 "status": "pending",
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
-            res = client.table("match_requests").insert(payload_without_username).execute()
-            return match_id
+            res = client.table("match_requests").insert(payload_without_username)            return match_id
         else:
             logger.exception("Supabase add_match_request error: %s", e)
             raise
@@ -333,14 +349,12 @@ def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     client = get_supabase()
     try:
         # Get a random pending request that's not from the same user
-        res = client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1).execute()
-        if not res.data:
+        res = client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1)        if not res.data:
             return None
 
         match_request = res.data[0]
         # Mark as matched
-        client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
-        return match_request
+        client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"])        return match_request
     except Exception as e:
         logger.exception("Supabase pop_match_request error: %s", e)
         return None
@@ -350,9 +364,8 @@ def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Check if user is verified by telegram_id"""
     try:
         client = get_supabase()
-        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified").execute()
-        if res.data and len(res.data) > 0:
-            return res.data[0]
+        res = client.table("verified_users").select("*").eq("telegram_id", telegram_id).eq("status", "verified")        data = _get_response_data(res); if data and len(data) > 0:
+            data = _get_response_data(res); return data[0] if data else None
         return None
     except Exception as e:
         logger.exception("Supabase check_verified_user error: %s", e)
@@ -373,8 +386,7 @@ def add_assignment_submission(telegram_id: int, username: str, module: str, file
             "status": "submitted",
             "submitted_at": datetime.now(timezone.utc).isoformat()
         }
-        res = client.table("assignments").insert(payload).execute()
-        return res.data[0]
+        res = client.table("assignments").insert(payload)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase add_assignment_submission error: %s", e)
         raise
@@ -384,8 +396,7 @@ def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
     """Get all assignments for a student"""
     client = get_supabase()
     try:
-        res = client.table("assignments").select("*").eq("telegram_id", telegram_id).execute()
-        return res.data or []
+        res = client.table("assignments").select("*").eq("telegram_id", telegram_id)        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase get_student_assignments error: %s", e)
         return []
@@ -403,8 +414,7 @@ def update_assignment_grade(submission_id: int, grade: int, comment: Optional[st
         if comment:
             update_data["comment"] = comment
         
-        res = client.table("assignments").update(update_data).eq("id", submission_id).execute()
-        return bool(res.data)
+        res = client.table("assignments").update(update_data).eq("id", submission_id)        data = _get_response_data(res); return bool(data)
     except Exception as e:
         logger.exception("Supabase update_assignment_grade error: %s", e)
         return False
@@ -422,8 +432,7 @@ def add_win(telegram_id: int, username: str, file_id: str, file_name: str, win_t
             "win_type": win_type,
             "shared_at": datetime.now(timezone.utc).isoformat()
         }
-        res = client.table("wins").insert(payload).execute()
-        return res.data[0]
+        res = client.table("wins").insert(payload)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase add_win error: %s", e)
         raise
@@ -433,8 +442,7 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
     """Get all wins for a student"""
     client = get_supabase()
     try:
-        res = client.table("wins").select("*").eq("telegram_id", telegram_id).execute()
-        return res.data or []
+        res = client.table("wins").select("*").eq("telegram_id", telegram_id)        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase get_student_wins error: %s", e)
         return []
@@ -459,8 +467,7 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
             payload["answer"] = answer
             payload["answered_at"] = datetime.now(timezone.utc).isoformat()
 
-        res = client.table("questions").insert(payload).execute()
-        return res.data[0]
+        res = client.table("questions").insert(payload)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase add_question error: %s", e)
         raise
@@ -470,8 +477,7 @@ def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
     """Get all questions for a student"""
     client = get_supabase()
     try:
-        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
-        return res.data or []
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id)        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase get_student_questions error: %s", e)
         return []
@@ -486,8 +492,7 @@ def update_question_answer(question_id: int, answer: str) -> bool:
             "status": "answered",
             "answered_at": datetime.now(timezone.utc).isoformat()
         }
-        res = client.table("questions").update(update_data).eq("id", question_id).execute()
-        return bool(res.data)
+        res = client.table("questions").update(update_data).eq("id", question_id)        data = _get_response_data(res); return bool(data)
     except Exception as e:
         logger.exception("Supabase update_question_answer error: %s", e)
         return False
@@ -497,8 +502,7 @@ def get_faqs() -> List[Dict[str, Any]]:
     """Get all FAQs for AI matching"""
     client = get_supabase()
     try:
-        res = client.table("faqs").select("*").execute()
-        return res.data or []
+        res = client.table("faqs").select("*")        data = _get_response_data(res); return data or []
     except Exception as e:
         logger.exception("Supabase get_faqs error: %s", e)
         return []
@@ -508,8 +512,9 @@ def get_answered_questions() -> List[Dict[str, Any]]:
     """Get all answered questions"""
     try:
         client = get_supabase()
-        res = client.table("questions").select("*").not_("answer", "is", None).execute()
-        return res.data or []
+        res = client.table("questions").select("*").not_("answer", "is", None)
+        data = _get_response_data(res)
+        return data or []
     except Exception as e:
         logger.exception("Supabase get_answered_questions error: %s", e)
         return []
@@ -524,8 +529,7 @@ def add_faq(question: str, answer: str) -> Dict[str, Any]:
             "answer": answer,
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        res = client.table("faqs").insert(payload).execute()
-        return res.data[0]
+        res = client.table("faqs").insert(payload)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase add_faq error: %s", e)
         raise
@@ -535,8 +539,7 @@ def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
     """Get tip for specific day of week"""
     client = get_supabase()
     try:
-        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1).execute()
-        return res.data[0] if res.data else None
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase get_tip_for_day error: %s", e)
         return None
@@ -552,8 +555,7 @@ def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
             "tip_type": "manual",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        res = client.table("tips").insert(payload).execute()
-        return res.data[0]
+        res = client.table("tips").insert(payload)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase add_manual_tip error: %s", e)
         raise
@@ -564,9 +566,8 @@ def get_top_students() -> List[Dict[str, Any]]:
     client = get_supabase()
     
     # Get all verified users
-    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
-    try:
-        users = users_res.data or []
+    users_res = client.table("verified_users").select("*").eq("status", "verified")    try:
+        users = _get_response_data(users_res) or []
     except Exception as e:
         logger.exception("Supabase get_top_students error: %s", e)
         return []
@@ -578,12 +579,10 @@ def get_top_students() -> List[Dict[str, Any]]:
             continue
         
         # Count assignments
-        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-        assignment_count = assignments_res.count or 0
+        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id)        assignment_count = assignments_res.count or 0
         
         # Count wins
-        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-        wins_count = wins_res.count or 0
+        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id)        wins_count = wins_res.count or 0
         
         if assignment_count >= 3 and wins_count >= 3:
             top_students.append({
@@ -602,8 +601,7 @@ def get_all_verified_telegram_ids() -> List[int]:
     """Get all verified user telegram IDs for broadcasting"""
     client = get_supabase()
     try:
-        res = client.table("verified_users").select("telegram_id").eq("status", "verified").execute()
-        return [user["telegram_id"] for user in (res.data or []) if user.get("telegram_id")]
+        res = client.table("verified_users").select("telegram_id").eq("status", "verified")        data = _get_response_data(res); return [user["telegram_id"] for user in (data or []) if user.get("telegram_id")]
     except Exception as e:
         logger.exception("Supabase get_all_verified_telegram_ids error: %s", e)
         return []
@@ -613,8 +611,7 @@ def update_user_badge(telegram_id: int, badge: str) -> bool:
     """Update user badge"""
     client = get_supabase()
     try:
-        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
-        return bool(res.data)
+        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id)        data = _get_response_data(res); return bool(data)
     except Exception as e:
         logger.exception("Supabase update_user_badge error: %s", e)
         return False
@@ -624,14 +621,13 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
     """Get assignment by ID"""
     client = get_supabase()
     try:
-        res = client.table("assignments").select("*").eq("id", assignment_id).execute()
-        return res.data[0] if res.data else None
+        res = client.table("assignments").select("*").eq("id", assignment_id)        data = _get_response_data(res); return data[0] if data else None
     except Exception as e:
         logger.exception("Supabase get_assignment_by_id error: %s", e)
         return None
-        if res.data and len(res.data) > 0:
+        data = _get_response_data(res); if data and len(data) > 0:
 
-            return res.data[0]
+            data = _get_response_data(res); return data[0] if data else None
 
         return None
 
@@ -673,9 +669,8 @@ def add_assignment_submission(telegram_id: int, username: str, module: str, file
 
         }
 
-        res = client.table("assignments").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("assignments").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -695,9 +690,8 @@ def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("assignments").select("*").eq("telegram_id", telegram_id).execute()
-
-        return res.data or []
+        res = client.table("assignments").select("*").eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -733,9 +727,8 @@ def update_assignment_grade(submission_id: int, grade: int, comment: Optional[st
 
         
 
-        res = client.table("assignments").update(update_data).eq("id", submission_id).execute()
-
-        return bool(res.data)
+        res = client.table("assignments").update(update_data).eq("id", submission_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -771,9 +764,8 @@ def add_win(telegram_id: int, username: str, file_id: str, file_name: str, win_t
 
         }
 
-        res = client.table("wins").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("wins").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -793,9 +785,8 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("wins").select("*").eq("telegram_id", telegram_id).execute()
-
-        return res.data or []
+        res = client.table("wins").select("*").eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -814,9 +805,8 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
-
-        return res.data or []
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -846,9 +836,8 @@ def update_question_answer(question_id: int, answer: str) -> bool:
 
         }
 
-        res = client.table("questions").update(update_data).eq("id", question_id).execute()
-
-        return bool(res.data)
+        res = client.table("questions").update(update_data).eq("id", question_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -868,9 +857,8 @@ def get_faqs() -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("faqs").select("*").execute()
-
-        return res.data or []
+        res = client.table("faqs").select("*")
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -900,9 +888,8 @@ def add_faq(question: str, answer: str) -> Dict[str, Any]:
 
         }
 
-        res = client.table("faqs").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("faqs").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -922,9 +909,8 @@ def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
 
     try:
 
-        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1).execute()
-
-        return res.data[0] if res.data else None
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -956,9 +942,8 @@ def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
 
         }
 
-        res = client.table("tips").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("tips").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -980,11 +965,10 @@ def get_top_students() -> List[Dict[str, Any]]:
 
     # Get all verified users
 
-    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
-
+    users_res = client.table("verified_users").select("*").eq("status", "verified")
     try:
 
-        users = users_res.data or []
+        users = _get_response_data(users_res) or []
 
     except Exception as e:
 
@@ -1008,16 +992,14 @@ def get_top_students() -> List[Dict[str, Any]]:
 
         # Count assignments
 
-        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-
+        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id)
         assignment_count = assignments_res.count or 0
 
         
 
         # Count wins
 
-        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-
+        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id)
         wins_count = wins_res.count or 0
 
         
@@ -1056,9 +1038,8 @@ def get_all_verified_telegram_ids() -> List[int]:
 
     try:
 
-        res = client.table("verified_users").select("telegram_id").eq("status", "verified").execute()
-
-        return [user["telegram_id"] for user in (res.data or []) if user.get("telegram_id")]
+        res = client.table("verified_users").select("telegram_id").eq("status", "verified")
+        data = _get_response_data(res); return [user["telegram_id"] for user in (data or []) if user.get("telegram_id")]
 
     except Exception as e:
 
@@ -1078,9 +1059,8 @@ def update_user_badge(telegram_id: int, badge: str) -> bool:
 
     try:
 
-        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
-
-        return bool(res.data)
+        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -1100,9 +1080,8 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
     try:
 
-        res = client.table("assignments").select("*").eq("id", assignment_id).execute()
-
-        return res.data[0] if res.data else None
+        res = client.table("assignments").select("*").eq("id", assignment_id)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1110,9 +1089,9 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
         return None
 
-        if res.data and len(res.data) > 0:
+        data = _get_response_data(res); if data and len(data) > 0:
 
-            return res.data[0]
+            data = _get_response_data(res); return data[0] if data else None
 
         return None
 
@@ -1154,9 +1133,8 @@ def add_assignment_submission(telegram_id: int, username: str, module: str, file
 
         }
 
-        res = client.table("assignments").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("assignments").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1176,9 +1154,8 @@ def get_student_assignments(telegram_id: int) -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("assignments").select("*").eq("telegram_id", telegram_id).execute()
-
-        return res.data or []
+        res = client.table("assignments").select("*").eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -1214,9 +1191,8 @@ def update_assignment_grade(submission_id: int, grade: int, comment: Optional[st
 
         
 
-        res = client.table("assignments").update(update_data).eq("id", submission_id).execute()
-
-        return bool(res.data)
+        res = client.table("assignments").update(update_data).eq("id", submission_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -1252,9 +1228,8 @@ def add_win(telegram_id: int, username: str, file_id: str, file_name: str, win_t
 
         }
 
-        res = client.table("wins").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("wins").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1274,9 +1249,8 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("wins").select("*").eq("telegram_id", telegram_id).execute()
-
-        return res.data or []
+        res = client.table("wins").select("*").eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -1288,48 +1262,12 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
 
 
 
-def add_question(telegram_id: int, username: str, question_text: str, file_id: Optional[str] = None, file_name: Optional[str] = None) -> Dict[str, Any]:
-
-    """Add a new question"""
-
-    client = get_supabase()
-
-    try:
-
-        payload = {
-
-            "telegram_id": telegram_id,
-
-            "username": username,
-
-            "question_text": question_text,
-
-            "file_id": file_id,
-
-            "file_name": file_name,
-
-            "status": "pending",
-
-            "asked_at": datetime.now(timezone.utc).isoformat()
-
-        }
-
-        res = client.table("questions").insert(payload).execute()
-
-        return res.data[0]
-
-    except Exception as e:
-
-        logger.exception("Supabase add_question error: %s", e)
-
-        raise
 
 
 
 
-        res = client.table("questions").update(update_data).eq("id", question_id).execute()
-
-        return bool(res.data)
+        res = client.table("questions").update(update_data).eq("id", question_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -1349,9 +1287,8 @@ def get_faqs() -> List[Dict[str, Any]]:
 
     try:
 
-        res = client.table("faqs").select("*").execute()
-
-        return res.data or []
+        res = client.table("faqs").select("*")
+        data = _get_response_data(res); return data or []
 
     except Exception as e:
 
@@ -1381,9 +1318,8 @@ def add_faq(question: str, answer: str) -> Dict[str, Any]:
 
         }
 
-        res = client.table("faqs").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("faqs").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1403,9 +1339,8 @@ def get_tip_for_day(day_of_week: int) -> Optional[Dict[str, Any]]:
 
     try:
 
-        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1).execute()
-
-        return res.data[0] if res.data else None
+        res = client.table("tips").select("*").eq("day_of_week", day_of_week).limit(1)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1437,9 +1372,8 @@ def add_manual_tip(content: str, day_of_week: int) -> Dict[str, Any]:
 
         }
 
-        res = client.table("tips").insert(payload).execute()
-
-        return res.data[0]
+        res = client.table("tips").insert(payload)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 
@@ -1461,11 +1395,10 @@ def get_top_students() -> List[Dict[str, Any]]:
 
     # Get all verified users
 
-    users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
-
+    users_res = client.table("verified_users").select("*").eq("status", "verified")
     try:
 
-        users = users_res.data or []
+        users = _get_response_data(users_res) or []
 
     except Exception as e:
 
@@ -1489,16 +1422,14 @@ def get_top_students() -> List[Dict[str, Any]]:
 
         # Count assignments
 
-        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-
+        assignments_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id)
         assignment_count = assignments_res.count or 0
 
         
 
         # Count wins
 
-        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id).execute()
-
+        wins_res = client.table("wins").select("id", count="exact").eq("telegram_id", telegram_id)
         wins_count = wins_res.count or 0
 
         
@@ -1537,9 +1468,8 @@ def get_all_verified_telegram_ids() -> List[int]:
 
     try:
 
-        res = client.table("verified_users").select("telegram_id").eq("status", "verified").execute()
-
-        return [user["telegram_id"] for user in (res.data or []) if user.get("telegram_id")]
+        res = client.table("verified_users").select("telegram_id").eq("status", "verified")
+        data = _get_response_data(res); return [user["telegram_id"] for user in (data or []) if user.get("telegram_id")]
 
     except Exception as e:
 
@@ -1559,9 +1489,8 @@ def update_user_badge(telegram_id: int, badge: str) -> bool:
 
     try:
 
-        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id).execute()
-
-        return bool(res.data)
+        res = client.table("verified_users").update({"badge": badge}).eq("telegram_id", telegram_id)
+        data = _get_response_data(res); return bool(data)
 
     except Exception as e:
 
@@ -1581,9 +1510,8 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
 
     try:
 
-        res = client.table("assignments").select("*").eq("id", assignment_id).execute()
-
-        return res.data[0] if res.data else None
+        res = client.table("assignments").select("*").eq("id", assignment_id)
+        data = _get_response_data(res); return data[0] if data else None
 
     except Exception as e:
 

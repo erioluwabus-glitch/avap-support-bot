@@ -41,6 +41,8 @@ def managed_model():
 
     # Load model if not cached
     if _model is None:
+        # Import here to ensure it's available
+        from avap_bot.utils.memory_monitor import log_memory_usage
         log_memory_usage("before model loading")
         logger.info("Loading sentence transformer model...")
         _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
