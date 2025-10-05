@@ -16,6 +16,7 @@ import numpy as np
 import psutil
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
+from avap_bot.utils.memory_monitor import log_memory_usage
 
 logger = logging.getLogger(__name__)
 
@@ -243,14 +244,33 @@ async def transcribe_audio(file_id: str, bot) -> Optional[str]:
         
         # Use OpenAI for transcription
         import openai
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        client = openai.OpenAI(api_key=openai.api_key)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if not openai_key:
+            logger.error("OpenAI API key not configured")
+            return None
+
+        try:
+            client = openai.OpenAI(api_key=openai_key)
+        except TypeError as e:
+            if "proxies" in str(e):
+                # Handle version compatibility issue
+                logger.warning(f"OpenAI client init error: {e}. Trying without proxies parameter.")
+                # Try the older initialization method
+                openai.api_key = openai_key
+                client = openai
+            else:
+                raise
 
         with open(file_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file
-            )
+            if hasattr(client, 'audio'):
+                # New OpenAI client style
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file
+                )
+            else:
+                # Old OpenAI API style
+                transcript = client.Audio.transcribe("whisper-1", audio_file)
         
         # Clean up
         import os
@@ -296,19 +316,42 @@ async def answer_question_with_ai(question: str) -> Optional[str]:
             "Be encouraging and supportive in your responses."
         )
 
-        client = openai.OpenAI(api_key=openai_key)
+        try:
+            client = openai.OpenAI(api_key=openai_key)
+        except TypeError as e:
+            if "proxies" in str(e):
+                # Handle version compatibility issue
+                logger.warning(f"OpenAI client init error: {e}. Trying without proxies parameter.")
+                # Try the older initialization method
+                openai.api_key = openai_key
+                client = openai
+            else:
+                raise
 
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
-            ],
+        if hasattr(client, 'chat'):
+            # New OpenAI client style
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
+                ],
             max_tokens=300,
             temperature=0.7
         )
+        else:
+            # Old OpenAI API style
+            response = client.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
+                ],
+                max_tokens=300,
+                temperature=0.7
+            )
 
-        answer = response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip() if hasattr(response.choices[0].message, 'content') else response.choices[0].message['content'].strip()
         if answer:
             return answer
 

@@ -1327,6 +1327,47 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
 
 
 
+
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+
+    """Get all questions for a student"""
+
+    client = get_supabase()
+
+    try:
+
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
+
+        return res.data or []
+
+    except Exception as e:
+
+        logger.exception("Supabase get_student_questions error: %s", e)
+
+        return []
+
+
+
+
+
+def update_question_answer(question_id: int, answer: str) -> bool:
+
+    """Update question with answer"""
+
+    client = get_supabase()
+
+    try:
+
+        update_data = {
+
+            "answer": answer,
+
+            "status": "answered",
+
+            "answered_at": datetime.now(timezone.utc).isoformat()
+
+        }
+
         res = client.table("questions").update(update_data).eq("id", question_id).execute()
 
         return bool(res.data)
