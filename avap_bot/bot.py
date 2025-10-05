@@ -20,6 +20,7 @@ from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 from avap_bot.services.ai_service import clear_model_cache, get_memory_usage, log_memory_usage
+from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring
 
 # Initialize logging
 setup_logging()
@@ -282,6 +283,11 @@ async def initialize_services():
         await bot_app.initialize()
         logger.debug("Telegram Application initialized successfully")
 
+        # Enhanced memory monitoring to prevent Render restarts
+        enable_detailed_memory_monitoring()
+        bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)
+        logger.info("Memory monitoring scheduled every 5 minutes (starting in 1 minute)")
+
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
 
@@ -343,7 +349,8 @@ async def _periodic_memory_cleanup():
     """Periodic memory cleanup to prevent memory leaks."""
     try:
         memory_before = get_memory_usage()
-        logger.debug(f"Starting periodic memory cleanup. Memory before: {memory_before".1f"}MB")
+        # Fixed typo in f-string formatter to prevent SyntaxError
+        logger.debug(f"Starting periodic memory cleanup. Memory before: {memory_before:.1f}MB")
 
         # Clear model cache
         clear_model_cache()
@@ -356,7 +363,8 @@ async def _periodic_memory_cleanup():
         memory_freed = memory_before - memory_after
 
         if memory_freed > 10:  # Only log if we freed significant memory
-            logger.info(f"Memory cleanup completed. Freed {memory_freed".1f"}MB (before: {memory_before".1f"}MB, after: {memory_after".1f"}MB)")
+            # Fixed typo in f-string formatter to prevent SyntaxError
+            logger.info(f"Memory cleanup completed. Freed {memory_freed:.1f}MB (before: {memory_before:.1f}MB, after: {memory_after:.1f}MB)")
 
     except Exception as e:
         logger.error(f"Periodic memory cleanup failed: {e}")
@@ -430,6 +438,10 @@ async def on_startup():
 async def on_shutdown():
     """Actions to perform on application shutdown."""
     logger.info("Shutting down...")
+
+    # Enhanced memory monitoring to prevent Render restarts - cleanup resources
+    await cleanup_resources()
+
     if os.getenv("WEBHOOK_URL"):
         await bot_app.bot.delete_webhook()
 
