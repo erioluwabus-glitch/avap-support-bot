@@ -13,15 +13,7 @@ from contextlib import contextmanager
 import requests
 import numpy as np
 
-try:
-    import psutil
-except ImportError:
-    # Fallback if psutil is not available
-    def get_memory_usage():
-        return 0
-
-    def log_memory_usage(context: str):
-        pass
+import psutil
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 
