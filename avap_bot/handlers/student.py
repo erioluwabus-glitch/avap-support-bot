@@ -64,10 +64,28 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
         return VERIFY_IDENTIFIER
     except Exception as e:
         logger.exception(f"Error in start_handler for user {update.effective_user.id}: {e}")
-        await update.message.reply_text(
-            "❌ Sorry, there was an error processing your request. Please try again later.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            # Check if we have a valid message to reply to
+            if update.message and update.message.message_id:
+                await update.message.reply_text(
+                    "❌ Sorry, there was an error processing your request. Please try again later.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                # Send a new message instead of replying if original message is not available
+                await update.effective_chat.send_message(
+                    "❌ Sorry, there was an error processing your request. Please try again later.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        except Exception as reply_error:
+            logger.error(f"Failed to send error message: {reply_error}")
+            # Last resort - try to send to the chat directly
+            try:
+                await update.effective_chat.send_message(
+                    "❌ An error occurred. Please try using /start again."
+                )
+            except Exception as final_error:
+                logger.error(f"Completely failed to send error message: {final_error}")
         return ConversationHandler.END
 
 
@@ -137,9 +155,17 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logger.exception(f"Verification failed for identifier '{identifier}': {e}")
         await notify_admin_telegram(context.bot, f"Verification failed for user {user.full_name} ({user.id}) with identifier '{identifier}'. Error: {e}")
-        await update.message.reply_text(
-            "❌ An error occurred during verification. The admin has been notified. Please try again later."
-        )
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text(
+                    "❌ An error occurred during verification. The admin has been notified. Please try again later."
+                )
+            else:
+                await update.effective_chat.send_message(
+                    "❌ An error occurred during verification. The admin has been notified. Please try again later."
+                )
+        except Exception as reply_error:
+            logger.error(f"Failed to send verification error message: {reply_error}")
         return ConversationHandler.END
 
 
@@ -165,10 +191,19 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
         )
     except Exception as e:
         logger.exception(f"Error in _show_main_menu for user {update.effective_user.id}: {e}")
-        await update.message.reply_text(
-            "❌ Sorry, there was an error showing the main menu. Please try again.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text(
+                    "❌ Sorry, there was an error showing the main menu. Please try again.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.effective_chat.send_message(
+                    "❌ Sorry, there was an error showing the main menu. Please try again.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        except Exception as reply_error:
+            logger.error(f"Failed to send main menu error message: {reply_error}")
 
 
 async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -358,7 +393,13 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     except Exception as e:
         logger.exception("Failed to submit assignment: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Assignment submission failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to submit assignment. Please try again.")
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text("❌ Failed to submit assignment. Please try again.")
+            else:
+                await update.effective_chat.send_message("❌ Failed to submit assignment. Please try again.")
+        except Exception as reply_error:
+            logger.error(f"Failed to send assignment error message: {reply_error}")
 
         # Show main menu after failure
         verified_user = check_verified_user(update.effective_user.id)
@@ -519,7 +560,13 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         logger.exception("Failed to share win: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Win sharing failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to share win. Please try again.")
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text("❌ Failed to share win. Please try again.")
+            else:
+                await update.effective_chat.send_message("❌ Failed to share win. Please try again.")
+        except Exception as reply_error:
+            logger.error(f"Failed to send share win error message: {reply_error}")
 
         # Show main menu after failure
         verified_user = check_verified_user(update.effective_user.id)
@@ -599,10 +646,19 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.exception("Failed to get status: %s", e)
-        await update.message.reply_text(
-            "❌ Failed to get status. Please try again.\n"
-            "If the problem persists, contact an admin."
-        )
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text(
+                    "❌ Failed to get status. Please try again.\n"
+                    "If the problem persists, contact an admin."
+                )
+            else:
+                await update.effective_chat.send_message(
+                    "❌ Failed to get status. Please try again.\n"
+                    "If the problem persists, contact an admin."
+                )
+        except Exception as reply_error:
+            logger.error(f"Failed to send status error message: {reply_error}")
 
 
 async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -869,7 +925,13 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     except Exception as e:
         logger.exception("Failed to submit question: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Question submission failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to submit question. Please try again.")
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text("❌ Failed to submit question. Please try again.")
+            else:
+                await update.effective_chat.send_message("❌ Failed to submit question. Please try again.")
+        except Exception as reply_error:
+            logger.error(f"Failed to send question error message: {reply_error}")
 
         # Show main menu after failure
         verified_user = check_verified_user(update.effective_user.id)
@@ -1076,10 +1138,18 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     except Exception as e:
         logger.exception("Failed to submit support group question: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Support group question failed: {str(e)}")
-        await update.message.reply_text(
-            "❌ Failed to submit question. Please try again or contact admin.",
-            reply_to_message_id=update.message.message_id
-        )
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text(
+                    "❌ Failed to submit question. Please try again or contact admin.",
+                    reply_to_message_id=update.message.message_id
+                )
+            else:
+                await update.effective_chat.send_message(
+                    "❌ Failed to submit question. Please try again or contact admin."
+                )
+        except Exception as reply_error:
+            logger.error(f"Failed to send support question error message: {reply_error}")
 
 
 async def _is_verified(update: Update) -> bool:
@@ -1159,7 +1229,13 @@ async def faq_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.exception("Failed to get FAQs: %s", e)
-        await update.message.reply_text("❌ Failed to load FAQs. Please try again later.")
+        try:
+            if update.message and update.message.message_id:
+                await update.message.reply_text("❌ Failed to load FAQs. Please try again later.")
+            else:
+                await update.effective_chat.send_message("❌ Failed to load FAQs. Please try again later.")
+        except Exception as reply_error:
+            logger.error(f"Failed to send FAQ error message: {reply_error}")
 
 
 # Conversation handlers
