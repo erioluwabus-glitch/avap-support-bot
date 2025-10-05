@@ -4,6 +4,7 @@ Student handlers for verified user features
 import os
 import logging
 import asyncio
+import random
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
@@ -13,7 +14,7 @@ from telegram.constants import ParseMode, ChatType
 
 from avap_bot.services.supabase_service import (
     find_verified_by_telegram, check_verified_user,
-    find_pending_by_email_or_phone, promote_pending_to_verified
+    find_pending_by_email_or_phone, promote_pending_to_verified, add_question
 )
 from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
@@ -88,8 +89,10 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         # Find a pending verification record
         email = identifier if is_email else None
         phone = identifier if is_phone else None
+        logger.info(f"Searching for pending verification: email={email}, phone={phone}")
         pending_records = find_pending_by_email_or_phone(email=email, phone=phone)
 
+        logger.info(f"Found {len(pending_records)} pending records")
         if not pending_records:
             await update.message.reply_text(
                 "❌ Your details were not found in the verification list. Please contact an admin to get added."
@@ -101,11 +104,12 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
-        verified_user = promote_pending_to_verified(pending_id, user.id)
+        logger.info(f"Promoting user {user.id} with pending_id {pending_id}")
+        verified_user = await promote_pending_to_verified(pending_id, user.id)
         if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
-        logger.info(f"User {user.id} ({verified_user['name']}) successfully verified.")
+        logger.info(f"User {user.id} ({verified_user['name']}) successfully verified with status: {verified_user.get('status')}")
 
         # Approve chat join request if the group ID is set
         if SUPPORT_GROUP_ID:
@@ -220,15 +224,15 @@ async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle submission type selection"""
     message_text = update.message.text
-
+    
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Assignment submission cancelled.")
         return ConversationHandler.END
-
+    
     # Extract type from button text (remove emoji)
     submission_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['submit_type'] = submission_type
-
+    
     # Remove keyboard and ask for content
     await update.message.reply_text(
         f"📝 **Module {context.user_data['submit_module']} - {submission_type.title()}**\n\n"
@@ -295,34 +299,44 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         
         # Forward to assignment group
         if ASSIGNMENT_GROUP_ID:
-            if submission_type == 'text' and 'text_content' in context.user_data:
-                # For text submissions, include the actual content
-                forward_text = (
-                    f"📝 **New Assignment Submission**\n\n"
-                    f"Student: @{username}\n"
-                    f"Telegram ID: {user_id}\n"
-                    f"Module: {module}\n"
-                    f"Type: {submission_type.title()}\n\n"
-                    f"**Content:**\n{context.user_data['text_content'][:500]}{'...' if len(context.user_data['text_content']) > 500 else ''}"
-                )
-            else:
-                # For file submissions, show file info
-                forward_text = (
-                    f"📝 **New Assignment Submission**\n\n"
-                    f"Student: @{username}\n"
-                    f"Telegram ID: {user_id}\n"
-                    f"Module: {module}\n"
-                    f"Type: {submission_type.title()}\n"
-                    f"File: {file_name}\n"
-                    f"File ID: `{file_id}`"
-                )
+            logger.info(f"Forwarding assignment to group {ASSIGNMENT_GROUP_ID}")
+            # First, forward the original student message
+            try:
+                if file_id and (update.message.document or update.message.voice or update.message.video):
+                    # Forward the file message
+                    await update.message.forward(ASSIGNMENT_GROUP_ID)
+                elif submission_type == 'text' and 'text_content' in context.user_data:
+                    # For text submissions, create a new message with the content and forward it
+                    text_message = await context.bot.send_message(
+                        update.message.chat_id,
+                        f"📝 **Assignment Submission**\n\n{context.user_data['text_content'][:1000]}{'...' if len(context.user_data['text_content']) > 1000 else ''}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    await text_message.forward(ASSIGNMENT_GROUP_ID)
+                    # Delete the temporary message
+                    await text_message.delete()
+                else:
+                    # Fallback: forward the original message
+                    await update.message.forward(ASSIGNMENT_GROUP_ID)
+            except Exception as forward_error:
+                logger.warning(f"Failed to forward original message: {forward_error}")
 
-            if file_id:
-                # For file submissions, send the file with caption
-                await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
-            else:
-                # For text submissions, send the text message
-                await context.bot.send_message(ASSIGNMENT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
+            # Then send assignment details for grading
+            assignment_details = (
+                f"📝 **New Assignment Submission**\n\n"
+                f"Student: @{username}\n"
+                f"Telegram ID: {user_id}\n"
+                f"Module: {module}\n"
+                f"Type: {submission_type.title()}\n"
+                f"File: {file_name if file_name else 'Text submission'}\n"
+                f"Status: Pending Review\n\n"
+                f"Use `/grade` command to start grading this assignment."
+            )
+
+            await context.bot.send_message(ASSIGNMENT_GROUP_ID, assignment_details, parse_mode=ParseMode.MARKDOWN)
+        else:
+            logger.warning("ASSIGNMENT_GROUP_ID not set - assignments will not be forwarded for grading!")
+            await notify_admin_telegram(context.bot, f"⚠️ ASSIGNMENT_GROUP_ID not configured. Assignment from @{username} (Module {module}) not forwarded for grading.")
         
         await update.message.reply_text(
             f"✅ **Assignment Submitted Successfully!**\n\n"
@@ -379,15 +393,15 @@ async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win type selection"""
     message_text = update.message.text
-
+    
     if message_text == "❌ Cancel":
         await update.message.reply_text("❌ Win sharing cancelled.")
         return ConversationHandler.END
-
+    
     # Extract type from button text (remove emoji)
     win_type = message_text.replace("📝 ", "").replace("🎤 ", "").replace("🎥 ", "").lower()
     context.user_data['win_type'] = win_type
-
+    
     # Remove keyboard and ask for content
     await update.message.reply_text(
         f"🏆 **Share {win_type.title()} Win**\n\n"
@@ -444,33 +458,26 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Forward to support group with engaging comments
         if SUPPORT_GROUP_ID:
-            # Generate deeply inspiring and humane comments based on win type
-            win_comments = {
-                "text": [
-                    f"💖 **Heartfelt Congratulations @{username}!** Your {win_type} achievement touches our hearts and reminds us all that perseverance creates miracles. Every word you share carries the weight of your incredible journey! 🌟✨",
-                    f"🌈 **@{username}, you are a true inspiration!** This {win_type} victory shows the beautiful transformation that happens when passion meets persistence. Your story will light the path for countless others! 💫❤️",
-                    f"🎯 **@{username}, your dedication moves us deeply!** Every {win_type} accomplishment like yours proves that dreams become reality through consistent effort. You make this community stronger and more beautiful! 🌹💪",
-                    f"🔥 **@{username}, you are absolutely incredible!** This {win_type} achievement isn't just a win - it's a testament to your beautiful spirit and unshakeable determination. We are so proud to witness your growth! ⭐🎉",
-                    f"💝 **@{username}, your courage inspires us all!** This {win_type} milestone represents so much more than success - it shows the power of believing in yourself. Thank you for sharing your light with us! 🌟💖"
-                ],
-                "audio": [
-                    f"🎵 **@{username}, your voice carries magic!** This {win_type} audio story speaks directly to our souls, reminding us that every journey has its own beautiful melody. Your courage to share touches us deeply! 🎤💖",
-                    f"🎶 **@{username}, you have a gift that moves hearts!** This {win_type} audio achievement isn't just heard - it's felt in the deepest parts of our spirits. Thank you for this beautiful moment of inspiration! 🌟🎵",
-                    f"🎧 **@{username}, your story resonates with pure authenticity!** This {win_type} audio share creates ripples of inspiration that will touch lives far beyond this moment. You are making a difference! 💫🎤",
-                    f"🎵 **@{username}, your voice is a beacon of hope!** This {win_type} achievement shows us that vulnerability and strength can coexist beautifully. Your courage inspires us all to share our own stories! 💖🌟",
-                    f"🎤 **@{username}, you are creating magic with every word!** This {win_type} audio accomplishment reminds us that our stories have the power to heal, inspire, and transform. Thank you for your beautiful authenticity! 🌈💝"
-                ],
-                "video": [
-                    f"🎬 **@{username}, your visual story moves us to tears!** This {win_type} video achievement captures the raw beauty of human perseverance and growth. You are a living inspiration! 💖✨",
-                    f"📹 **@{username}, you paint pictures with your spirit!** This {win_type} video showcases not just an accomplishment, but the beautiful journey of a soul committed to growth. We are deeply moved! 🌟🎥",
-                    f"🎥 **@{username}, your courage shines through every frame!** This {win_type} video achievement reminds us that true success is measured in courage, not just results. You inspire us profoundly! 💫💖",
-                    f"🎬 **@{username}, you are a masterpiece in motion!** This {win_type} video captures the essence of what makes us human - the courage to grow, learn, and share our authentic selves. Thank you! 🌹🎵",
-                    f"📹 **@{username}, your story touches the deepest parts of our hearts!** This {win_type} video achievement shows us that every challenge overcome becomes a gift to others. You are changing lives! 💝🌟"
-                ]
-            }
+            # Added random compliments to make share win more motivating
+            COMPLIMENTS = [
+                "Congratulations on your incredible success! You're inspiring everyone around you.",
+                "Your hard work and dedication have truly paid off—keep shining!",
+                "What an amazing achievement! This motivates us all to push harder.",
+                "You've turned your dreams into reality. Proud of you—let's see more wins!",
+                "Outstanding job! Your perseverance is a lesson for the whole group.",
+                "This win is well-deserved. You're setting the bar high for everyone!",
+                "Incredible effort! Sharing this encourages others to chase their goals too.",
+                "Way to go! Your success story is fueling motivation in the group.",
+                "Bravo on this milestone! Can't wait to celebrate more with you.",
+                "You've nailed it! This is proof that persistence pays off—thanks for sharing.",
+                "Fantastic achievement! You're a role model for us all.",
+                "Huge congrats! Your win is sparking inspiration across the community.",
+                "Impressive work! Keep sharing—these stories drive us forward.",
+                "Well done! This encourages everyone to aim higher.",
+                "Epic win! Your journey motivates and uplifts the entire group."
+            ]
 
-            import random
-            comment = random.choice(win_comments.get(win_type, win_comments["text"]))
+            comment = random.choice(COMPLIMENTS)
 
             if text_content:
                 # For text wins, include the actual text content with engaging intro
@@ -663,7 +670,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     parse_mode=ParseMode.MARKDOWN
                 )
 
-                # Still save the question for tracking but mark as auto-answered
+                # Store question in database for future FAQ matching
+                await run_blocking(add_question, user_id, username, question_text, file_id, file_name, similar_answer['answer'], 'answered')
+
+                # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
                     'username': username,
                     'telegram_id': user_id,
@@ -671,7 +681,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     'file_id': file_id,
                     'file_name': file_name,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'Auto-answered'
+                    'status': 'Auto-answered',
+                    'answer': similar_answer['answer']
                 }
                 await run_blocking(append_question, question_data)
                 return ConversationHandler.END
@@ -694,7 +705,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     parse_mode=ParseMode.MARKDOWN
                 )
 
-                # Still save the question for tracking but mark as auto-answered
+                # Store question in database for future FAQ matching
+                await run_blocking(add_question, user_id, username, question_text, file_id, file_name, faq_match['answer'], 'answered')
+
+                # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
                     'username': username,
                     'telegram_id': user_id,
@@ -702,7 +716,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     'file_id': file_id,
                     'file_name': file_name,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'Auto-answered'
+                    'status': 'Auto-answered',
+                    'answer': faq_match['answer']
                 }
                 await run_blocking(append_question, question_data)
                 return ConversationHandler.END
@@ -725,7 +740,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     parse_mode=ParseMode.MARKDOWN
                 )
 
-                # Save as AI-answered
+                # Store question in database for future FAQ matching
+                await run_blocking(add_question, user_id, username, question_text, file_id, file_name, ai_answer, 'answered')
+
+                # Save as AI-answered with the answer
                 question_data = {
                     'username': username,
                     'telegram_id': user_id,
@@ -733,7 +751,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     'file_id': file_id,
                     'file_name': file_name,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'AI-answered'
+                    'status': 'AI-answered',
+                    'answer': ai_answer
                 }
                 await run_blocking(append_question, question_data)
                 return ConversationHandler.END
@@ -741,6 +760,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         except Exception as e:
             logger.exception("Error in auto-answer check: %s", e)
             # Continue with normal flow if auto-answer fails
+
+        # Store question in database for future FAQ matching
+        await run_blocking(add_question, user_id, username, question_text, file_id, file_name, None, 'pending')
 
         # Prepare question data for forwarding to admins
         question_data = {
@@ -872,34 +894,55 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ask command from support group"""
     # Only process if message is from support group
-    if update.message.chat.id != SUPPORT_GROUP_ID:
+    chat_id = update.message.chat.id
+    chat_type = update.message.chat.type
+    logger.info(f"Support group ask handler triggered - Chat ID: {chat_id}, Chat Type: {chat_type}, Expected SUPPORT_GROUP_ID: {SUPPORT_GROUP_ID}")
+
+    # Debug: Check if SUPPORT_GROUP_ID is properly configured
+    if SUPPORT_GROUP_ID <= 0:
+        logger.error(f"SUPPORT_GROUP_ID is not properly configured: {SUPPORT_GROUP_ID}")
+        await update.message.reply_text(
+            "❌ Support group configuration error. Please contact an admin.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if chat_id != SUPPORT_GROUP_ID:
+        logger.warning(f"Ignoring /ask command from chat {chat_id} - not the support group")
         return
     
     user = update.effective_user
     username = user.username or "unknown"
     
     # Check if user is verified
+    logger.info(f"Checking verification for user {user.id} ({username})")
     verified_user = check_verified_user(user.id)
     if not verified_user:
+        logger.warning(f"User {user.id} is not verified, rejecting /ask command")
         await update.message.reply_text(
             "❌ You must be a verified student to ask questions.\n"
             "Please send /start to the bot in private to verify.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
+    logger.info(f"User {user.id} is verified, proceeding with /ask command")
     
     # Get the question from the command
     # Format: /ask <question text>
     message_text = update.message.text
+    logger.info(f"Processing /ask command: {message_text}")
+
     if not message_text or len(message_text.split(maxsplit=1)) < 2:
+        logger.warning(f"Invalid /ask command format: {message_text}")
         await update.message.reply_text(
             "❓ **Usage:** `/ask <your question>`\n"
             "Example: `/ask How do I submit an assignment?`",
             parse_mode=ParseMode.MARKDOWN
         )
         return
-    
+
     question_text = message_text.split(maxsplit=1)[1]
+    logger.info(f"Parsed question: {question_text}")
     
     try:
         # Check for similar questions and auto-answer if found
@@ -924,7 +967,10 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     reply_to_message_id=update.message.message_id
                 )
 
-                # Still save the question for tracking but mark as auto-answered
+                # Store question in database for future FAQ matching
+                await run_blocking(add_question, user.id, username, question_text, None, None, faq_match['answer'], 'answered')
+
+                # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
                     'username': username,
                     'telegram_id': user.id,
@@ -932,7 +978,8 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     'file_id': None,
                     'file_name': None,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'Auto-answered'
+                    'status': 'Auto-answered',
+                    'answer': faq_match['answer']
                 }
                 await run_blocking(append_question, question_data)
                 return
@@ -957,7 +1004,10 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     reply_to_message_id=update.message.message_id
                 )
 
-                # Save as AI-answered
+                # Store question in database for future FAQ matching
+                await run_blocking(add_question, user.id, username, question_text, None, None, faq_match['answer'], 'answered')
+
+                # Save as AI-answered with the answer
                 question_data = {
                     'username': username,
                     'telegram_id': user.id,
@@ -965,7 +1015,8 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     'file_id': None,
                     'file_name': None,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'AI-answered'
+                    'status': 'AI-answered',
+                    'answer': ai_answer
                 }
                 await run_blocking(append_question, question_data)
                 return
@@ -973,6 +1024,9 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         except Exception as e:
             logger.exception("Error in support group auto-answer check: %s", e)
             # Continue with normal flow if auto-answer fails
+
+        # Store question in database for future FAQ matching
+                await run_blocking(add_question, user.id, username, question_text, None, None, ai_answer, 'answered')
 
         # Prepare question data for forwarding to admins
         question_data = {
@@ -1016,9 +1070,9 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             parse_mode=ParseMode.MARKDOWN,
             reply_to_message_id=update.message.message_id
         )
-        
-        logger.info(f"Support group question from {username}: {question_text}")
-        
+
+        logger.info(f"Support group question processed successfully from {username}: {question_text}")
+
     except Exception as e:
         logger.exception("Failed to submit support group question: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Support group question failed: {str(e)}")
@@ -1167,4 +1221,4 @@ def register_handlers(application):
     application.add_handler(MessageHandler(filters.Regex(r"📊 Check Status"), status_handler))
     
     # Add support group /ask handler (only processes messages from support group)
-    application.add_handler(CommandHandler("ask", support_group_ask_handler, filters=filters.ChatType.SUPERGROUP | filters.ChatType.GROUP))
+    application.add_handler(CommandHandler("ask", support_group_ask_handler))

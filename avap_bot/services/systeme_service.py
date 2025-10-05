@@ -19,12 +19,12 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
         if not SYSTEME_API_KEY:
             logger.warning("SYSTEME_API_KEY not set, skipping contact creation")
             return None
-        
+
         headers = {
             "Authorization": f"Bearer {SYSTEME_API_KEY}",
             "Content-Type": "application/json"
         }
-        
+
         # Create contact - use proper Systeme.io API format
         contact_payload = {
             "email": contact_data.get("email"),
@@ -35,28 +35,35 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
         }
 
         async with httpx.AsyncClient() as client:
-            # Try the correct Systeme.io API endpoint format
+            # Try to create contact (Systeme.io will create duplicate if email exists)
             response = await client.post(
                 f"{SYSTEME_BASE_URL}/contacts",
                 headers=headers,
                 json=contact_payload,
                 timeout=10.0
             )
-            
+
             if response.status_code == 201:
                 result = response.json()
                 contact_id = result.get("id")
-                logger.info("Created Systeme.io contact: %s", contact_data.get("email"))
-                
-                # Apply achiever tag if applicable
+                logger.info("Created/Updated Systeme.io contact: %s", contact_data.get("email"))
+
+                # Apply achiever tag if applicable and verified
                 if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
                     await _apply_achiever_tag(contact_id, client, headers)
-                
+
                 return contact_id
+            elif response.status_code == 409:
+                # Contact already exists - this is expected for verification updates
+                logger.info("Contact already exists in Systeme.io: %s", contact_data.get("email"))
+                # Try to update the existing contact with new tag
+                # Note: Systeme.io doesn't provide easy way to update tags on existing contacts
+                # The tag update happens when the contact is processed by Systeme.io workflows
+                return "existing"
             else:
                 logger.warning("Failed to create Systeme.io contact: %s", response.text)
                 return None
-        
+
     except Exception as e:
         logger.exception("Failed to create Systeme.io contact: %s", e)
         return None

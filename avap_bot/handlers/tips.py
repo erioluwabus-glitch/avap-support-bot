@@ -82,7 +82,7 @@ async def add_tip_content(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def schedule_daily_tips(bot, scheduler):
     """Schedule daily tips job"""
     try:
-        # Schedule for 8:00 AM WAT (UTC+1)
+        # Schedule for 8:00 AM WAT (UTC+1) - Lagos timezone
         scheduler.add_job(
             send_daily_tip,
             'cron',
@@ -102,26 +102,53 @@ async def schedule_daily_tips(bot, scheduler):
 async def send_daily_tip(bot):
     """Send daily tip to support group"""
     try:
-        if not SUPPORT_GROUP_ID:
-            logger.warning("SUPPORT_GROUP_ID not set, cannot send daily tip")
+        if not SUPPORT_GROUP_ID or SUPPORT_GROUP_ID <= 0:
+            logger.warning(f"SUPPORT_GROUP_ID not properly configured: {SUPPORT_GROUP_ID}, cannot send daily tip")
+            # Try to send to admin as fallback
+            if ADMIN_USER_ID and ADMIN_USER_ID > 0:
+                logger.info("Attempting to send daily tip to admin as fallback")
+                tip_content = await _get_daily_tip_content()
+                if tip_content:
+                    try:
+                        await bot.send_message(
+                            ADMIN_USER_ID,
+                            f"💡 **Daily Tip (Group not configured)**\n\n{tip_content}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                        logger.info(f"Daily tip sent to admin {ADMIN_USER_ID} as fallback")
+                    except Exception as admin_send_error:
+                        logger.error(f"Failed to send daily tip to admin {ADMIN_USER_ID}: {admin_send_error}")
             return
-        
+
         # Get tip content
         tip_content = await _get_daily_tip_content()
-        
+
         if not tip_content:
             logger.warning("No tip content available")
             return
-        
-        # Send tip to support group
-        await bot.send_message(
-            SUPPORT_GROUP_ID,
-            f"💡 **Daily Tip**\n\n{tip_content}",
-            parse_mode=ParseMode.MARKDOWN
-        )
 
-        logger.info(f"Daily tip sent successfully to group {SUPPORT_GROUP_ID}: {tip_content[:50]}...")
-        
+        # Send tip to support group
+        try:
+            await bot.send_message(
+                SUPPORT_GROUP_ID,
+                f"💡 **Daily Tip**\n\n{tip_content}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Daily tip sent successfully to group {SUPPORT_GROUP_ID}: {tip_content[:50]}...")
+        except Exception as send_error:
+            logger.error(f"Failed to send daily tip to group {SUPPORT_GROUP_ID}: {send_error}")
+            # Try to send to admin as fallback
+            try:
+                if ADMIN_USER_ID and ADMIN_USER_ID > 0:
+                    await bot.send_message(
+                        ADMIN_USER_ID,
+                        f"💡 **Daily Tip (Failed to send to group)**\n\n{tip_content}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    logger.info(f"Daily tip sent to admin {ADMIN_USER_ID} as fallback")
+            except Exception as admin_send_error:
+                logger.error(f"Failed to send daily tip to admin {ADMIN_USER_ID}: {admin_send_error}")
+
     except Exception as e:
         logger.exception("Failed to send daily tip: %s", e)
         await notify_admin_telegram(bot, f"❌ Daily tip failed: {str(e)}")
@@ -233,7 +260,27 @@ add_tip_conv = ConversationHandler(
 )
 
 
+async def test_daily_tip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Test function to manually trigger daily tip (admin only)"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only for admins.")
+        return ConversationHandler.END
+
+    try:
+        # Manually trigger the daily tip
+        await send_daily_tip(context.bot)
+        await update.message.reply_text("✅ Daily tip test completed. Check logs for details.")
+    except Exception as e:
+        logger.exception("Test daily tip failed: %s", e)
+        await update.message.reply_text(f"❌ Test failed: {str(e)}")
+
+    return ConversationHandler.END
+
+
 def register_handlers(application):
     """Register all tips handlers with the application"""
     # Add conversation handler
     application.add_handler(add_tip_conv)
+
+    # Add test command for admins
+    application.add_handler(CommandHandler("test_tip", test_daily_tip))

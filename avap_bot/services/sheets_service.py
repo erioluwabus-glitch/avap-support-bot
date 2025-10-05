@@ -29,16 +29,19 @@ _spreadsheet = None
 # CSV fallback directory
 # IMPORTANT: /tmp/ is ephemeral on many hosting platforms like Render.
 # For persistent backups, set the STABLE_BACKUP_DIR environment variable.
-CSV_DIR = os.getenv("STABLE_BACKUP_DIR", "/tmp/avap_sheets")
+CSV_DIR = os.getenv("STABLE_BACKUP_DIR", "./data/csv_backup")
+
 # Create directory if it doesn't exist
 try:
     os.makedirs(CSV_DIR, exist_ok=True)
+    logger.info(f"CSV backup directory created/verified: {CSV_DIR}")
 except Exception as e:
     logger.warning(f"Failed to create CSV directory {CSV_DIR}: {e}")
     # Fallback to current directory
     CSV_DIR = "./csv_backup"
     try:
         os.makedirs(CSV_DIR, exist_ok=True)
+        logger.info(f"Using fallback CSV directory: {CSV_DIR}")
     except Exception as e2:
         logger.error(f"Failed to create fallback CSV directory {CSV_DIR}: {e2}")
         CSV_DIR = "./"
@@ -48,8 +51,9 @@ def _get_sheets_client():
     """Get Google Sheets client"""
     global _sheets_client
     if not GSPREAD_AVAILABLE:
+        logger.error("gspread library not available. Install with: pip install gspread google-auth")
         raise RuntimeError("gspread not available")
-    
+
     if _sheets_client is None:
         if GOOGLE_CREDENTIALS_JSON:
             logger.info("Using provided Google credentials from environment variable")
@@ -63,22 +67,30 @@ def _get_sheets_client():
 
                 creds_dict = json.loads(creds_json)
                 creds = Credentials.from_service_account_info(creds_dict)
+                logger.info("Google credentials loaded successfully")
             except Exception as e:
-                logger.warning("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
+                logger.error("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
+                logger.error("Make sure GOOGLE_CREDENTIALS_JSON contains valid JSON (base64 encoded or raw)")
                 raise RuntimeError("Invalid Google credentials")
         else:
             # Try to load credentials from file, but handle gracefully if not found
             try:
                 creds = Credentials.from_service_account_file("credentials.json")
+                logger.info("Loaded credentials from credentials.json file")
             except FileNotFoundError:
-                logger.info("Using CSV fallback mode for production deployment (no local credentials.json found)")
-                logger.info("CSV fallback active - all data stored locally")
+                logger.error("credentials.json file not found and GOOGLE_CREDENTIALS_JSON not set")
+                logger.error("Please configure Google Sheets credentials:")
+                logger.error("1. Set GOOGLE_CREDENTIALS_JSON environment variable with base64-encoded service account JSON")
+                logger.error("2. Or create credentials.json file with service account credentials")
+                logger.error("3. Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL")
+                logger.error("CSV fallback active - all data stored locally")
                 # Set a flag to indicate we're in fallback mode
                 os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
                 return None  # Return None to indicate no client available
-        
+
         _sheets_client = gspread.authorize(creds)
-    
+        logger.info("Google Sheets client initialized successfully")
+
     return _sheets_client
 
 
@@ -91,17 +103,31 @@ def _get_spreadsheet():
         # If client is None, we're in fallback mode
         if client is None:
             logger.info("CSV fallback mode active - storing data locally")
+            logger.warning("Google Sheets not configured. All data will be stored in CSV files only.")
             return None
 
-        if GOOGLE_SHEET_ID:
-            _spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
-        elif GOOGLE_SHEET_URL:
-            _spreadsheet = client.open_by_url(GOOGLE_SHEET_URL)
-        else:
-            raise RuntimeError("GOOGLE_SHEET_ID or GOOGLE_SHEET_URL must be set")
+        if not GOOGLE_SHEET_ID and not GOOGLE_SHEET_URL:
+            logger.error("Neither GOOGLE_SHEET_ID nor GOOGLE_SHEET_URL is set")
+            logger.error("Please configure at least one of these environment variables")
+            logger.info("Falling back to CSV mode")
+            return None
 
-        # Ensure all required worksheets exist
-        _ensure_worksheets()
+        try:
+            if GOOGLE_SHEET_ID:
+                logger.info("Opening spreadsheet by ID: %s", GOOGLE_SHEET_ID[:10] + "...")
+                _spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+            elif GOOGLE_SHEET_URL:
+                logger.info("Opening spreadsheet by URL")
+                _spreadsheet = client.open_by_url(GOOGLE_SHEET_URL)
+
+            logger.info("Google Sheets connected successfully")
+
+            # Ensure all required worksheets exist
+            _ensure_worksheets()
+        except Exception as e:
+            logger.error("Failed to connect to Google Sheets: %s", e)
+            logger.info("Falling back to CSV mode")
+            return None
 
     return _spreadsheet
 
@@ -109,20 +135,30 @@ def _get_spreadsheet():
 def _ensure_worksheets():
     """Ensure all required worksheets exist"""
     spreadsheet = _get_spreadsheet()
+
+    # If spreadsheet is None, we're in CSV fallback mode - skip worksheet creation
+    if spreadsheet is None:
+        logger.info("CSV fallback mode - skipping worksheet creation")
+        return
+
     required_sheets = [
-        "verification", "submissions", "submissions_updates", 
+        "verification", "submissions", "submissions_updates",
         "wins", "questions", "tips_manual"
     ]
-    
-    existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
-    
-    for sheet_name in required_sheets:
-        if sheet_name not in existing_sheets:
-            try:
-                spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
-                logger.info("Created worksheet: %s", sheet_name)
-            except Exception as e:
-                logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
+
+    try:
+        existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
+
+        for sheet_name in required_sheets:
+            if sheet_name not in existing_sheets:
+                try:
+                    spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
+                    logger.info("Created worksheet: %s", sheet_name)
+                except Exception as e:
+                    logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
+    except Exception as e:
+        logger.error("Failed to list existing worksheets: %s", e)
+        logger.info("Continuing with existing worksheets")
 
 
 def _csv_fallback(filename: str, data: List[List[str]], headers: List[str] = None):
@@ -362,7 +398,7 @@ def append_question(payload: Dict[str, Any]) -> bool:
                 payload.get("file_name", ""),
                 payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
                 payload.get("status", "Pending"),
-                ""
+                payload.get("answer", "")
             ], ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
 
         sheet = spreadsheet.worksheet("questions")
@@ -376,7 +412,7 @@ def append_question(payload: Dict[str, Any]) -> bool:
             payload.get("file_name", ""),
             payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
             payload.get("status", "Pending"),
-            ""  # Answer column
+            payload.get("answer", "")  # Answer column
         ]
 
         sheet.append_row(row)
@@ -867,4 +903,30 @@ def update_question_status(username: str, answer: str) -> bool:
 
     except Exception as e:
         logger.exception("Failed to update question status: %s", e)
+        return False
+
+
+def test_sheets_connection() -> bool:
+    """Test Google Sheets connection and return status"""
+    try:
+        logger.info("Testing Google Sheets connection...")
+        spreadsheet = _get_spreadsheet()
+
+        if spreadsheet is None:
+            logger.warning("Google Sheets not configured - using CSV fallback mode")
+            return False
+
+        # Try to access a worksheet to verify connection
+        try:
+            sheet = spreadsheet.worksheet("verification")
+            # Try a simple operation
+            records = sheet.get_all_records()
+            logger.info(f"Google Sheets test successful - found {len(records)} verification records")
+            return True
+        except Exception as e:
+            logger.error(f"Google Sheets test failed: {e}")
+            return False
+
+    except Exception as e:
+        logger.exception("Google Sheets connection test failed: %s", e)
         return False

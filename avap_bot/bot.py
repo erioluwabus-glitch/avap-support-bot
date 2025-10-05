@@ -19,6 +19,7 @@ from avap_bot.handlers import register_all
 from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
+from avap_bot.services.ai_service import clear_model_cache, get_memory_usage, log_memory_usage
 
 # Initialize logging
 setup_logging()
@@ -228,6 +229,40 @@ async def ping():
     """Simple ping endpoint for keep-alive."""
     return {"status": "pong", "timestamp": time.time()}
 
+# Memory cleanup endpoint
+@app.post("/admin/cleanup-memory")
+async def cleanup_memory():
+    """Admin endpoint to manually trigger memory cleanup."""
+    try:
+        memory_before = get_memory_usage()
+        log_memory_usage("before manual cleanup")
+
+        # Clear model cache
+        clear_model_cache()
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+
+        memory_after = get_memory_usage()
+        log_memory_usage("after manual cleanup")
+
+        memory_freed = memory_before - memory_after
+
+        return {
+            "status": "success",
+            "memory_before_mb": round(memory_before, 1),
+            "memory_after_mb": round(memory_after, 1),
+            "memory_freed_mb": round(memory_freed, 1),
+            "message": f"Memory cleanup completed. Freed {round(memory_freed, 1)}MB"
+        }
+    except Exception as e:
+        logger.error(f"Memory cleanup failed: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
 # Root endpoint for basic health check
 @app.get("/")
 async def root():
@@ -281,6 +316,16 @@ async def initialize_services():
         )
         logger.debug("Activity generator scheduled every 5 seconds")
 
+        # Schedule periodic memory cleanup every 10 minutes
+        scheduler.add_job(
+            _periodic_memory_cleanup,
+            'interval',
+            minutes=10,
+            id='memory_cleanup',
+            replace_existing=True
+        )
+        logger.debug("Memory cleanup scheduled every 10 minutes")
+
         logger.info("Services initialized successfully.")
     except Exception as e:
         logger.critical(f"Failed to initialize services: {e}", exc_info=True)
@@ -294,6 +339,28 @@ async def main_polling():
     await bot_app.run_polling(allowed_updates=["message", "callback_query"])
 
 # Background task to continuously ping health endpoint
+async def _periodic_memory_cleanup():
+    """Periodic memory cleanup to prevent memory leaks."""
+    try:
+        memory_before = get_memory_usage()
+        logger.debug(f"Starting periodic memory cleanup. Memory before: {memory_before".1f"}MB")
+
+        # Clear model cache
+        clear_model_cache()
+
+        # Force garbage collection
+        import gc
+        gc.collect()
+
+        memory_after = get_memory_usage()
+        memory_freed = memory_before - memory_after
+
+        if memory_freed > 10:  # Only log if we freed significant memory
+            logger.info(f"Memory cleanup completed. Freed {memory_freed".1f"}MB (before: {memory_before".1f"}MB, after: {memory_after".1f"}MB)")
+
+    except Exception as e:
+        logger.error(f"Periodic memory cleanup failed: {e}")
+
 async def background_keepalive():
     """Background task that continuously pings the health endpoint."""
     import asyncio

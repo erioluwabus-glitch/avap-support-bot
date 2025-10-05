@@ -162,6 +162,7 @@ async def _send_answer_to_student(
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle cancel command"""
     await update.message.reply_text("❌ Operation cancelled.")
+    context.user_data.clear()
     return ConversationHandler.END
 
 
@@ -178,11 +179,16 @@ answer_conv = ConversationHandler(
         ANSWER_TEXT: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, answer_text)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False
+    per_message=False,
+    conversation_timeout=600
 )
 
 
 def register_handlers(application):
     """Register all question answering handlers with the application"""
     application.add_handler(answer_conv)
+
+    # Add global callback handler to fix per_message=False warning
+    # Note: answer_ callbacks are also handled globally in answer.py
+    application.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
 

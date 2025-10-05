@@ -77,6 +77,7 @@ async def answer_type_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if answer_type == "cancel":
         await query.edit_message_text("❌ Answer cancelled.")
+        context.user_data.clear()
         return ConversationHandler.END
     
     context.user_data['answer_type'] = answer_type

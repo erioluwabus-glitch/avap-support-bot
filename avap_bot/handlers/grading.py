@@ -66,6 +66,7 @@ async def grade_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     
     if query.data == "grade_cancel":
         await query.edit_message_text("❌ Grading cancelled.")
+        context.user_data.clear()
         return ConversationHandler.END
     
     score = int(query.data.split("_")[1])
@@ -221,27 +222,47 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
 
 
 def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
-    """Extract submission info from forwarded message"""
+    """Extract submission info from forwarded message or bot message"""
     try:
-        text = message.text or message.caption or ""
-        
-        # Regex extraction for all required fields
-        username_match = re.search(r"Student: @(\w+)", text)
-        telegram_id_match = re.search(r"Telegram ID: (\d+)", text)
-        module_match = re.search(r"Module: (\d+)", text)
-        type_match = re.search(r"Type: (\w+)", text)
-        
-        if username_match and module_match and type_match and telegram_id_match:
-            return {
-                'username': username_match.group(1),
-                'telegram_id': int(telegram_id_match.group(1)),
-                'module': module_match.group(1),
-                'type': type_match.group(1),
-            }
-        
+        # Check if this is a forwarded message from a student
+        if message.forward_from:
+            # This is a forwarded message - extract from the forwarded message content
+            text = message.text or message.caption or ""
+
+            # Look for student info in the forwarded message
+            username_match = re.search(r"Student: @(\w+)", text)
+            telegram_id_match = re.search(r"Telegram ID: (\d+)", text)
+            module_match = re.search(r"Module: (\d+)", text)
+            type_match = re.search(r"Type: (\w+)", text)
+
+            if username_match and module_match and type_match and telegram_id_match:
+                return {
+                    'username': username_match.group(1),
+                    'telegram_id': int(telegram_id_match.group(1)),
+                    'module': module_match.group(1),
+                    'type': type_match.group(1),
+                }
+        else:
+            # This might be a bot message with assignment details - look for the pattern
+            text = message.text or message.caption or ""
+
+            # Look for assignment details pattern
+            username_match = re.search(r"Student: @(\w+)", text)
+            telegram_id_match = re.search(r"Telegram ID: (\d+)", text)
+            module_match = re.search(r"Module: (\d+)", text)
+            type_match = re.search(r"Type: (\w+)", text)
+
+            if username_match and module_match and type_match and telegram_id_match:
+                return {
+                    'username': username_match.group(1),
+                    'telegram_id': int(telegram_id_match.group(1)),
+                    'module': module_match.group(1),
+                    'type': type_match.group(1),
+                }
+
         logger.warning("Could not extract all required info from message text: %s", text)
         return None
-        
+
     except Exception as e:
         logger.exception("Failed to extract submission info: %s", e)
         return None
@@ -259,9 +280,9 @@ def _is_admin(update: Update) -> bool:
     return user_id == ADMIN_USER_ID
 
 
-# Conversation handler
+# Conversation handler - available to admins in any chat
 grade_conv = ConversationHandler(
-    entry_points=[CommandHandler("grade", grade_assignment, filters=filters.Chat(chat_id=ASSIGNMENT_GROUP_ID))],
+    entry_points=[CommandHandler("grade", grade_assignment)],
     states={
         GRADE_SCORE: [CallbackQueryHandler(grade_score, pattern="^grade_|^grade_cancel$")],
         GRADE_COMMENT: [
@@ -270,11 +291,16 @@ grade_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False
+    per_message=False,
+    conversation_timeout=600
 )
 
 
 def register_handlers(application):
     """Register all grading handlers with the application"""
-    # Add conversation handler
+    # Add conversation handler - available to admins for grading assignments
     application.add_handler(grade_conv)
+
+    # Add global callback handlers to fix per_message=False warnings
+    application.add_handler(CallbackQueryHandler(grade_score, pattern="^grade_|^grade_cancel$"))
+    application.add_handler(CallbackQueryHandler(grade_comment, pattern="^add_comment$|^no_comment$"))

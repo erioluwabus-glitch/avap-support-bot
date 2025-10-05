@@ -17,7 +17,7 @@ from avap_bot.services.supabase_service import (
     promote_pending_to_verified, remove_verified_by_identifier,
     find_verified_by_email_or_phone, find_verified_by_name
 )
-from avap_bot.services.sheets_service import append_pending_verification, update_verification_status
+from avap_bot.services.sheets_service import append_pending_verification, update_verification_status, test_sheets_connection
 from avap_bot.services.systeme_service import create_contact_and_tag, untag_or_remove_contact
 from avap_bot.utils.validators import validate_email, validate_phone
 from avap_bot.utils.run_blocking import run_blocking
@@ -333,6 +333,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
     
     if query.data == "remove_cancel":
         await query.edit_message_text("❌ Removal cancelled.")
+        context.user_data.clear()
         return ConversationHandler.END
     
     if not _is_admin(update):
@@ -442,6 +443,25 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def test_sheets_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Test Google Sheets connection (admin only)"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only for admins.")
+        return ConversationHandler.END
+
+    try:
+        success = await run_blocking(test_sheets_connection)
+        if success:
+            await update.message.reply_text("✅ Google Sheets connection test successful!")
+        else:
+            await update.message.reply_text("❌ Google Sheets connection test failed. Check logs for details.")
+    except Exception as e:
+        logger.exception("Sheets test command failed: %s", e)
+        await update.message.reply_text(f"❌ Sheets test failed: {str(e)}")
+
+    return ConversationHandler.END
+
+
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
@@ -468,7 +488,8 @@ remove_student_conv = ConversationHandler(
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],
     },
     fallbacks=fallbacks,
-    per_message=False
+    per_message=False,
+    conversation_timeout=600
 )
 
 
@@ -477,6 +498,10 @@ def register_handlers(application):
     # Add conversation handlers
     application.add_handler(add_student_conv)
     application.add_handler(remove_student_conv)
-    
+
+    # Add test command for Google Sheets
+    application.add_handler(CommandHandler("test_sheets", test_sheets_handler))
+
     # Add callback query handlers
     application.add_handler(CallbackQueryHandler(admin_verify_callback, pattern="^verify_"))
+    application.add_handler(CallbackQueryHandler(remove_student_confirm, pattern="^remove_"))

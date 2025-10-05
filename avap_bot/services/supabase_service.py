@@ -203,7 +203,7 @@ def find_verified_by_name(name: str) -> List[Dict[str, Any]]:
         return []
 
 
-def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, Any]:
+async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, Any]:
     """Promote pending verification to verified user"""
     client = get_supabase()
     try:
@@ -213,6 +213,8 @@ def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, 
             raise Exception("Pending verification not found")
 
         row = r.data[0]
+        logger.info(f"Promoting user: {row['name']} ({row['email']}) from pending to verified")
+
         verified_payload = {
             "name": row["name"],
             "email": row["email"],
@@ -220,12 +222,37 @@ def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict[str, 
             "telegram_id": telegram_id,
             "status": "verified"
         }
+
+        logger.info(f"Inserting verified user payload: {verified_payload}")
         ins = client.table("verified_users").insert(verified_payload).execute()
+
+        if not ins.data:
+            logger.error("Failed to insert verified user - no data returned")
+            raise Exception("Failed to insert verified user")
+
+        verified_user = ins.data[0]
+        logger.info(f"Successfully inserted verified user: {verified_user['name']} ({verified_user['email']})")
+
+        # Update Systeme.io tag from "pending" to "verified"
+        try:
+            from avap_bot.services.systeme_service import create_contact_and_tag
+            # Update contact with verified status
+            contact_data = {
+                "name": row["name"],
+                "email": row["email"],
+                "phone": row["phone"],
+                "status": "verified"
+            }
+            # This will create/update the contact with "verified" tag
+            await create_contact_and_tag(contact_data)
+        except Exception as systeme_error:
+            logger.warning(f"Failed to update Systeme.io tag: {systeme_error}")
+            # Don't fail the verification if Systeme.io update fails
 
         # Optionally delete pending row:
         client.table("pending_verifications").delete().eq("id", pending_id).execute()
 
-        return ins.data[0]
+        return verified_user
     except Exception as e:
         logger.exception("Supabase promote_pending_to_verified error: %s", e)
         raise
@@ -413,7 +440,7 @@ def get_student_wins(telegram_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-def add_question(telegram_id: int, username: str, question_text: str, file_id: Optional[str] = None, file_name: Optional[str] = None) -> Dict[str, Any]:
+def add_question(telegram_id: int, username: str, question_text: str, file_id: Optional[str] = None, file_name: Optional[str] = None, answer: Optional[str] = None, status: str = "pending") -> Dict[str, Any]:
     """Add a new question"""
     client = get_supabase()
     try:
@@ -423,9 +450,15 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
             "question_text": question_text,
             "file_id": file_id,
             "file_name": file_name,
-            "status": "pending",
+            "status": status,
             "asked_at": datetime.now(timezone.utc).isoformat()
         }
+
+        # Only add answer if provided (for auto-answered questions)
+        if answer:
+            payload["answer"] = answer
+            payload["answered_at"] = datetime.now(timezone.utc).isoformat()
+
         res = client.table("questions").insert(payload).execute()
         return res.data[0]
     except Exception as e:

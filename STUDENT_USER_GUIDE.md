@@ -116,6 +116,12 @@ You need:
 3. Your question is forwarded to the support team
 4. You'll receive an answer in your DM
 
+**Smart Question Answering:**
+- **FAQ Matching:** If your question matches our FAQ database, you'll get an instant answer!
+- **Previous Answers:** If someone asked a similar question before (80%+ similarity), you'll get that answer automatically!
+- **AI Assistance:** For new questions, our AI provides helpful responses
+- **Admin Support:** Complex questions are forwarded to admins for personalized help
+
 **Question tips:**
 - Be specific and clear
 - Include context if needed
@@ -127,7 +133,7 @@ You need:
 - Assignment clarifications
 - General learning questions
 
-> 💡 **Voice/Video Questions:** Now properly forwarded as original messages (not converted to documents) for better clarity!
+> 💡 **Enhanced Experience:** Questions are now intelligently matched and answered automatically when possible!
 
 ---
 
@@ -143,11 +149,18 @@ You can also ask questions directly in the support group!
 ```
 
 **What happens:**
-1. Your question is forwarded to the support team
-2. Bot confirms receipt in the group (tagging you)
-3. You'll receive the answer in your DM
+1. **Smart Auto-Answering:** Bot checks if your question matches FAQ or previous answers
+2. **Instant Response:** If match found, you get an immediate answer!
+3. **Admin Forwarding:** If no match, question is forwarded to support team
+4. **Answer Delivery:** You'll receive the answer in your DM
 
-> 📌 **Note:** You must be verified to use `/ask` in the support group.
+**Enhanced Features:**
+- **FAQ Matching:** Common questions answered instantly
+- **Similarity Detection:** Previous similar questions return those answers (80%+ match)
+- **AI Fallback:** New questions get AI-generated responses
+- **Admin Escalation:** Complex questions reach human support
+
+> 📌 **Note:** You must be verified to use `/ask` in the support group. Questions are intelligently processed for the best possible response!
 
 ---
 

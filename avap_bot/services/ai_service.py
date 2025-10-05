@@ -1,56 +1,119 @@
 """
-AI service for Hugging Face integration
+AI service for Hugging Face integration with memory optimization
 """
 import os
 import logging
 import asyncio
+import gc
+import psutil
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
+from contextlib import contextmanager
 
 import requests
-from sentence_transformers import SentenceTransformer
 import numpy as np
+
+try:
+    import psutil
+except ImportError:
+    # Fallback if psutil is not available
+    def get_memory_usage():
+        return 0
+
+    def log_memory_usage(context: str):
+        pass
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 
 logger = logging.getLogger(__name__)
 
-# Initialize sentence transformer model
-model = None
+# Model cache with aggressive cleanup
+_model = None
+_model_last_used = None
+MODEL_CACHE_DURATION = 60  # 1 minute for aggressive memory management
 
-def get_model():
-    """Get or initialize the sentence transformer model"""
-    global model
-    if model is None:
-        model = SentenceTransformer('all-MiniLM-L6-v2')
-    return model
+@contextmanager
+def managed_model():
+    """Context manager for model loading with automatic cleanup"""
+    global _model, _model_last_used
+
+    # Clean up old model if cache expired
+    if (_model_last_used and
+        (datetime.now(timezone.utc) - _model_last_used).seconds > MODEL_CACHE_DURATION):
+        logger.info("Cleaning up expired model cache")
+        if _model:
+            del _model
+            _model = None
+        gc.collect()
+
+    # Load model if not cached
+    if _model is None:
+        log_memory_usage("before model loading")
+        logger.info("Loading sentence transformer model...")
+        _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+        _model_last_used = datetime.now(timezone.utc)
+        log_memory_usage("after model loading")
+
+    try:
+        yield _model
+    finally:
+        # Model will be cleaned up by cache expiration logic
+        pass
+
+def clear_model_cache():
+    """Force clear the model cache"""
+    global _model, _model_last_used
+    if _model:
+        del _model
+        _model = None
+    _model_last_used = None
+    gc.collect()
+    log_memory_usage("after model cache clear")
 
 
 async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
-    """Find best FAQ match using semantic similarity"""
+    """Find best FAQ match using semantic similarity with memory optimization"""
     try:
         # Get all FAQs
         faqs = get_faqs()
         if not faqs:
             return None
 
-        # Get sentence transformer model
-        transformer = get_model()
+        # Use managed model context for automatic cleanup
+        with managed_model() as transformer:
+            log_memory_usage("start FAQ matching")
 
-        # Encode question and FAQ questions
-        question_embedding = transformer.encode([question])
-        faq_questions = [faq['question'] for faq in faqs]
-        faq_embeddings = transformer.encode(faq_questions)
+            # Limit FAQ list size to prevent memory issues (top 50 FAQs)
+            max_faqs = 50
+            if len(faqs) > max_faqs:
+                logger.info(f"Limiting FAQ search to {max_faqs} most recent FAQs")
+                faqs = faqs[:max_faqs]
 
-        # Calculate similarities
-        similarities = np.dot(question_embedding, faq_embeddings.T)[0]
+            # Encode question and FAQ questions in batches
+            question_embedding = transformer.encode([question])
+            faq_questions = [faq['question'] for faq in faqs]
 
-        # Find best match
-        best_idx = np.argmax(similarities)
-        best_similarity = similarities[best_idx]
+            # Batch encode FAQs to reduce memory usage
+            batch_size = 10
+            faq_embeddings = []
+            for i in range(0, len(faq_questions), batch_size):
+                batch = faq_questions[i:i + batch_size]
+                batch_embeddings = transformer.encode(batch)
+                faq_embeddings.extend(batch_embeddings)
 
-        if best_similarity >= threshold:
-            return faqs[best_idx]
+            faq_embeddings = np.array(faq_embeddings)
+
+            # Calculate similarities
+            similarities = np.dot(question_embedding, faq_embeddings.T)[0]
+
+            # Find best match
+            best_idx = np.argmax(similarities)
+            best_similarity = similarities[best_idx]
+
+            log_memory_usage("end FAQ matching")
+
+            if best_similarity >= threshold:
+                return faqs[best_idx]
 
         return None
 
@@ -59,8 +122,8 @@ async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict
         return None
 
 
-async def find_similar_answered_question(question: str, threshold: float = 0.75) -> Optional[Dict[str, Any]]:
-    """Find similar previously answered questions using semantic similarity"""
+async def find_similar_answered_question(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
+    """Find similar previously answered questions using semantic similarity with memory optimization"""
     try:
         from avap_bot.services.supabase_service import get_answered_questions
 
@@ -69,23 +132,41 @@ async def find_similar_answered_question(question: str, threshold: float = 0.75)
         if not answered_questions:
             return None
 
-        # Get sentence transformer model
-        transformer = get_model()
+        # Use managed model context for automatic cleanup
+        with managed_model() as transformer:
+            log_memory_usage("start similar question matching")
 
-        # Encode question and answered questions
-        question_embedding = transformer.encode([question])
-        answered_texts = [q['question_text'] for q in answered_questions]
-        answered_embeddings = transformer.encode(answered_texts)
+            # Limit answered questions to prevent memory issues (top 100)
+            max_questions = 100
+            if len(answered_questions) > max_questions:
+                logger.info(f"Limiting similar question search to {max_questions} most recent questions")
+                answered_questions = answered_questions[:max_questions]
 
-        # Calculate similarities
-        similarities = np.dot(question_embedding, answered_embeddings.T)[0]
+            # Encode question and answered questions in batches
+            question_embedding = transformer.encode([question])
+            answered_texts = [q['question_text'] for q in answered_questions]
 
-        # Find best match
-        best_idx = np.argmax(similarities)
-        best_similarity = similarities[best_idx]
+            # Batch encode answered questions to reduce memory usage
+            batch_size = 15
+            answered_embeddings = []
+            for i in range(0, len(answered_texts), batch_size):
+                batch = answered_texts[i:i + batch_size]
+                batch_embeddings = transformer.encode(batch)
+                answered_embeddings.extend(batch_embeddings)
 
-        if best_similarity >= threshold:
-            return answered_questions[best_idx]
+            answered_embeddings = np.array(answered_embeddings)
+
+            # Calculate similarities
+            similarities = np.dot(question_embedding, answered_embeddings.T)[0]
+
+            # Find best match
+            best_idx = np.argmax(similarities)
+            best_similarity = similarities[best_idx]
+
+            log_memory_usage("end similar question matching")
+
+            if best_similarity >= threshold:
+                return answered_questions[best_idx]
 
         return None
 

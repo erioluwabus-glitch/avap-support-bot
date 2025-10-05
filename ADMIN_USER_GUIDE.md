@@ -363,10 +363,11 @@ You automatically receive notifications for:
 
 ### System Health
 1. **Monitor notifications** - Act on errors quickly
-2. **Check logs regularly** - Catch issues early
-3. **Test new features** - Verify changes work before students use them
-4. **Backup important data** - Google Sheets serves this purpose
-5. **Bot stability** - Bot now uses ultra-aggressive keepalive (3-second intervals) to prevent sleep issues
+2. **Check logs regularly** - Catch issues early (enhanced logging now available)
+3. **Test new features** - Use `/test_sheets` and `/test_tip` commands
+4. **Backup important data** - Google Sheets serves this purpose (CSV fallback available)
+5. **Bot stability** - Ultra-aggressive keepalive (3-second intervals) + memory management
+6. **Memory monitoring** - Automatic cleanup when approaching 512MB limit
 
 ---
 
@@ -401,13 +402,41 @@ You automatically receive notifications for:
 5. Check error notifications
 
 #### Daily Tips Not Sending
-**Symptoms:** Tips not arriving at 8 AM  
+**Symptoms:** Tips not arriving at 8 AM
 **Solutions:**
 1. Check scheduler is running (Render logs)
-2. Verify SUPPORT_GROUP_ID
+2. Verify SUPPORT_GROUP_ID is configured
 3. Add manual tips with `/add_tip`
 4. Check OPENAI_API_KEY for AI tips
 5. Review error notifications
+6. Test with `/test_tip` command (admin only)
+
+#### Support Group /ask Not Working
+**Symptoms:** `/ask` commands in support group not responding
+**Solutions:**
+1. Verify SUPPORT_GROUP_ID is correctly configured
+2. Check that handler is registered (should appear in logs)
+3. Test with `/test_sheets` to verify bot connectivity
+4. Review logs for "Support group ask handler triggered" messages
+5. Ensure student is verified before using `/ask`
+
+#### Google Sheets Not Updating
+**Symptoms:** Wins, assignments, verification not appearing in Sheets
+**Solutions:**
+1. Test with `/test_sheets` command (admin only)
+2. Verify GOOGLE_SHEET_ID and GOOGLE_CREDENTIALS_JSON are configured
+3. Check CSV fallback directory exists and is writable
+4. Review error notifications for Sheets failures
+5. Check Render logs for authentication errors
+
+#### Memory Issues (Bot Crashing)
+**Symptoms:** Bot exceeding 512MB memory limit on Render
+**Solutions:**
+1. Bot now has aggressive memory management (1-minute model cache)
+2. Conversation timeouts prevent abandoned conversations
+3. Check logs for memory usage warnings
+4. Monitor for high memory usage alerts
+5. Restart bot if memory issues persist
 
 ---
 
@@ -475,6 +504,30 @@ You automatically receive notifications for:
 - Top student rate (how many achieve 3/3?)
 - Question response time (how fast do you answer?)
 
+### 🤖 Enhanced FAQ System
+
+**New Smart Question Answering:**
+- **FAQ Database Matching:** Questions matching 80%+ similarity to FAQ database get instant answers
+- **Previous Answer Matching:** Questions similar to previously answered questions (80%+ match) return those answers
+- **AI Fallback:** New questions get AI-generated responses
+- **Admin Escalation:** Complex questions still reach you for personalized help
+
+**Support Group Integration:**
+- Students can use `/ask <question>` directly in support groups
+- Smart auto-answering reduces admin workload
+- Questions still forwarded to assignment group if no auto-answer found
+
+**Benefits:**
+- Faster response times for common questions
+- Reduced admin workload for repetitive questions
+- Better student experience with instant answers
+- Questions stored for future FAQ matching
+
+**Monitoring:**
+- Watch for "Similar Question Found!" messages in logs
+- Check Google Sheets for auto-answered questions
+- Monitor AI answer quality and adjust as needed
+
 ---
 
 ## 🚨 Emergency Procedures
@@ -527,6 +580,8 @@ You automatically receive notifications for:
 - `/list_achievers` - See top students
 - `/broadcast <message>` - Message all students
 - `/add_tip <tip>` - Add daily tip
+- `/test_sheets` - Test Google Sheets connection (admin only)
+- `/test_tip` - Test daily tip sending (admin only)
 
 ---
 
@@ -540,9 +595,10 @@ You automatically receive notifications for:
 - **Engagement:** Monitor wins and questions
 
 ### Bot Health
-- **Uptime:** 99%+ (monitor Render)
-- **Error Rate:** < 5% of operations
-- **Duplicate Blocks:** Track prevention success
+- **Memory Management:** Aggressive cleanup (1-minute model cache, 10-minute conversation timeouts)
+- **Connection Stability:** Ultra-aggressive keepalive (3-second intervals)
+- **Error Monitoring:** Enhanced logging for all operations
+- **Auto-Recovery:** System continues working even if components fail
 - **Student Satisfaction:** Gather feedback
 
 ---

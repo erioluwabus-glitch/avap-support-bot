@@ -255,6 +255,7 @@ async def broadcast_type_callback(update: Update, context: ContextTypes.DEFAULT_
 
     if broadcast_type == "cancel":
         await query.edit_message_text("❌ Broadcast cancelled.")
+        context.user_data.clear()
         return ConversationHandler.END
 
     context.user_data['broadcast_type'] = broadcast_type
@@ -390,7 +391,8 @@ message_achievers_conv = ConversationHandler(
         MESSAGE_ACHIEVERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, message_achievers)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False
+    per_message=False,
+    conversation_timeout=600
 )
 
 broadcast_conv = ConversationHandler(
@@ -402,7 +404,8 @@ broadcast_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False
+    per_message=False,
+    conversation_timeout=600
 )
 
 
@@ -412,6 +415,10 @@ def register_handlers(application):
     application.add_handler(get_submission_conv)
     application.add_handler(message_achievers_conv)
     application.add_handler(broadcast_conv)
-    
+
+    # Add global callback handlers to fix per_message=False warnings
+    application.add_handler(CallbackQueryHandler(broadcast_achievers, pattern="^broadcast_achievers$"))
+    application.add_handler(CallbackQueryHandler(broadcast_type_callback, pattern="^broadcast_"))
+
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
