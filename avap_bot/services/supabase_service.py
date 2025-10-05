@@ -80,8 +80,9 @@ def check_tables_exist():
             try:
                 client.table(table).select('*').limit(1)
             except AttributeError:
-                client.table(table).select('*').limit(1)        except Exception as e:
-            logger.warning(f"Table {table} may not exist: {e}")
+                client.table(table).select('*').limit(1).execute()
+            except Exception as e:
+                logger.warning(f"Table {table} may not exist: {e}")
 
 
 def init_supabase() -> Client:
