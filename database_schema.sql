@@ -94,6 +94,21 @@ CREATE TABLE IF NOT EXISTS tips (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Broadcast history table for tracking sent messages
+CREATE TABLE IF NOT EXISTS broadcast_history (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    broadcast_type TEXT NOT NULL, -- 'text', 'audio', 'video'
+    content TEXT, -- text content or file_id
+    content_type TEXT, -- 'text', 'voice', 'video'
+    file_name TEXT, -- for audio/video files
+    sent_to_count INTEGER DEFAULT 0,
+    failed_count INTEGER DEFAULT 0,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    admin_id BIGINT NOT NULL,
+    admin_username TEXT,
+    message_ids JSONB DEFAULT '[]'::jsonb -- Array of {user_id: message_id} objects
+);
+
 -- Insert some sample FAQs
 INSERT INTO faqs (question, answer, category) VALUES
 ('How do I submit an assignment?', 'Use the "Submit Assignment" button in the bot menu, select your module, choose the type (text/audio/video), and send your work.', 'submission'),
@@ -119,6 +134,8 @@ CREATE INDEX IF NOT EXISTS idx_assignments_username ON assignments(username);
 CREATE INDEX IF NOT EXISTS idx_assignments_status ON assignments(status);
 CREATE INDEX IF NOT EXISTS idx_match_requests_status ON match_requests(status);
 CREATE INDEX IF NOT EXISTS idx_tips_day_of_week ON tips(day_of_week);
+CREATE INDEX IF NOT EXISTS idx_broadcast_history_sent_at ON broadcast_history(sent_at);
+CREATE INDEX IF NOT EXISTS idx_broadcast_history_admin_id ON broadcast_history(admin_id);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE pending_verifications ENABLE ROW LEVEL SECURITY;
@@ -129,6 +146,7 @@ ALTER TABLE wins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE faqs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tips ENABLE ROW LEVEL SECURITY;
+ALTER TABLE broadcast_history ENABLE ROW LEVEL SECURITY;
 
 -- Create policies (allow all for now - adjust based on your security needs)
 CREATE POLICY "Allow all operations" ON pending_verifications FOR ALL USING (true);
@@ -139,3 +157,4 @@ CREATE POLICY "Allow all operations" ON wins FOR ALL USING (true);
 CREATE POLICY "Allow all operations" ON questions FOR ALL USING (true);
 CREATE POLICY "Allow all operations" ON faqs FOR ALL USING (true);
 CREATE POLICY "Allow all operations" ON tips FOR ALL USING (true);
+CREATE POLICY "Allow all operations" ON broadcast_history FOR ALL USING (true);

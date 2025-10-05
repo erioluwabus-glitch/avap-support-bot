@@ -1,0 +1,5 @@
+username,email,phone,telegram_id,status,badge,created_at,updated_at
+testuser1,test1@example.com,+1234567890,123456789,verified,New Student,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+testuser2,test2@example.com,+1234567891,123456790,verified,New Student,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+testuser3,test3@example.com,+1234567892,123456791,verified,New Student,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z
+achiever1,achiever1@example.com,+1234567893,123456792,verified,Top Student,2025-01-01T00:00:00Z,2025-01-01T00:00:00Z

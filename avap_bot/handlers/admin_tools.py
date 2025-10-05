@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQ
 from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users
-from avap_bot.services.supabase_service import get_supabase
+from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
@@ -113,41 +113,128 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not _is_admin(update):
         await update.message.reply_text("❌ This command is only for admins.")
         return
-    
+
     try:
         # Get achievers from Google Sheets
         achievers = await run_blocking(list_achievers)
-        
+
         if not achievers:
             await update.message.reply_text("📊 No achievers found.")
             return
-        
+
         # Format achievers list
         message = "🏆 **Top Achievers**\n\n"
         for i, achiever in enumerate(achievers, 1):
             username = achiever.get('username', 'Unknown')
             assignments = achiever.get('assignments', 0)
             wins = achiever.get('wins', 0)
-            
+
             message += f"**{i}. @{username}**\n"
             message += f"   Assignments: {assignments}\n"
             message += f"   Wins: {wins}\n\n"
-        
+
         # Add broadcast button
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📢 Broadcast to Achievers", callback_data="broadcast_achievers")]
         ])
-        
+
         await update.message.reply_text(
             message,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=keyboard
         )
-        
+
     except Exception as e:
         logger.exception("Failed to list achievers: %s", e)
         await notify_admin_telegram(context.bot, f"❌ List achievers failed: {str(e)}")
         await update.message.reply_text("❌ Failed to list achievers. Please try again.")
+
+
+async def broadcast_history_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /broadcast_history command"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only for admins.")
+        return
+
+    try:
+        # Get recent broadcast history
+        broadcasts = await run_blocking(get_broadcast_history, 20)
+
+        if not broadcasts:
+            await update.message.reply_text("📜 No broadcast history found.")
+            return
+
+        # Send each broadcast as a separate message with delete option
+        for i, broadcast in enumerate(broadcasts, 1):
+            broadcast_id = broadcast.get('id')
+            broadcast_type = broadcast.get('broadcast_type', 'Unknown').title()
+            sent_at = broadcast.get('sent_at', 'Unknown')
+            sent_count = broadcast.get('sent_to_count', 0)
+            failed_count = broadcast.get('failed_count', 0)
+            admin_username = broadcast.get('admin_username', 'Unknown')
+
+            # Format sent_at to readable format
+            try:
+                dt = datetime.fromisoformat(sent_at.replace('Z', '+00:00'))
+                sent_at_formatted = dt.strftime("%Y-%m-%d %H:%M UTC")
+            except:
+                sent_at_formatted = sent_at
+
+            message = f"**{i}. {broadcast_type} Broadcast**\n"
+            message += f"📅 Sent: {sent_at_formatted}\n"
+            message += f"👤 By: @{admin_username}\n"
+            message += f"📊 Recipients: {sent_count} sent, {failed_count} failed\n"
+
+            # Show content preview for text broadcasts
+            if broadcast.get('content_type') == 'text' and broadcast.get('content'):
+                content_preview = broadcast['content'][:50] + "..." if len(broadcast['content']) > 50 else broadcast['content']
+                message += f"💬 Content: \"{content_preview}\"\n"
+
+            # Add delete button for this broadcast
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🗑️ Delete This Broadcast", callback_data=f"delete_broadcast_{broadcast_id}")],
+                [InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="admin_menu")]
+            ])
+
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+
+    except Exception as e:
+        logger.exception("Failed to get broadcast history: %s", e)
+        await notify_admin_telegram(context.bot, f"❌ Broadcast history failed: {str(e)}")
+        await update.message.reply_text("❌ Failed to get broadcast history. Please try again.")
+
+
+async def delete_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle delete broadcast callback"""
+    query = update.callback_query
+    await query.answer()
+
+    if not _is_admin(update):
+        await query.edit_message_text("❌ This command is only for admins.")
+        return ConversationHandler.END
+
+    # Extract broadcast ID from callback data (format: "delete_broadcast_{id}")
+    broadcast_id = query.data.replace("delete_broadcast_", "")
+
+    try:
+        # Delete the broadcast messages
+        success = await run_blocking(delete_broadcast_messages, broadcast_id, query.bot)
+
+        if success:
+            await query.edit_message_text("✅ **Broadcast messages deleted successfully!**")
+        else:
+            await query.edit_message_text("❌ Failed to delete broadcast messages.")
+
+    except Exception as e:
+        logger.exception("Failed to delete broadcast: %s", e)
+        await notify_admin_telegram(query.bot, f"❌ Delete broadcast failed: {str(e)}")
+        await query.edit_message_text("❌ Failed to delete broadcast. Please try again.")
+
+    return ConversationHandler.END
 
 
 async def broadcast_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -191,20 +278,12 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             try:
                 telegram_id = achiever.get('telegram_id')
                 if telegram_id:
+                    # Send only the raw message without prefix
                     await context.bot.send_message(
                         telegram_id,
-                        message_text,
-                        parse_mode=ParseMode.MARKDOWN
+                        message_text  # Send raw message without "Message from Admin" prefix
                     )
                     sent_count += 1
-
-                    # Store broadcast message for deletion tracking (for achievers)
-                    try:
-                        from avap_bot.services.supabase_service import add_broadcast_message
-                        await run_blocking(add_broadcast_message, "achievers", message_text, update.effective_user.id)
-                    except Exception as e:
-                        logger.warning("Failed to store achievers broadcast message for deletion: %s", e)
-
                 else:
                     failed_users.append(achiever)
             except Exception as e:
@@ -308,9 +387,42 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             await update.message.reply_text("❌ No verified users found.")
             return ConversationHandler.END
 
-        # Prepare broadcast content
+        # Create broadcast record in history
+        admin_id = update.effective_user.id
+        admin_username = update.effective_user.username or "Unknown"
+
+        broadcast_record = None
+        if broadcast_type == "text":
+            content = update.message.text
+            content_type = "text"
+            file_name = None
+        elif broadcast_type == "audio":
+            content = update.message.voice.file_id if update.message.voice else None
+            content_type = "voice"
+            file_name = getattr(update.message.voice, 'file_name', None) if update.message.voice else None
+        elif broadcast_type == "video":
+            content = update.message.video.file_id if update.message.video else None
+            content_type = "video"
+            file_name = getattr(update.message.video, 'file_name', None) if update.message.video else None
+
+        broadcast_record = await run_blocking(
+            add_broadcast_record,
+            broadcast_type,
+            content,
+            content_type,
+            admin_id,
+            admin_username,
+            file_name
+        )
+
+        if not broadcast_record:
+            await update.message.reply_text("❌ Failed to create broadcast record.")
+            return ConversationHandler.END
+
+        # Prepare broadcast content and track sent messages
         sent_count = 0
         failed_count = 0
+        message_ids = []
 
         for user in verified_users:
             try:
@@ -319,15 +431,17 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     failed_count += 1
                     continue
 
+                sent_message = None
+
                 if broadcast_type == "text":
                     if not update.message.text:
                         await update.message.reply_text("❌ Please send a text message.")
                         return BROADCAST_CONTENT
 
-                    await context.bot.send_message(
+                    # Remove the "📢 **Broadcast Message**" prefix - send only the raw text
+                    sent_message = await context.bot.send_message(
                         telegram_id,
-                        update.message.text,
-                        parse_mode=ParseMode.MARKDOWN
+                        update.message.text  # Send raw message without prefix
                     )
 
                 elif broadcast_type == "audio":
@@ -335,10 +449,10 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         await update.message.reply_text("❌ Please send an audio/voice message.")
                         return BROADCAST_CONTENT
 
-                    await context.bot.send_voice(
+                    sent_message = await context.bot.send_voice(
                         telegram_id,
-                        voice=update.message.voice.file_id,
-                        caption=None
+                        voice=update.message.voice.file_id
+                        # No caption - just the audio
                     )
 
                 elif broadcast_type == "video":
@@ -346,25 +460,33 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                         await update.message.reply_text("❌ Please send a video message.")
                         return BROADCAST_CONTENT
 
-                    await context.bot.send_video(
+                    sent_message = await context.bot.send_video(
                         telegram_id,
-                        video=update.message.video.file_id,
-                        caption=None
+                        video=update.message.video.file_id
+                        # No caption - just the video
                     )
 
                 sent_count += 1
 
-                # Store broadcast message for deletion tracking
-                try:
-                    from avap_bot.services.supabase_service import add_broadcast_message
-                    content = update.message.text if broadcast_type == "text" else f"{broadcast_type.title()} file"
-                    await run_blocking(add_broadcast_message, broadcast_type, content, update.effective_user.id)
-                except Exception as e:
-                    logger.warning("Failed to store broadcast message for deletion: %s", e)
+                # Track message ID for potential deletion later
+                if sent_message:
+                    message_ids.append({
+                        "user_id": telegram_id,
+                        "message_id": sent_message.message_id
+                    })
 
             except Exception as e:
                 logger.exception("Failed to send broadcast: %s", e)
                 failed_count += 1
+
+        # Update broadcast record with statistics
+        await run_blocking(
+            update_broadcast_stats,
+            broadcast_record.get('id'),
+            sent_count,
+            failed_count,
+            message_ids
+        )
 
         await update.message.reply_text(
             f"✅ **{broadcast_type.title()} Broadcast Complete!**\n\n"
@@ -377,90 +499,6 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.exception("Failed to broadcast: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Broadcast failed: {str(e)}")
         await update.message.reply_text("❌ Failed to broadcast. Please try again.")
-
-    return ConversationHandler.END
-
-
-async def delete_broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /delete_broadcast command - show list of broadcast messages for deletion"""
-    if not _is_admin(update):
-        await update.message.reply_text("❌ This command is only for admins.")
-        return ConversationHandler.END
-
-    try:
-        # Get broadcast messages from database
-        from avap_bot.services.supabase_service import get_broadcast_messages
-        broadcast_messages = await run_blocking(get_broadcast_messages)
-
-        if not broadcast_messages:
-            await update.message.reply_text("📭 No broadcast messages found.")
-            return ConversationHandler.END
-
-        # Format broadcast messages list
-        message = "🗑️ **Delete Broadcast Messages**\n\n"
-        message += "Select a broadcast message to delete:\n\n"
-
-        keyboard = []
-
-        for i, broadcast in enumerate(broadcast_messages, 1):
-            created_at = broadcast.get('created_at', 'Unknown')
-            broadcast_type = broadcast.get('broadcast_type', 'Unknown')
-            content_preview = broadcast.get('content', '')[:50] + "..." if len(broadcast.get('content', '')) > 50 else broadcast.get('content', '')
-
-            message += f"**{i}.** {broadcast_type.title()} - {created_at[:19]}\n"
-            message += f"Content: {content_preview}\n\n"
-
-            # Add button for deletion
-            keyboard.append([InlineKeyboardButton(
-                f"🗑️ Delete #{i}",
-                callback_data=f"delete_broadcast_{broadcast['id']}"
-            )])
-
-        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")])
-
-        await update.message.reply_text(
-            message,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    except Exception as e:
-        logger.exception("Failed to list broadcast messages: %s", e)
-        await update.message.reply_text("❌ Failed to retrieve broadcast messages. Please try again.")
-
-    return ConversationHandler.END
-
-
-async def delete_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle broadcast message deletion callback"""
-    query = update.callback_query
-    await query.answer()
-
-    if not _is_admin(update):
-        await query.edit_message_text("❌ This command is only for admins.")
-        return ConversationHandler.END
-
-    try:
-        # Parse broadcast ID from callback data
-        callback_data = query.data
-        if not callback_data.startswith("delete_broadcast_"):
-            await query.edit_message_text("❌ Invalid deletion request.")
-            return ConversationHandler.END
-
-        broadcast_id = int(callback_data.replace("delete_broadcast_", ""))
-
-        # Delete broadcast message from database
-        from avap_bot.services.supabase_service import delete_broadcast_message
-        success = await run_blocking(delete_broadcast_message, broadcast_id)
-
-        if success:
-            await query.edit_message_text("✅ **Broadcast message deleted successfully!**")
-        else:
-            await query.edit_message_text("❌ Failed to delete broadcast message.")
-
-    except Exception as e:
-        logger.exception("Failed to delete broadcast message: %s", e)
-        await query.edit_message_text("❌ Failed to delete broadcast message. Please try again.")
 
     return ConversationHandler.END
 
@@ -522,7 +560,5 @@ def register_handlers(application):
 
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
-    application.add_handler(CommandHandler("delete_broadcast", delete_broadcast_cmd))
-
-    # Add callback handlers for broadcast deletion
+    application.add_handler(CommandHandler("broadcast_history", broadcast_history_cmd))
     application.add_handler(CallbackQueryHandler(delete_broadcast_callback, pattern="^delete_broadcast_"))

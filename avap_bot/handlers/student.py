@@ -333,7 +333,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await run_blocking(append_submission, submission_data)
         
         # Forward to assignment group
-        if ASSIGNMENT_GROUP_ID:
+        if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
             logger.info(f"Forwarding assignment to group {ASSIGNMENT_GROUP_ID}")
             # First, forward the original student message
             try:
@@ -369,18 +369,25 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             )
 
             await context.bot.send_message(ASSIGNMENT_GROUP_ID, assignment_details, parse_mode=ParseMode.MARKDOWN)
+
+            await update.message.reply_text(
+                f"✅ **Assignment Submitted Successfully!**\n\n"
+                f"Module: {module}\n"
+                f"Type: {submission_type.title()}\n"
+                f"Status: Pending Review\n\n"
+                f"You'll be notified when it's graded.",
+                parse_mode=ParseMode.MARKDOWN
+            )
         else:
-            logger.warning("ASSIGNMENT_GROUP_ID not set - assignments will not be forwarded for grading!")
+            logger.warning("ASSIGNMENT_GROUP_ID not configured - assignments will not be forwarded for grading!")
             await notify_admin_telegram(context.bot, f"⚠️ ASSIGNMENT_GROUP_ID not configured. Assignment from @{username} (Module {module}) not forwarded for grading.")
-        
-        await update.message.reply_text(
-            f"✅ **Assignment Submitted Successfully!**\n\n"
-            f"Module: {module}\n"
-            f"Type: {submission_type.title()}\n"
-            f"Status: Pending Review\n\n"
-            f"You'll be notified when it's graded.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+            await update.message.reply_text(
+                f"⚠️ **Assignment Saved!**\n\n"
+                f"Your submission has been recorded in our system.\n"
+                f"However, admin notifications are not properly configured.\n"
+                f"An admin will need to check the system manually for new submissions.",
+                parse_mode=ParseMode.MARKDOWN
+            )
         
         # Clear conversation state and show main menu
         context.user_data.clear()
@@ -835,7 +842,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await run_blocking(append_question, question_data)
 
         # Forward to assignment group (where admins monitor)
-        if ASSIGNMENT_GROUP_ID:
+        if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
@@ -906,13 +913,22 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=keyboard
                 )
-        
-        await update.message.reply_text(
-            f"✅ **Question Submitted!**\n\n"
-            f"Your question has been forwarded to the support team.\n"
-            f"You'll receive an answer soon.",
-            parse_mode=ParseMode.MARKDOWN
-        )
+
+                await update.message.reply_text(
+                    f"✅ **Question Submitted!**\n\n"
+                    f"Your question has been forwarded to the support team.\n"
+                    f"You'll receive an answer soon.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        else:
+            # ASSIGNMENT_GROUP_ID not configured - question saved but not forwarded
+            await update.message.reply_text(
+                f"⚠️ **Question Saved!**\n\n"
+                f"Your question has been recorded in our system.\n"
+                f"However, admin notifications are not properly configured.\n"
+                f"An admin will need to check the system manually for new questions.",
+                parse_mode=ParseMode.MARKDOWN
+            )
         
         # Clear conversation state and show main menu
         context.user_data.clear()
@@ -1105,7 +1121,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         await run_blocking(append_question, question_data)
 
         # Forward to assignment group (where admins monitor)
-        if ASSIGNMENT_GROUP_ID:
+        if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
             forward_text = (
                 f"❓ **New Question from Support Group**\n\n"
                 f"Student: @{username}\n"
@@ -1124,14 +1140,23 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard
             )
-        
-        # Confirm in support group
-        await update.message.reply_text(
-            f"✅ Your question has been forwarded to the support team, @{username}!\n"
-            f"You'll get an answer soon.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_to_message_id=update.message.message_id
-        )
+
+            # Confirm in support group
+            await update.message.reply_text(
+                f"✅ Your question has been forwarded to the support team, @{username}!\n"
+                f"You'll get an answer soon.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_to_message_id=update.message.message_id
+            )
+        else:
+            # ASSIGNMENT_GROUP_ID not configured - question saved but not forwarded
+            await update.message.reply_text(
+                f"⚠️ Your question has been recorded, @{username}!\n"
+                f"However, admin notifications are not properly configured.\n"
+                f"An admin will need to check the system manually for new questions.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_to_message_id=update.message.message_id
+            )
 
         logger.info(f"Support group question processed successfully from {username}: {question_text}")
 

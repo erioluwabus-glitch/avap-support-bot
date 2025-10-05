@@ -69,6 +69,20 @@ def _get_sheets_client():
         raise RuntimeError("gspread not available")
 
     if _sheets_client is None:
+        # Check if we have any credentials available
+        has_credentials = GOOGLE_CREDENTIALS_JSON or os.path.exists("credentials.json")
+
+        if not has_credentials:
+            logger.error("No Google Sheets credentials found")
+            logger.error("Please configure Google Sheets credentials:")
+            logger.error("1. Set GOOGLE_CREDENTIALS_JSON environment variable with base64-encoded service account JSON")
+            logger.error("2. Or create credentials.json file with service account credentials")
+            logger.error("3. Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL")
+            logger.error("CSV fallback active - all data stored locally")
+            # Set a flag to indicate we're in fallback mode
+            os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
+            return None  # Return None to indicate no client available
+
         if GOOGLE_CREDENTIALS_JSON:
             logger.info("Using provided Google credentials from environment variable")
             try:
@@ -85,25 +99,28 @@ def _get_sheets_client():
             except Exception as e:
                 logger.error("Failed to parse GOOGLE_CREDENTIALS_JSON: %s", e)
                 logger.error("Make sure GOOGLE_CREDENTIALS_JSON contains valid JSON (base64 encoded or raw)")
-                raise RuntimeError("Invalid Google credentials")
+                logger.error("CSV fallback active - all data stored locally")
+                os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
+                return None  # Return None to indicate no client available
         else:
-            # Try to load credentials from file, but handle gracefully if not found
+            # Try to load credentials from file
             try:
                 creds = Credentials.from_service_account_file("credentials.json")
                 logger.info("Loaded credentials from credentials.json file")
             except FileNotFoundError:
-                logger.error("credentials.json file not found and GOOGLE_CREDENTIALS_JSON not set")
-                logger.error("Please configure Google Sheets credentials:")
-                logger.error("1. Set GOOGLE_CREDENTIALS_JSON environment variable with base64-encoded service account JSON")
-                logger.error("2. Or create credentials.json file with service account credentials")
-                logger.error("3. Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL")
+                logger.error("credentials.json file not found")
                 logger.error("CSV fallback active - all data stored locally")
-                # Set a flag to indicate we're in fallback mode
                 os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
                 return None  # Return None to indicate no client available
 
-        _sheets_client = gspread.authorize(creds)
-        logger.info("Google Sheets client initialized successfully")
+        try:
+            _sheets_client = gspread.authorize(creds)
+            logger.info("Google Sheets client initialized successfully")
+        except Exception as e:
+            logger.error("Failed to authenticate with Google Sheets: %s", e)
+            logger.error("CSV fallback active - all data stored locally")
+            os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
+            return None  # Return None to indicate no client available
 
     return _sheets_client
 
@@ -512,6 +529,11 @@ def list_achievers() -> List[Dict[str, Any]]:
     try:
         spreadsheet = _get_spreadsheet()
 
+        # Handle CSV fallback mode
+        if spreadsheet is None:
+            logger.info("Google Sheets not available, using CSV fallback for list_achievers")
+            return _list_achievers_csv()
+
         # Get verified users for telegram_id lookup
         verification_sheet = spreadsheet.worksheet("verification")
         verified_users = verification_sheet.get_all_records()
@@ -586,9 +608,92 @@ def list_achievers() -> List[Dict[str, Any]]:
                 achievers.append(achiever_data)
 
         return achievers
-        
+
     except Exception as e:
         logger.exception("Failed to list achievers: %s", e)
+        return []
+
+
+def _list_achievers_csv() -> List[Dict[str, Any]]:
+    """List achievers from CSV files (fallback when Google Sheets not available)"""
+    try:
+        # Read verified users CSV
+        verified_users = _read_csv_fallback("verified_users.csv")
+
+        # Create email to telegram_id mapping
+        email_to_telegram_id = {
+            user.get("email"): user.get("telegram_id")
+            for user in verified_users if user.get("email") and user.get("telegram_id")
+        }
+
+        # Read submissions CSV
+        submissions = _read_csv_fallback("submissions.csv")
+
+        # Read wins CSV
+        wins = _read_csv_fallback("wins.csv")
+
+        # Count submissions and wins per student
+        student_stats = {}
+
+        for submission in submissions:
+            username = submission.get("username")
+            if not username:
+                continue
+            if username not in student_stats:
+                student_stats[username] = {
+                    "assignments": 0,
+                    "wins": 0,
+                    "telegram_id": submission.get("telegram_id"),
+                    "email": submission.get("email")
+                }
+            student_stats[username]["assignments"] += 1
+            if not student_stats[username].get("telegram_id") and submission.get("telegram_id"):
+                student_stats[username]["telegram_id"] = submission.get("telegram_id")
+            if not student_stats[username].get("email") and submission.get("email"):
+                student_stats[username]["email"] = submission.get("email")
+
+        for win in wins:
+            username = win.get("username")
+            if not username:
+                continue
+            if username not in student_stats:
+                student_stats[username] = {
+                    "assignments": 0,
+                    "wins": 0,
+                    "telegram_id": win.get("telegram_id"),
+                    "email": win.get("email")
+                }
+            student_stats[username]["wins"] += 1
+            if not student_stats[username].get("telegram_id") and win.get("telegram_id"):
+                student_stats[username]["telegram_id"] = win.get("telegram_id")
+            if not student_stats[username].get("email") and win.get("email"):
+                student_stats[username]["email"] = win.get("email")
+
+        # Filter achievers (3+ assignments and 3+ wins)
+        achievers = []
+        for username, stats in student_stats.items():
+            if stats["assignments"] >= 3 and stats["wins"] >= 3:
+                telegram_id = stats.get("telegram_id")
+                if not telegram_id:
+                    # Fallback to email lookup
+                    email = stats.get("email")
+                    if email in email_to_telegram_id:
+                        telegram_id = email_to_telegram_id[email]
+
+                achiever_data = {
+                    "username": username,
+                    "assignments": stats["assignments"],
+                    "wins": stats["wins"],
+                    "telegram_id": telegram_id,
+                    "email": stats.get("email")
+                }
+                achievers.append(achiever_data)
+
+        logger.info(f"Found {len(achievers)} achievers from CSV files")
+        return achievers
+
+    except Exception as e:
+        logger.exception("Failed to list achievers from CSV: %s", e)
         return []
 
 
@@ -624,18 +729,41 @@ def get_manual_tips() -> List[Dict[str, Any]]:
     """Get manual tips from Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # Handle CSV fallback mode
+        if spreadsheet is None:
+            logger.info("Google Sheets not available, using CSV fallback for get_manual_tips")
+            return _get_manual_tips_csv()
+
         sheet = spreadsheet.worksheet("tips_manual")
-        
+
         # Get all data
         records = sheet.get_all_records()
-        
+
         # Filter manual tips
         manual_tips = [record for record in records if record.get("type") == "manual"]
-        
+
         return manual_tips
-        
+
     except Exception as e:
         logger.exception("Failed to get manual tips: %s", e)
+        return []
+
+
+def _get_manual_tips_csv() -> List[Dict[str, Any]]:
+    """Get manual tips from CSV files (fallback when Google Sheets not available)"""
+    try:
+        # Read tips CSV
+        tips = _read_csv_fallback("tips.csv")
+
+        # Filter manual tips
+        manual_tips = [tip for tip in tips if tip.get("tip_type") == "manual"]
+
+        logger.info(f"Found {len(manual_tips)} manual tips from CSV files")
+        return manual_tips
+
+    except Exception as e:
+        logger.exception("Failed to get manual tips from CSV: %s", e)
         return []
 
 
@@ -745,18 +873,40 @@ def get_all_verified_users() -> List[Dict[str, Any]]:
     """Get all verified users from Google Sheets"""
     try:
         spreadsheet = _get_spreadsheet()
+
+        # Handle CSV fallback mode
+        if spreadsheet is None:
+            logger.info("Google Sheets not available, using CSV fallback for get_all_verified_users")
+            return _get_all_verified_users_csv()
+
         sheet = spreadsheet.worksheet("verification")
-        
+
         # Get all data
         records = sheet.get_all_records()
-        
+
         # Filter verified users
         verified_users = [record for record in records if record.get("status", "").lower() == "verified"]
-        
+
         return verified_users
-        
+
     except Exception as e:
         logger.exception("Failed to get verified users: %s", e)
+        return []
+
+
+def _get_all_verified_users_csv() -> List[Dict[str, Any]]:
+    """Get all verified users from CSV files (fallback when Google Sheets not available)"""
+    try:
+        verified_users = _read_csv_fallback("verified_users.csv")
+
+        # Filter verified users
+        filtered_users = [user for user in verified_users if user.get("status", "").lower() == "verified"]
+
+        logger.info(f"Found {len(filtered_users)} verified users from CSV files")
+        return filtered_users
+
+    except Exception as e:
+        logger.exception("Failed to get verified users from CSV: %s", e)
         return []
 
 

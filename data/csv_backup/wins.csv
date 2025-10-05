@@ -1,0 +1,8 @@
+id,username,telegram_id,email,win_type,file_id,file_name,shared_at
+1,achiever1,123456792,achiever1@example.com,text,,Win 1,2025-01-01T00:00:00Z
+2,achiever1,123456792,achiever1@example.com,text,,Win 2,2025-01-01T00:00:00Z
+3,achiever1,123456792,achiever1@example.com,text,,Win 3,2025-01-01T00:00:00Z
+4,achiever1,123456792,achiever1@example.com,text,,Win 4,2025-01-01T00:00:00Z
+5,testuser2,123456790,test2@example.com,text,,Win 1,2025-01-01T00:00:00Z
+6,testuser2,123456790,test2@example.com,text,,Win 2,2025-01-01T00:00:00Z
+7,testuser3,123456791,test3@example.com,text,,Win 1,2025-01-01T00:00:00Z
