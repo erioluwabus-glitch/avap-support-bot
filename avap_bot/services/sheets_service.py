@@ -32,19 +32,33 @@ _spreadsheet = None
 CSV_DIR = os.getenv("STABLE_BACKUP_DIR", "./data/csv_backup")
 
 # Create directory if it doesn't exist
-try:
-    os.makedirs(CSV_DIR, exist_ok=True)
-    logger.info(f"CSV backup directory created/verified: {CSV_DIR}")
-except Exception as e:
-    logger.warning(f"Failed to create CSV directory {CSV_DIR}: {e}")
-    # Fallback to current directory
-    CSV_DIR = "./csv_backup"
+def _ensure_csv_directory():
+    """Ensure CSV directory exists and is writable"""
+    global CSV_DIR
     try:
         os.makedirs(CSV_DIR, exist_ok=True)
-        logger.info(f"Using fallback CSV directory: {CSV_DIR}")
-    except Exception as e2:
-        logger.error(f"Failed to create fallback CSV directory {CSV_DIR}: {e2}")
-        CSV_DIR = "./"
+        logger.info(f"CSV backup directory created/verified: {CSV_DIR}")
+
+        # Test write permissions
+        test_file = os.path.join(CSV_DIR, ".test_write")
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.remove(test_file)
+        logger.info(f"CSV directory write test successful: {CSV_DIR}")
+
+    except Exception as e:
+        logger.warning(f"Failed to create CSV directory {CSV_DIR}: {e}")
+        # Fallback to current directory
+        CSV_DIR = "./csv_backup"
+        try:
+            os.makedirs(CSV_DIR, exist_ok=True)
+            logger.info(f"Using fallback CSV directory: {CSV_DIR}")
+        except Exception as e2:
+            logger.error(f"Failed to create fallback CSV directory {CSV_DIR}: {e2}")
+            CSV_DIR = "./"
+
+# Initialize CSV directory on module load
+_ensure_csv_directory()
 
 
 def _get_sheets_client():

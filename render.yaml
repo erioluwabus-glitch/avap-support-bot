@@ -9,6 +9,34 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      # Google Sheets Configuration
+      - key: GOOGLE_CREDENTIALS_JSON
+        fromSecret: google_credentials_json
+      - key: GOOGLE_SHEET_ID
+        fromSecret: google_sheet_id
+      # Alternative: Use GOOGLE_SHEET_URL if you have the full URL
+      # - key: GOOGLE_SHEET_URL
+      #   fromSecret: google_sheet_url
+      # Systeme.io Configuration
+      - key: SYSTEME_API_KEY
+        fromSecret: systeme_api_key
+      - key: SYSTEME_ACHIEVER_TAG_ID
+        fromSecret: systeme_achiever_tag_id
+      # Supabase Configuration
+      - key: SUPABASE_URL
+        fromSecret: supabase_url
+      - key: SUPABASE_KEY
+        fromSecret: supabase_key
+      # Bot Configuration
+      - key: BOT_TOKEN
+        fromSecret: bot_token
+      - key: TELEGRAM_BOT_TOKEN
+        fromSecret: telegram_bot_token
+      - key: WEBHOOK_URL
+        fromSecret: webhook_url
+      # Optional: Set persistent storage for CSV fallback
+      - key: STABLE_BACKUP_DIR
+        value: /opt/render/persistent/csv_backup
     scaling:
       minInstances: 1
       maxInstances: 1

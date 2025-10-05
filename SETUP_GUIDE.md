@@ -1,55 +1,70 @@
 # AVAP Support Bot Setup Guide
 
+## 🚨 CRITICAL FIXES APPLIED - October 5, 2025
+
+**Fixed Issues:**
+- ✅ Added persistent CSV storage (no more ephemeral /tmp directory)
+- ✅ Updated render.yaml with all required environment variables
+- ✅ Fixed database schema migration script
+- ✅ Improved error handling for missing credentials
+- ❌ **Google Sheets** - Still needs credentials configuration
+- ❌ **Systeme.io** - Still needs API key configuration
+
 ## Prerequisites
 
 1. **Telegram Bot**: Create a bot with @BotFather
 2. **Supabase**: Create a free account and project
 3. **Google Sheets**: Create a spreadsheet for data backup
-4. **Render**: For hosting (free tier available)
-5. **OpenAI API**: For AI features (optional)
-6. **Hugging Face**: For AI features (optional)
+4. **Systeme.io**: Create account and get API key
+5. **Render**: For hosting (free tier available)
+6. **OpenAI API**: For AI features (optional)
 
-## Environment Variables
+## ⚙️ Environment Variables Setup
 
-Create a `.env` file with the following variables:
+### Required for Render Deployment
 
+Set these as **secrets** in your Render dashboard:
+
+#### 🔑 Required Secrets:
 ```bash
-# Bot Configuration
-BOT_TOKEN=your_telegram_bot_token_here
-ADMIN_USER_ID=your_telegram_user_id_here
+# Google Sheets Configuration
+GOOGLE_CREDENTIALS_JSON=base64_encoded_service_account_json
+GOOGLE_SHEET_ID=your_google_sheet_id_here
 
-# Group IDs (get from @userinfobot)
-SUPPORT_GROUP_ID=-1001234567890
-VERIFICATION_GROUP_ID=-1001234567891
-ASSIGNMENT_GROUP_ID=-1001234567892
-QUESTIONS_GROUP_ID=-1001234567893
+# Systeme.io Configuration
+SYSTEME_API_KEY=your_systeme_api_key_here
+SYSTEME_ACHIEVER_TAG_ID=your_achiever_tag_id_here
 
-# Database Configuration
+# Supabase Configuration
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_anon_key
 
-# Google Sheets Configuration
-GOOGLE_SHEETS_CREDENTIALS_FILE=path/to/credentials.json
-GOOGLE_SHEETS_ID=your_google_sheets_id
+# Bot Configuration
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+WEBHOOK_URL=https://your-app.onrender.com
 
-# Systeme.io Configuration (optional)
-SYSTEME_API_KEY=your_systeme_api_key
-SYSTEME_TAG_ID=your_verified_tag_id
-
-# AI Services
-OPENAI_API_KEY=your_openai_api_key
-HUGGINGFACE_TOKEN=your_huggingface_token
-
-# Landing Page
-LANDING_PAGE_URL=https://your-course-landing-page.com
-
-# Render Configuration
-RENDER_EXTERNAL_URL=https://your-app-name.onrender.com
-AUTO_SET_WEBHOOK=true
-
-# Logging
-LOG_LEVEL=INFO
+# Optional but Recommended
+STABLE_BACKUP_DIR=/opt/render/persistent/csv_backup
 ```
+
+#### 🔧 How to Get Each Secret:
+
+**1. Google Sheets:**
+- Go to [Google Cloud Console](https://console.cloud.google.com/)
+- Create service account → Generate JSON key
+- Base64 encode: `cat credentials.json | base64 -w 0`
+- Get Sheet ID from URL: `https://docs.google.com/spreadsheets/d/[SHEET_ID]/edit`
+
+**2. Systeme.io:**
+- Login to Systeme.io → Account Settings → API
+- Generate API key (starts with `sk_` or `pk_`)
+- Get tag ID from Tags section
+
+**3. Supabase:**
+- Project Settings → API → URL and anon/public key
+
+**4. Telegram:**
+- Message @BotFather → Create bot → Copy token
 
 ## Database Setup
 
@@ -127,12 +142,37 @@ LOG_LEVEL=INFO
 - Question answering
 - Audio transcription
 
-## Troubleshooting
+## 🔍 Current Issues & Solutions
+
+### ❌ Google Sheets Not Working
+**Error:** `credentials.json file not found and GOOGLE_CREDENTIALS_JSON not set`
+
+**Solution:**
+1. Set `GOOGLE_CREDENTIALS_JSON` with base64-encoded service account JSON
+2. Set `GOOGLE_SHEET_ID` with your sheet ID
+3. Ensure service account has edit access to the sheet
+
+### ❌ Systeme.io Not Working
+**Error:** `Full authentication is required to access this resource`
+
+**Solution:**
+1. Set `SYSTEME_API_KEY` with valid API key from Systeme.io
+2. Verify API key starts with `sk_` or `pk_`
+3. Check API permissions in Systeme.io dashboard
+
+### ⚠️ Database Schema Issues
+**Error:** `Status column not found, inserting without status field`
+
+**Solution:**
+1. Run `database_migration.sql` in your Supabase SQL editor
+2. This adds missing columns: status, username, comment, tip_type
+
+## 🛠️ General Troubleshooting
 
 1. **Bot not responding**: Check webhook URL and bot token
-2. **Database errors**: Verify Supabase credentials and schema
-3. **Sheets errors**: Check service account permissions
-4. **AI features not working**: Verify API keys
+2. **CSV fallback active**: Google Sheets not configured - set credentials
+3. **Systeme.io auth errors**: Verify API key format and permissions
+4. **Database errors**: Run migration script and verify credentials
 
 ## Support
 

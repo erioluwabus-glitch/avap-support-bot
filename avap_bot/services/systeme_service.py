@@ -18,6 +18,13 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
     try:
         if not SYSTEME_API_KEY:
             logger.warning("SYSTEME_API_KEY not set, skipping contact creation")
+            logger.warning("Please set SYSTEME_API_KEY environment variable with your Systeme.io API key")
+            logger.warning("Get your API key from: https://systeme.io/account/api")
+            return None
+
+        if not SYSTEME_API_KEY.startswith(('sk_', 'pk_')):
+            logger.error("SYSTEME_API_KEY appears to be invalid - should start with 'sk_' or 'pk_'")
+            logger.warning("Please verify your Systeme.io API key from: https://systeme.io/account/api")
             return None
 
         headers = {

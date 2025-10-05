@@ -64,7 +64,7 @@ scheduler.start()
 logger.debug("Scheduler started for daily tips")
 
 # --- Webhook and Health Check ---
-async def keep_alive_check(bot):
+def keep_alive_check(bot):
     """Ultra-aggressive keep-alive check to prevent Render timeouts."""
     try:
         # Perform database check to keep connection alive
@@ -73,30 +73,31 @@ async def keep_alive_check(bot):
         client.table("verified_users").select("id").limit(1).execute()
 
         # Make multiple HTTP requests to simulate heavy activity
-        import httpx
-        import asyncio
         import socket
 
-        # Make several concurrent requests to show activity
-        async def make_request(url, timeout=2.0):
+        # Make several requests to show activity
+        def make_request(url, timeout=2.0):
             try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, timeout=timeout)
-                    return response.status_code
+                import requests
+                response = requests.get(url, timeout=timeout)
+                return response.status_code
             except:
                 return None
 
-        # Fire multiple requests concurrently
-        tasks = [
-            make_request("http://localhost:8080/health"),
-            make_request("http://localhost:8080/health"),
-            make_request("http://localhost:8080/health"),
-            make_request("http://localhost:8080/ping"),
-            make_request("http://localhost:8080/"),
+        # Fire multiple requests
+        urls = [
+            "http://localhost:8080/health",
+            "http://localhost:8080/health",
+            "http://localhost:8080/health",
+            "http://localhost:8080/ping",
+            "http://localhost:8080/",
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        successful_requests = sum(1 for r in results if r == 200)
+        successful_requests = 0
+        for url in urls:
+            result = make_request(url)
+            if result == 200:
+                successful_requests += 1
 
         # Additional network activity
         try:
@@ -123,23 +124,23 @@ async def keep_alive_check(bot):
             logger.debug(f"Failed to reinitialize Supabase: {reinit_error}")
 
 
-async def ping_self():
+def ping_self():
     """Simple ping to keep the service alive."""
     try:
-        import httpx
+        import requests
         import socket
-        async with httpx.AsyncClient() as client:
-            await client.get("http://localhost:8080/ping", timeout=1.0)
-            # Additional activity
-            try:
-                socket.gethostbyname('telegram.org')
-            except:
-                pass
+        # Use sync client
+        requests.get("http://localhost:8080/ping", timeout=1.0)
+        # Additional activity
+        try:
+            socket.gethostbyname('telegram.org')
+        except:
+            pass
     except:
         pass  # Silent fail to avoid log spam
 
 
-async def generate_activity():
+def generate_activity():
     """Generate additional activity to prevent Render timeout."""
     try:
         import socket
@@ -156,7 +157,7 @@ async def generate_activity():
         _ = sum(i * i for i in range(100))
 
         # Small delay to simulate work
-        await asyncio.sleep(0.01)
+        time.sleep(0.01)
 
     except:
         pass  # Silent fail
@@ -259,6 +260,11 @@ async def cleanup_memory():
         }
     except Exception as e:
         logger.error(f"Memory cleanup failed: {e}")
+        # Ensure log_memory_usage is available for error logging
+        try:
+            log_memory_usage("error in cleanup")
+        except NameError:
+            logger.error("log_memory_usage function not available for error logging")
         return {
             "status": "error",
             "error": str(e)
@@ -346,12 +352,11 @@ async def main_polling():
     await bot_app.run_polling(allowed_updates=["message", "callback_query"])
 
 # Background task to continuously ping health endpoint
-async def _periodic_memory_cleanup():
+def _periodic_memory_cleanup():
     """Periodic memory cleanup to prevent memory leaks."""
     try:
         memory_before = get_memory_usage()
-        # Fixed typo in f-string formatter to prevent SyntaxError
-        logger.debug(f"Starting periodic memory cleanup. Memory before: {memory_before:.1f}MB")
+        log_memory_usage("before periodic cleanup")
 
         # Clear model cache
         clear_model_cache()
@@ -363,12 +368,18 @@ async def _periodic_memory_cleanup():
         memory_after = get_memory_usage()
         memory_freed = memory_before - memory_after
 
+        log_memory_usage("after periodic cleanup")
+
         if memory_freed > 10:  # Only log if we freed significant memory
-            # Fixed typo in f-string formatter to prevent SyntaxError
             logger.info(f"Memory cleanup completed. Freed {memory_freed:.1f}MB (before: {memory_before:.1f}MB, after: {memory_after:.1f}MB)")
 
     except Exception as e:
         logger.error(f"Periodic memory cleanup failed: {e}")
+        # Ensure log_memory_usage is available for error logging
+        try:
+            log_memory_usage("error in cleanup")
+        except NameError:
+            logger.error("log_memory_usage function not available for error logging")
 
 async def background_keepalive():
     """Background task that continuously pings the health endpoint."""
