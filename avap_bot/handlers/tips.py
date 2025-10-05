@@ -229,7 +229,7 @@ add_tip_conv = ConversationHandler(
         ADD_TIP: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_tip_content)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 

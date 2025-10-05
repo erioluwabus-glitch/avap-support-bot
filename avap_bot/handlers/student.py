@@ -40,22 +40,33 @@ LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://t.me/avapsupportbot"
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Optional[int]:
     """Handle /start command. Check for verification and start verification if needed."""
-    user = update.effective_user
-    
-    # Check if user is already verified
-    verified_user = check_verified_user(user.id)
-    if verified_user:
-        await _show_main_menu(update, context, verified_user)
-        return ConversationHandler.END
+    try:
+        user = update.effective_user
+        logger.info(f"Start command received from user {user.id} ({user.username})")
 
-    # If not verified, start the verification process
-    await update.message.reply_text(
-        "👋 **Welcome to AVAP Support Bot!**\n\n"
-        "To get started, please verify your account.\n"
-        "Please enter your email address or phone number that you used to register for the course:",
-        parse_mode=ParseMode.MARKDOWN
-    )
-    return VERIFY_IDENTIFIER
+        # Check if user is already verified
+        verified_user = check_verified_user(user.id)
+        if verified_user:
+            logger.info(f"User {user.id} is already verified, showing main menu")
+            await _show_main_menu(update, context, verified_user)
+            return ConversationHandler.END
+
+        # If not verified, start the verification process
+        logger.info(f"User {user.id} is not verified, starting verification process")
+        await update.message.reply_text(
+            "👋 **Welcome to AVAP Support Bot!**\n\n"
+            "To get started, please verify your account.\n"
+            "Please enter your email address or phone number that you used to register for the course:",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return VERIFY_IDENTIFIER
+    except Exception as e:
+        logger.exception(f"Error in start_handler for user {update.effective_user.id}: {e}")
+        await update.message.reply_text(
+            "❌ Sorry, there was an error processing your request. Please try again later.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return ConversationHandler.END
 
 
 async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -123,23 +134,30 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, verified_user: Dict[str, Any]):
     """Display the main menu for verified users."""
-    # Only show menu in private chats (DMs), not in groups
-    if update.effective_chat.type != ChatType.PRIVATE:
-        return
+    try:
+        # Only show menu in private chats (DMs), not in groups
+        if update.effective_chat.type != ChatType.PRIVATE:
+            return
 
-    from telegram import ReplyKeyboardMarkup
+        from telegram import ReplyKeyboardMarkup
 
-    keyboard = ReplyKeyboardMarkup([
-        ["📝 Submit Assignment", "🏆 Share Win"],
-        ["📊 Check Status", "❓ Ask Question"]
-    ], resize_keyboard=True, one_time_keyboard=False)
-    
-    await update.message.reply_text(
-        f"🎉 **Welcome back, {verified_user['name']}!**\n\n"
-        "Choose an option below:",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboard
-    )
+        keyboard = ReplyKeyboardMarkup([
+            ["📝 Submit Assignment", "🏆 Share Win"],
+            ["📊 Check Status", "❓ Ask Question"]
+        ], resize_keyboard=True, one_time_keyboard=False)
+
+        await update.message.reply_text(
+            f"🎉 **Welcome back, {verified_user['name']}!**\n\n"
+            "Choose an option below:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard
+        )
+    except Exception as e:
+        logger.exception(f"Error in _show_main_menu for user {update.effective_user.id}: {e}")
+        await update.message.reply_text(
+            "❌ Sorry, there was an error showing the main menu. Please try again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 
 async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -885,7 +903,7 @@ start_conv = ConversationHandler(
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 submit_conv = ConversationHandler(
@@ -896,7 +914,7 @@ submit_conv = ConversationHandler(
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 share_win_conv = ConversationHandler(
@@ -906,7 +924,7 @@ share_win_conv = ConversationHandler(
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 ask_conv = ConversationHandler(
@@ -915,7 +933,7 @@ ask_conv = ConversationHandler(
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 

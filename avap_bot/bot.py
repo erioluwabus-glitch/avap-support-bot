@@ -5,6 +5,8 @@ import os
 import logging
 import asyncio
 import time
+import signal
+import sys
 from telegram import Update
 from telegram.ext import Application
 from fastapi import FastAPI, Request, Response
@@ -21,6 +23,14 @@ from avap_bot.features.cancel_feature import register_cancel_handlers, register_
 # Initialize logging
 setup_logging()
 logger = logging.getLogger(__name__)
+
+def handle_sigterm(signum, frame):
+    """Handle SIGTERM signal for graceful shutdown."""
+    logger.info("SIGTERM received — shutting down gracefully")
+    sys.exit(0)
+
+# Register SIGTERM handler
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 # Get bot token from environment variable
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -204,7 +214,13 @@ async def telegram_webhook(request: Request):
 
 # Handle webhook with bot token in path (Telegram standard format)
 app.post("/webhook/{bot_token}")(telegram_webhook)
-app.get("/health")(health_check)
+
+@app.get("/health")
+async def simple_health():
+    """Simple health endpoint for external monitors - returns 200 immediately."""
+    return {"status": "ok"}
+
+app.get("/health_check")(health_check)
 
 # Simple ping endpoint for keep-alive
 @app.get("/ping")
