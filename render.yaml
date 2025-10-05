@@ -34,6 +34,15 @@ services:
         fromSecret: telegram_bot_token
       - key: WEBHOOK_URL
         fromSecret: webhook_url
+      # Telegram Group IDs (get from @userinfobot)
+      - key: ASSIGNMENT_GROUP_ID
+        fromSecret: assignment_group_id
+      - key: SUPPORT_GROUP_ID
+        fromSecret: support_group_id
+      - key: VERIFICATION_GROUP_ID
+        fromSecret: verification_group_id
+      - key: QUESTIONS_GROUP_ID
+        fromSecret: questions_group_id
       # Optional: Set persistent storage for CSV fallback
       - key: STABLE_BACKUP_DIR
         value: /opt/render/persistent/csv_backup

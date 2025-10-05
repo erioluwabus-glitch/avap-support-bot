@@ -262,9 +262,10 @@ async def cleanup_memory():
         logger.error(f"Memory cleanup failed: {e}")
         # Ensure log_memory_usage is available for error logging
         try:
+            from avap_bot.utils.memory_monitor import log_memory_usage
             log_memory_usage("error in cleanup")
-        except NameError:
-            logger.error("log_memory_usage function not available for error logging")
+        except (NameError, ImportError) as e2:
+            logger.error(f"log_memory_usage function not available for error logging: {e2}")
         return {
             "status": "error",
             "error": str(e)
@@ -355,6 +356,9 @@ async def main_polling():
 def _periodic_memory_cleanup():
     """Periodic memory cleanup to prevent memory leaks."""
     try:
+        # Import here to ensure it's available
+        from avap_bot.utils.memory_monitor import log_memory_usage
+
         memory_before = get_memory_usage()
         log_memory_usage("before periodic cleanup")
 
@@ -377,9 +381,10 @@ def _periodic_memory_cleanup():
         logger.error(f"Periodic memory cleanup failed: {e}")
         # Ensure log_memory_usage is available for error logging
         try:
+            from avap_bot.utils.memory_monitor import log_memory_usage
             log_memory_usage("error in cleanup")
-        except NameError:
-            logger.error("log_memory_usage function not available for error logging")
+        except (NameError, ImportError) as e2:
+            logger.error(f"log_memory_usage function not available for error logging: {e2}")
 
 async def background_keepalive():
     """Background task that continuously pings the health endpoint."""

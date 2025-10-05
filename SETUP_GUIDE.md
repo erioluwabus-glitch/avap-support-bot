@@ -27,24 +27,29 @@ Set these as **secrets** in your Render dashboard:
 
 #### 🔑 Required Secrets:
 ```bash
-# Google Sheets Configuration
-GOOGLE_CREDENTIALS_JSON=base64_encoded_service_account_json
-GOOGLE_SHEET_ID=your_google_sheet_id_here
+# Bot Configuration
+BOT_TOKEN=your_bot_token_from_botfather
+TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
+WEBHOOK_URL=https://your-app.onrender.com
 
-# Systeme.io Configuration
-SYSTEME_API_KEY=your_systeme_api_key_here
-SYSTEME_ACHIEVER_TAG_ID=your_achiever_tag_id_here
+# Telegram Group IDs (get from @userinfobot)
+ASSIGNMENT_GROUP_ID=your_assignment_group_id
+SUPPORT_GROUP_ID=your_support_group_id
+VERIFICATION_GROUP_ID=your_verification_group_id
+QUESTIONS_GROUP_ID=your_questions_group_id
 
 # Supabase Configuration
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_anon_key
 
-# Bot Configuration
-TELEGRAM_BOT_TOKEN=your_bot_token_from_botfather
-WEBHOOK_URL=https://your-app.onrender.com
-
 # Optional but Recommended
 STABLE_BACKUP_DIR=/opt/render/persistent/csv_backup
+
+# Optional Integrations (configure if needed)
+GOOGLE_CREDENTIALS_JSON=base64_encoded_service_account_json
+GOOGLE_SHEET_ID=your_google_sheet_id_here
+SYSTEME_API_KEY=your_systeme_api_key_here
+SYSTEME_ACHIEVER_TAG_ID=your_achiever_tag_id_here
 ```
 
 #### 🔧 How to Get Each Secret:
@@ -63,8 +68,9 @@ STABLE_BACKUP_DIR=/opt/render/persistent/csv_backup
 **3. Supabase:**
 - Project Settings → API → URL and anon/public key
 
-**4. Telegram:**
+**4. Telegram Bot & Groups:**
 - Message @BotFather → Create bot → Copy token
+- Message @userinfobot → Add to groups → Copy group IDs (-100xxxxxxxxx format)
 
 ## Database Setup
 

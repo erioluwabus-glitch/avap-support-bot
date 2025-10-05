@@ -77,7 +77,10 @@ async def monitor_memory(context) -> None:
         rss_mb = mem_info.rss / (1024 * 1024)
         vms_mb = mem_info.vms / (1024 * 1024)
 
-        logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
+        try:
+            log_memory_usage("periodic monitoring")
+        except (NameError, ImportError):
+            logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
 
         # Check for high memory usage (80% of 512MB = 410MB)
         if rss_mb > 410:
@@ -102,7 +105,10 @@ async def monitor_memory(context) -> None:
 
             # Check memory after cleanup
             new_rss_mb = get_memory_usage()
-            logger.info(f"Memory after cleanup: {new_rss_mb:.1f}MB (freed: {rss_mb - new_rss_mb:.1f}MB)")
+            try:
+                log_memory_usage("after memory cleanup")
+            except (NameError, ImportError):
+                logger.info(f"Memory after cleanup: {new_rss_mb:.1f}MB (freed: {rss_mb - new_rss_mb:.1f}MB)")
 
         # Check for potential memory leaks (gradual increase)
         # This could be enhanced with historical tracking
@@ -132,7 +138,11 @@ async def cleanup_resources() -> None:
 
         # Log final memory usage
         final_memory = get_memory_usage()
-        logger.info(f"Resource cleanup completed. Final memory: {final_memory:.1f}MB")
+        # Use local import to avoid scope issues
+        try:
+            log_memory_usage("final cleanup")
+        except (NameError, ImportError):
+            logger.info(f"Resource cleanup completed. Final memory: {final_memory:.1f}MB")
 
     except Exception as e:
         logger.error(f"Resource cleanup failed: {e}")
@@ -156,4 +166,19 @@ def enable_detailed_memory_monitoring() -> None:
 
 # Cleanup on import (for development)
 import atexit
-atexit.register(lambda: asyncio.run(cleanup_resources()) if not asyncio.get_event_loop().is_closed() else None)
+def _safe_cleanup():
+    """Safe cleanup that doesn't rely on async context"""
+    try:
+        # Only run cleanup if we're not in an async context
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            return
+        # Run cleanup synchronously
+        loop.run_until_complete(cleanup_resources())
+    except RuntimeError:
+        # No event loop or other issues - just skip cleanup
+        pass
+    except Exception as e:
+        logger.warning(f"Cleanup during exit failed: {e}")
+
+atexit.register(_safe_cleanup)
