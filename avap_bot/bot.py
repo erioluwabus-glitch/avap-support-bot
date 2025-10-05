@@ -293,7 +293,7 @@ async def initialize_services():
         # Enhanced memory monitoring to prevent Render restarts
         enable_detailed_memory_monitoring()
         bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)
-        bot_app.job_queue.start()  # Start the job queue
+        await bot_app.job_queue.start()  # Start the job queue
         logger.info("Memory monitoring scheduled every 5 minutes (starting in 1 minute)")
 
         # Schedule daily tips
