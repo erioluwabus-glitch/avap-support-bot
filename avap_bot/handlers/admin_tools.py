@@ -193,10 +193,18 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                 if telegram_id:
                     await context.bot.send_message(
                         telegram_id,
-                        f"📢 **Message from Admin**\n\n{message_text}",
+                        message_text,
                         parse_mode=ParseMode.MARKDOWN
                     )
                     sent_count += 1
+
+                    # Store broadcast message for deletion tracking (for achievers)
+                    try:
+                        from avap_bot.services.supabase_service import add_broadcast_message
+                        await run_blocking(add_broadcast_message, "achievers", message_text, update.effective_user.id)
+                    except Exception as e:
+                        logger.warning("Failed to store achievers broadcast message for deletion: %s", e)
+
                 else:
                     failed_users.append(achiever)
             except Exception as e:
@@ -318,7 +326,7 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
                     await context.bot.send_message(
                         telegram_id,
-                        f"📢 **Broadcast Message**\n\n{update.message.text}",
+                        update.message.text,
                         parse_mode=ParseMode.MARKDOWN
                     )
 
@@ -330,7 +338,7 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     await context.bot.send_voice(
                         telegram_id,
                         voice=update.message.voice.file_id,
-                        caption="📢 **Audio Broadcast**"
+                        caption=None
                     )
 
                 elif broadcast_type == "video":
@@ -341,10 +349,18 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
                     await context.bot.send_video(
                         telegram_id,
                         video=update.message.video.file_id,
-                        caption="📢 **Video Broadcast**"
+                        caption=None
                     )
 
                 sent_count += 1
+
+                # Store broadcast message for deletion tracking
+                try:
+                    from avap_bot.services.supabase_service import add_broadcast_message
+                    content = update.message.text if broadcast_type == "text" else f"{broadcast_type.title()} file"
+                    await run_blocking(add_broadcast_message, broadcast_type, content, update.effective_user.id)
+                except Exception as e:
+                    logger.warning("Failed to store broadcast message for deletion: %s", e)
 
             except Exception as e:
                 logger.exception("Failed to send broadcast: %s", e)
@@ -361,6 +377,90 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.exception("Failed to broadcast: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Broadcast failed: {str(e)}")
         await update.message.reply_text("❌ Failed to broadcast. Please try again.")
+
+    return ConversationHandler.END
+
+
+async def delete_broadcast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle /delete_broadcast command - show list of broadcast messages for deletion"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only for admins.")
+        return ConversationHandler.END
+
+    try:
+        # Get broadcast messages from database
+        from avap_bot.services.supabase_service import get_broadcast_messages
+        broadcast_messages = await run_blocking(get_broadcast_messages)
+
+        if not broadcast_messages:
+            await update.message.reply_text("📭 No broadcast messages found.")
+            return ConversationHandler.END
+
+        # Format broadcast messages list
+        message = "🗑️ **Delete Broadcast Messages**\n\n"
+        message += "Select a broadcast message to delete:\n\n"
+
+        keyboard = []
+
+        for i, broadcast in enumerate(broadcast_messages, 1):
+            created_at = broadcast.get('created_at', 'Unknown')
+            broadcast_type = broadcast.get('broadcast_type', 'Unknown')
+            content_preview = broadcast.get('content', '')[:50] + "..." if len(broadcast.get('content', '')) > 50 else broadcast.get('content', '')
+
+            message += f"**{i}.** {broadcast_type.title()} - {created_at[:19]}\n"
+            message += f"Content: {content_preview}\n\n"
+
+            # Add button for deletion
+            keyboard.append([InlineKeyboardButton(
+                f"🗑️ Delete #{i}",
+                callback_data=f"delete_broadcast_{broadcast['id']}"
+            )])
+
+        keyboard.append([InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")])
+
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    except Exception as e:
+        logger.exception("Failed to list broadcast messages: %s", e)
+        await update.message.reply_text("❌ Failed to retrieve broadcast messages. Please try again.")
+
+    return ConversationHandler.END
+
+
+async def delete_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle broadcast message deletion callback"""
+    query = update.callback_query
+    await query.answer()
+
+    if not _is_admin(update):
+        await query.edit_message_text("❌ This command is only for admins.")
+        return ConversationHandler.END
+
+    try:
+        # Parse broadcast ID from callback data
+        callback_data = query.data
+        if not callback_data.startswith("delete_broadcast_"):
+            await query.edit_message_text("❌ Invalid deletion request.")
+            return ConversationHandler.END
+
+        broadcast_id = int(callback_data.replace("delete_broadcast_", ""))
+
+        # Delete broadcast message from database
+        from avap_bot.services.supabase_service import delete_broadcast_message
+        success = await run_blocking(delete_broadcast_message, broadcast_id)
+
+        if success:
+            await query.edit_message_text("✅ **Broadcast message deleted successfully!**")
+        else:
+            await query.edit_message_text("❌ Failed to delete broadcast message.")
+
+    except Exception as e:
+        logger.exception("Failed to delete broadcast message: %s", e)
+        await query.edit_message_text("❌ Failed to delete broadcast message. Please try again.")
 
     return ConversationHandler.END
 
@@ -422,3 +522,7 @@ def register_handlers(application):
 
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
+    application.add_handler(CommandHandler("delete_broadcast", delete_broadcast_cmd))
+
+    # Add callback handlers for broadcast deletion
+    application.add_handler(CallbackQueryHandler(delete_broadcast_callback, pattern="^delete_broadcast_"))

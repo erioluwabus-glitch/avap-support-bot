@@ -1487,3 +1487,44 @@ def get_assignment_by_id(assignment_id: int) -> Optional[Dict[str, Any]]:
         logger.exception("Supabase get_assignment_by_id error: %s", e)
 
         return None
+
+def add_broadcast_message(broadcast_type: str, content: str, admin_id: int) -> Dict[str, Any]:
+    """Add a broadcast message record for deletion tracking"""
+    client = get_supabase()
+    try:
+        payload = {
+            "broadcast_type": broadcast_type,
+            "content": content,
+            "admin_id": admin_id,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        res = client.table("broadcast_messages").insert(payload)
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase add_broadcast_message error: %s", e)
+        raise
+
+
+def get_broadcast_messages() -> List[Dict[str, Any]]:
+    """Get all broadcast messages for admin management"""
+    client = get_supabase()
+    try:
+        res = client.table("broadcast_messages").select("*").order("created_at", desc=True)
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_broadcast_messages error: %s", e)
+        return []
+
+
+def delete_broadcast_message(broadcast_id: int) -> bool:
+    """Delete a broadcast message record"""
+    client = get_supabase()
+    try:
+        res = client.table("broadcast_messages").delete().eq("id", broadcast_id)
+        data = _get_response_data(res)
+        return bool(data)
+    except Exception as e:
+        logger.exception("Supabase delete_broadcast_message error: %s", e)
+        return False
