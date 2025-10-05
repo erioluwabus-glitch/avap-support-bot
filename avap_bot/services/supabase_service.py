@@ -280,12 +280,25 @@ def add_match_request(telegram_id: int, username: str) -> str:
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
-    res = client.table("match_requests").insert(payload).execute()
+
     try:
+        res = client.table("match_requests").insert(payload).execute()
         return match_id
     except Exception as e:
-        logger.exception("Supabase add_match_request error: %s", e)
-        raise
+        # If username column doesn't exist, try without it
+        if "username" in str(e) and "column" in str(e).lower():
+            logger.warning("Username column not found in match_requests, inserting without username field")
+            payload_without_username = {
+                "match_id": match_id,
+                "telegram_id": telegram_id,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            res = client.table("match_requests").insert(payload_without_username).execute()
+            return match_id
+        else:
+            logger.exception("Supabase add_match_request error: %s", e)
+            raise
 
 
 def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:

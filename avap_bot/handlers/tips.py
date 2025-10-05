@@ -119,8 +119,8 @@ async def send_daily_tip(bot):
             f"💡 **Daily Tip**\n\n{tip_content}",
             parse_mode=ParseMode.MARKDOWN
         )
-        
-        logger.info("Daily tip sent successfully")
+
+        logger.info(f"Daily tip sent successfully to group {SUPPORT_GROUP_ID}: {tip_content[:50]}...")
         
     except Exception as e:
         logger.exception("Failed to send daily tip: %s", e)

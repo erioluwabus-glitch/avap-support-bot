@@ -238,8 +238,14 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
         # Update Google Sheets
         await run_blocking(update_verification_status, verified_data['email'], 'Verified')
         
-        # Update Systeme.io tag
-        await create_contact_and_tag(verified_data)
+        # Update Systeme.io tag - ensure proper data structure
+        systeme_data = {
+            "name": verified_data.get("name", ""),
+            "email": verified_data.get("email", ""),
+            "phone": verified_data.get("phone", ""),
+            "status": "verified"
+        }
+        await create_contact_and_tag(systeme_data)
         
         # Send confirmation
         await query.edit_message_text(
@@ -396,7 +402,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
-    """Find student by email, phone, or name in the verified_users table."""
+    """Find student by email, phone, or name in verified_users and pending_verifications tables."""
     # Try as email first
     if validate_email(identifier):
         results = find_verified_by_email_or_phone(email=identifier)
@@ -409,10 +415,23 @@ def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
         if results:
             return results[0]
 
-    # Try as name
+    # Try as name in verified users
     results = find_verified_by_name(identifier)
     if results:
         return results[0]
+
+    # If not found in verified_users, try pending_verifications
+    from avap_bot.services.supabase_service import find_pending_by_email_or_phone
+
+    if validate_email(identifier):
+        pending_results = find_pending_by_email_or_phone(email=identifier)
+        if pending_results:
+            return pending_results[0]
+
+    if validate_phone(identifier):
+        pending_results = find_pending_by_email_or_phone(phone=identifier)
+        if pending_results:
+            return pending_results[0]
 
     return None
 

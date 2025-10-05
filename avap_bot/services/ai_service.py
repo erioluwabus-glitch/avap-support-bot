@@ -152,40 +152,92 @@ async def transcribe_audio(file_id: str, bot) -> Optional[str]:
 
 
 async def answer_question_with_ai(question: str) -> Optional[str]:
-    """Answer question using AI if no FAQ match found"""
+    """Answer question using ChatGPT/OpenAI if no FAQ match found"""
     try:
         # First try FAQ matching
         faq_match = await find_faq_match(question)
         if faq_match:
             return faq_match['answer']
-        
-        # If no FAQ match, use AI to generate answer
+
+        # If no FAQ match, use ChatGPT/OpenAI for intelligent answers
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if not openai_key:
+            # Fallback to Hugging Face if OpenAI is not available
+            return await _answer_with_huggingface(question)
+
+        import openai
+        openai.api_key = openai_key
+
+        # Use ChatGPT for contextual question answering
+        context = (
+            "You are a helpful support bot assistant for AVAP course students. "
+            "AVAP is a comprehensive course with 12 modules covering various topics. "
+            "Students can submit assignments, share wins, ask questions, check their progress, "
+            "and earn badges for participation. Common student activities include: "
+            "submitting text/audio/video assignments, sharing achievements, asking for help, "
+            "and getting matched with study partners."
+        )
+
+        system_prompt = (
+            "You are an expert AVAP course assistant. Provide helpful, accurate answers "
+            "about course procedures, assignments, progress tracking, and community features. "
+            "Be encouraging and supportive in your responses."
+        )
+
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Context: {context}\n\nQuestion: {question}\n\nPlease provide a helpful answer:"}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+
+        answer = response.choices[0].message.content.strip()
+        if answer:
+            return answer
+
+        return None
+
+    except Exception as e:
+        logger.exception("Failed to answer question with AI: %s", e)
+        # Try Hugging Face as fallback
+        try:
+            return await _answer_with_huggingface(question)
+        except:
+            return None
+
+
+async def _answer_with_huggingface(question: str) -> Optional[str]:
+    """Fallback to Hugging Face if OpenAI is not available"""
+    try:
         hf_token = os.getenv("HUGGINGFACE_TOKEN")
         if not hf_token:
             return None
-        
+
         # Use Hugging Face API for question answering
         api_url = "https://api-inference.huggingface.co/models/distilbert-base-cased-distilled-squad"
         headers = {"Authorization": f"Bearer {hf_token}"}
-        
+
         data = {
             "inputs": {
                 "question": question,
                 "context": "This is a support bot for AVAP course students. Students can submit assignments, share wins, ask questions, and check their progress. The course has 12 modules and students can earn badges for participation."
             }
         }
-        
+
         response = requests.post(api_url, headers=headers, json=data, timeout=10)
-        
+
         if response.status_code == 200:
             result = response.json()
             if isinstance(result, dict) and 'answer' in result:
                 answer = result['answer']
                 if answer and answer != '[CLS]':
                     return answer
-        
+
         return None
-        
+
     except Exception as e:
-        logger.exception("Failed to answer question with AI: %s", e)
+        logger.exception("Failed to answer question with Hugging Face: %s", e)
         return None

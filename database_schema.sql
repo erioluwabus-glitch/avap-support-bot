@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS verified_users (
 CREATE TABLE IF NOT EXISTS match_requests (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     telegram_id BIGINT NOT NULL,
+    username TEXT,
     match_id TEXT UNIQUE NOT NULL,
     status TEXT DEFAULT 'pending',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

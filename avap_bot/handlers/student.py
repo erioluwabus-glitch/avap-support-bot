@@ -19,6 +19,7 @@ from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
 )
+from avap_bot.services.ai_service import answer_question_with_ai, find_faq_match
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
@@ -112,7 +113,11 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
                 await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user.id)
                 logger.info(f"Approved join request for user {user.id} to support group.")
             except Exception as e:
-                logger.error(f"Failed to approve join request for user {user.id}: {e}")
+                error_msg = str(e)
+                if "User_already_participant" in error_msg:
+                    logger.info(f"User {user.id} is already a participant in the support group (expected).")
+                else:
+                    logger.error(f"Failed to approve join request for user {user.id}: {e}")
 
         await update.message.reply_text(
             f"🎉 **Congratulations, {verified_user['name']}! You are now verified!**\n\n"
@@ -324,11 +329,12 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             parse_mode=ParseMode.MARKDOWN
         )
         
-        # Show main menu after successful submission
+        # Clear conversation state and show main menu
+        context.user_data.clear()
         verified_user = check_verified_user(user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
-        
+
         return ConversationHandler.END
         
     except Exception as e:
@@ -417,6 +423,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         
         # Prepare win data
         win_data = {
+            'win_id': f"win_{user_id}_{int(datetime.now(timezone.utc).timestamp())}",
             'username': username,
             'telegram_id': user_id,
             'type': win_type,
@@ -429,24 +436,43 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Save to Google Sheets
         await run_blocking(append_win, win_data)
         
-        # Forward to support group
+        # Forward to support group with engaging comments
         if SUPPORT_GROUP_ID:
+            # Generate engaging comment based on win type
+            win_comments = {
+                "text": [
+                    f"🎉 Amazing progress from @{username}! This {win_type} achievement shows real dedication! 🌟",
+                    f"💪 @{username} is crushing it with this {win_type} win! Keep up the fantastic work! 🚀",
+                    f"🏆 What an incredible {win_type} accomplishment by @{username}! This community is lucky to have such motivated learners! ⭐"
+                ],
+                "audio": [
+                    f"🎵 @{username} shared an inspiring {win_type} story! Let's listen and get motivated! 🔥",
+                    f"🎤 Hear @{username}'s amazing {win_type} journey - pure motivation! 💪",
+                    f"🔊 @{username} is sharing their {win_type} success through audio! This is going to inspire everyone! 🌟"
+                ],
+                "video": [
+                    f"🎬 @{username} created an amazing {win_type} showcase! This visual story is incredible! 👏",
+                    f"📹 @{username} is sharing their {win_type} journey through video - what an inspiration! 🌟",
+                    f"🎥 Check out @{username}'s {win_type} achievement in this fantastic video! Pure motivation! 💫"
+                ]
+            }
+
+            import random
+            comment = random.choice(win_comments.get(win_type, win_comments["text"]))
+
             if text_content:
-                # For text wins, include the actual text content
+                # For text wins, include the actual text content with engaging intro
                 forward_text = (
-                    f"🏆 **New Win Shared**\n\n"
-                    f"Student: @{username}\n"
-                    f"Type: {win_type.title()}\n\n"
-                    f"**Content:**\n{text_content}"
+                    f"{comment}\n\n"
+                    f"**Their Story:**\n{text_content}"
                 )
             else:
-                # For file wins, show file info
+                # For file wins, show file info with engaging intro
                 forward_text = (
-                    f"🏆 **New Win Shared**\n\n"
-                    f"Student: @{username}\n"
-                    f"Type: {win_type.title()}\n"
-                    f"File: {file_name}\n"
-                    f"File ID: `{file_id}`"
+                    f"{comment}\n\n"
+                    f"**Achievement Details:**\n"
+                    f"📁 File: {file_name}\n"
+                    f"🆔 ID: `{file_id}`"
                 )
 
             if file_id:
@@ -463,11 +489,12 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             parse_mode=ParseMode.MARKDOWN
         )
         
-        # Show main menu after successful win sharing
+        # Clear conversation state and show main menu
+        context.user_data.clear()
         verified_user = check_verified_user(user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
-        
+
         return ConversationHandler.END
         
     except Exception as e:
@@ -499,14 +526,14 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             wins = await run_blocking(get_student_wins, username)
             questions = await run_blocking(get_student_questions, username)
         except Exception as e:
-            logger.warning(f"Failed to get data from Google Sheets: {e}")
+            logger.exception(f"Failed to get student data: {e}")
             # Use empty lists as fallback
             submissions = []
             wins = []
             questions = []
 
             # Show a warning in the status message
-            status_text += "\n\n⚠️ **Note:** Some data may not be available due to system maintenance."
+            status_text += "\n\n⚠️ **Note:** Unable to retrieve some data. Please try again later."
 
         # Calculate stats
         total_submissions = len(submissions)
@@ -601,7 +628,75 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await update.message.reply_text("❌ Unsupported question type. Please send text, document, audio, or video.")
             return ASK_QUESTION
         
-        # Prepare question data
+        # Check for similar questions and auto-answer if found
+        try:
+            # Try FAQ matching first
+            faq_match = await find_faq_match(question_text)
+            if faq_match:
+                # Send FAQ answer immediately
+                await context.bot.send_message(
+                    user_id,
+                    f"💡 **Quick Answer Found!**\n\n"
+                    f"**Question:** {faq_match['question']}\n\n"
+                    f"**Answer:** {faq_match['answer']}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await update.message.reply_text(
+                    f"✅ **Question answered automatically!**\n\n"
+                    f"I found a similar question in our FAQ database and provided the answer above.\n"
+                    f"If this doesn't fully address your question, please ask again for admin assistance.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+                # Still save the question for tracking but mark as auto-answered
+                question_data = {
+                    'username': username,
+                    'telegram_id': user_id,
+                    'question_text': question_text,
+                    'file_id': file_id,
+                    'file_name': file_name,
+                    'asked_at': datetime.now(timezone.utc),
+                    'status': 'Auto-answered'
+                }
+                await run_blocking(append_question, question_data)
+                return ConversationHandler.END
+
+            # Try AI matching for previously answered questions
+            ai_answer = await answer_question_with_ai(question_text)
+            if ai_answer:
+                # Send AI answer immediately
+                await context.bot.send_message(
+                    user_id,
+                    f"🤖 **AI-Generated Answer!**\n\n"
+                    f"**Your Question:** {question_text}\n\n"
+                    f"**Answer:** {ai_answer}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await update.message.reply_text(
+                    f"✅ **Question answered by AI!**\n\n"
+                    f"Our AI assistant provided an answer above.\n"
+                    f"If you need further clarification, please ask again!",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+
+                # Save as AI-answered
+                question_data = {
+                    'username': username,
+                    'telegram_id': user_id,
+                    'question_text': question_text,
+                    'file_id': file_id,
+                    'file_name': file_name,
+                    'asked_at': datetime.now(timezone.utc),
+                    'status': 'AI-answered'
+                }
+                await run_blocking(append_question, question_data)
+                return ConversationHandler.END
+
+        except Exception as e:
+            logger.exception("Error in auto-answer check: %s", e)
+            # Continue with normal flow if auto-answer fails
+
+        # Prepare question data for forwarding to admins
         question_data = {
             'username': username,
             'telegram_id': user_id,
@@ -611,10 +706,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             'asked_at': datetime.now(timezone.utc),
             'status': 'Pending'
         }
-        
+
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
-        
+
         # Forward to questions group
         if QUESTIONS_GROUP_ID:
             keyboard = InlineKeyboardMarkup([[
@@ -695,11 +790,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             parse_mode=ParseMode.MARKDOWN
         )
         
-        # Show main menu after successful question submission
+        # Clear conversation state and show main menu
+        context.user_data.clear()
         verified_user = check_verified_user(user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
-        
+
         return ConversationHandler.END
         
     except Exception as e:
@@ -760,7 +856,79 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     question_text = message_text.split(maxsplit=1)[1]
     
     try:
-        # Prepare question data
+        # Check for similar questions and auto-answer if found
+        try:
+            # Try FAQ matching first
+            faq_match = await find_faq_match(question_text)
+            if faq_match:
+                # Send FAQ answer immediately
+                await context.bot.send_message(
+                    user.id,
+                    f"💡 **Quick Answer Found!**\n\n"
+                    f"**Question:** {faq_match['question']}\n\n"
+                    f"**Answer:** {faq_match['answer']}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_to_message_id=update.message.message_id
+                )
+                await update.message.reply_text(
+                    f"✅ **Question answered automatically!**\n\n"
+                    f"I found a similar question in our FAQ database and provided the answer above.\n"
+                    f"If this doesn't fully address your question, please ask again for admin assistance.",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_to_message_id=update.message.message_id
+                )
+
+                # Still save the question for tracking but mark as auto-answered
+                question_data = {
+                    'username': username,
+                    'telegram_id': user.id,
+                    'question_text': question_text,
+                    'file_id': None,
+                    'file_name': None,
+                    'asked_at': datetime.now(timezone.utc),
+                    'status': 'Auto-answered'
+                }
+                await run_blocking(append_question, question_data)
+                return
+
+            # Try AI matching for previously answered questions
+            ai_answer = await answer_question_with_ai(question_text)
+            if ai_answer:
+                # Send AI answer immediately
+                await context.bot.send_message(
+                    user.id,
+                    f"🤖 **AI-Generated Answer!**\n\n"
+                    f"**Your Question:** {question_text}\n\n"
+                    f"**Answer:** {ai_answer}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_to_message_id=update.message.message_id
+                )
+                await update.message.reply_text(
+                    f"✅ **Question answered by AI!**\n\n"
+                    f"Our AI assistant provided an answer above.\n"
+                    f"If you need further clarification, please ask again!",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_to_message_id=update.message.message_id
+                )
+
+                # Save as AI-answered
+                question_data = {
+                    'username': username,
+                    'telegram_id': user.id,
+                    'question_text': question_text,
+                    'file_id': None,
+                    'file_name': None,
+                    'asked_at': datetime.now(timezone.utc),
+                    'status': 'AI-answered'
+                }
+                await run_blocking(append_question, question_data)
+                return
+
+        except Exception as e:
+            logger.exception("Error in support group auto-answer check: %s", e)
+            # Continue with normal flow if auto-answer fails
+
+        # Prepare question data for forwarding to admins
         question_data = {
             'username': username,
             'telegram_id': user.id,
@@ -770,10 +938,10 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             'asked_at': datetime.now(timezone.utc),
             'status': 'Pending'
         }
-        
+
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
-        
+
         # Forward to questions group
         if QUESTIONS_GROUP_ID:
             forward_text = (

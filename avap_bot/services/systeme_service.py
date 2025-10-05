@@ -25,12 +25,12 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             "Content-Type": "application/json"
         }
         
-        # Create contact
+        # Create contact - use proper Systeme.io API format
         contact_payload = {
             "email": contact_data.get("email"),
-            "first_name": contact_data.get("name", "").split()[0] if contact_data.get("name") else "",
-            "last_name": " ".join(contact_data.get("name", "").split()[1:]) if contact_data.get("name") and len(contact_data.get("name", "").split()) > 1 else "",
-            "phone": contact_data.get("phone", ""),
+            "firstName": contact_data.get("name", "").split()[0] if contact_data.get("name") else "",
+            "lastName": " ".join(contact_data.get("name", "").split()[1:]) if contact_data.get("name") and len(contact_data.get("name", "").split()) > 1 else "",
+            "phoneNumber": contact_data.get("phone", ""),
             "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
         }
         
@@ -64,10 +64,8 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
 async def _apply_achiever_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
     """Apply achiever tag to contact"""
     try:
-        tag_payload = {
-            "contact_id": contact_id,
-            "tag_id": SYSTEME_ACHIEVER_TAG_ID
-        }
+        # Apply tag using Systeme.io API format
+        tag_payload = [SYSTEME_ACHIEVER_TAG_ID]
         
         response = await client.post(
             f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
@@ -164,7 +162,7 @@ async def tag_achiever(contact_id: str) -> bool:
             response = await client.post(
                 f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
                 headers=headers,
-                json={"tag_id": SYSTEME_ACHIEVER_TAG_ID},
+                json=[SYSTEME_ACHIEVER_TAG_ID],
                 timeout=10.0
             )
             

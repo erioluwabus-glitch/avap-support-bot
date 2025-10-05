@@ -41,6 +41,7 @@ def _get_sheets_client():
     
     if _sheets_client is None:
         if GOOGLE_CREDENTIALS_JSON:
+            logger.info("Using provided Google credentials from environment variable")
             try:
                 # Try base64 decode first
                 try:
@@ -59,9 +60,8 @@ def _get_sheets_client():
             try:
                 creds = Credentials.from_service_account_file("credentials.json")
             except FileNotFoundError:
-                logger.warning("credentials.json not found. Set GOOGLE_CREDENTIALS_JSON environment variable with base64 encoded credentials.")
-                # For production, we'll use CSV fallback instead of failing completely
-                logger.info("Using CSV fallback for Google Sheets operations")
+                logger.info("Using CSV fallback mode for production deployment (no local credentials.json found)")
+                logger.info("CSV fallback active - all data stored locally")
                 # Set a flag to indicate we're in fallback mode
                 os.environ['_SHEETS_FALLBACK_MODE'] = 'true'
                 return None  # Return None to indicate no client available
@@ -79,7 +79,7 @@ def _get_spreadsheet():
 
         # If client is None, we're in fallback mode
         if client is None:
-            logger.info("Using CSV fallback mode - no spreadsheet operations available")
+            logger.info("CSV fallback mode active - storing data locally")
             return None
 
         if GOOGLE_SHEET_ID:
@@ -120,7 +120,7 @@ def _csv_fallback(filename: str, data: List[List[str]]):
     # For persistent backups, set the STABLE_BACKUP_DIR environment variable.
     if not os.getenv("STABLE_BACKUP_DIR"):
         logger.warning("Using ephemeral /tmp/ directory for CSV fallback. Set STABLE_BACKUP_DIR for persistent storage.")
-    
+
     filepath = os.path.join(CSV_DIR, filename)
     try:
         with open(filepath, 'a', newline='', encoding='utf-8') as f:
@@ -131,6 +131,21 @@ def _csv_fallback(filename: str, data: List[List[str]]):
     except Exception as e:
         logger.exception("CSV fallback failed: %s", e)
         return False
+
+
+def _read_csv_fallback(filename: str) -> List[Dict[str, Any]]:
+    """Read data from CSV file (fallback mode)"""
+    filepath = os.path.join(CSV_DIR, filename)
+    try:
+        if not os.path.exists(filepath):
+            return []
+
+        with open(filepath, 'r', newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            return list(reader)
+    except Exception as e:
+        logger.exception("CSV read fallback failed for %s: %s", filename, e)
+        return []
 
 
 def append_pending_verification(record: Dict[str, Any]) -> bool:
@@ -305,23 +320,50 @@ def append_question(payload: Dict[str, Any]) -> bool:
 
 
 def get_student_submissions(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Get student submissions from Google Sheets"""
+    """Get student submissions from Google Sheets or CSV fallback"""
     try:
         spreadsheet = _get_spreadsheet()
-        sheet = spreadsheet.worksheet("submissions")
-        
-        # Get all data
-        records = sheet.get_all_records()
-        
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                sheet = spreadsheet.worksheet("submissions")
+                # Get all data
+                records = sheet.get_all_records()
+                # Filter by username and optionally module
+                student_submissions = [record for record in records if record.get("username") == username]
+                if module:
+                    student_submissions = [s for s in student_submissions if s.get("module") == module]
+                return student_submissions
+            except Exception as e:
+                logger.warning("Failed to get submissions from Google Sheets, falling back to CSV: %s", e)
+
+        # CSV fallback mode
+        return _get_student_submissions_csv(username, module)
+
+    except Exception as e:
+        logger.exception("Failed to get student submissions: %s", e)
+        # Try CSV as last resort
+        try:
+            return _get_student_submissions_csv(username, module)
+        except:
+            return []
+
+
+def _get_student_submissions_csv(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get student submissions from CSV file (fallback mode)"""
+    try:
+        records = _read_csv_fallback("submissions.csv")
+
         # Filter by username and optionally module
         student_submissions = [record for record in records if record.get("username") == username]
         if module:
             student_submissions = [s for s in student_submissions if s.get("module") == module]
-        
+
         return student_submissions
-        
+
     except Exception as e:
-        logger.exception("Failed to get student submissions: %s", e)
+        logger.exception("Failed to get student submissions from CSV: %s", e)
         return []
 
 
@@ -600,40 +642,90 @@ def update_verification_status(email: str, status: str) -> bool:
 
 
 def get_student_wins(username: str) -> List[Dict[str, Any]]:
-    """Get student wins from Google Sheets"""
+    """Get student wins from Google Sheets or CSV fallback"""
     try:
         spreadsheet = _get_spreadsheet()
-        sheet = spreadsheet.worksheet("wins")
-        
-        # Get all data
-        records = sheet.get_all_records()
-        
-        # Filter by username
-        student_wins = [record for record in records if record.get("username") == username]
-        
-        return student_wins
-        
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                sheet = spreadsheet.worksheet("wins")
+                # Get all data
+                records = sheet.get_all_records()
+                # Filter by username
+                student_wins = [record for record in records if record.get("username") == username]
+                return student_wins
+            except Exception as e:
+                logger.warning("Failed to get wins from Google Sheets, falling back to CSV: %s", e)
+
+        # CSV fallback mode
+        return _get_student_wins_csv(username)
+
     except Exception as e:
         logger.exception("Failed to get student wins: %s", e)
+        # Try CSV as last resort
+        try:
+            return _get_student_wins_csv(username)
+        except:
+            return []
+
+
+def _get_student_wins_csv(username: str) -> List[Dict[str, Any]]:
+    """Get student wins from CSV file (fallback mode)"""
+    try:
+        records = _read_csv_fallback("wins.csv")
+
+        # Filter by username
+        student_wins = [record for record in records if record.get("username") == username]
+
+        return student_wins
+
+    except Exception as e:
+        logger.exception("Failed to get student wins from CSV: %s", e)
         return []
 
 
 def get_student_questions(username: str) -> List[Dict[str, Any]]:
-    """Get student questions from Google Sheets"""
+    """Get student questions from Google Sheets or CSV fallback"""
     try:
         spreadsheet = _get_spreadsheet()
-        sheet = spreadsheet.worksheet("questions")
-        
-        # Get all data
-        records = sheet.get_all_records()
-        
-        # Filter by username
-        student_questions = [record for record in records if record.get("username") == username]
-        
-        return student_questions
-        
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                sheet = spreadsheet.worksheet("questions")
+                # Get all data
+                records = sheet.get_all_records()
+                # Filter by username
+                student_questions = [record for record in records if record.get("username") == username]
+                return student_questions
+            except Exception as e:
+                logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
+
+        # CSV fallback mode
+        return _get_student_questions_csv(username)
+
     except Exception as e:
         logger.exception("Failed to get student questions: %s", e)
+        # Try CSV as last resort
+        try:
+            return _get_student_questions_csv(username)
+        except:
+            return []
+
+
+def _get_student_questions_csv(username: str) -> List[Dict[str, Any]]:
+    """Get student questions from CSV file (fallback mode)"""
+    try:
+        records = _read_csv_fallback("questions.csv")
+
+        # Filter by username
+        student_questions = [record for record in records if record.get("username") == username]
+
+        return student_questions
+
+    except Exception as e:
+        logger.exception("Failed to get student questions from CSV: %s", e)
         return []
 
 

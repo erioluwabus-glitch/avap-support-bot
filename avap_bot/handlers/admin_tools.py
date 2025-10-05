@@ -21,7 +21,7 @@ from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 logger = logging.getLogger(__name__)
 
 # Conversation states
-GET_SUBMISSION, BROADCAST_MESSAGE, MESSAGE_ACHIEVERS = range(3)
+GET_SUBMISSION, BROADCAST_MESSAGE, MESSAGE_ACHIEVERS, BROADCAST_TYPE, BROADCAST_CONTENT = range(5)
 
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0"))
@@ -223,66 +223,144 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle /broadcast command"""
+    """Handle /broadcast command - start interactive broadcast"""
     if not _is_admin(update):
         await update.message.reply_text("❌ This command is only for admins.")
         return ConversationHandler.END
-    
-    # Parse command arguments
-    args = context.args
-    if not args:
-        await update.message.reply_text(
-            "📢 **Broadcast Message**\n\n"
-            "Usage: `/broadcast <message>`\n"
-            "Example: `/broadcast Important announcement for all students!`",
+
+    # Show broadcast type options
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Text Broadcast", callback_data="broadcast_text")],
+        [InlineKeyboardButton("🎤 Audio Broadcast", callback_data="broadcast_audio")],
+        [InlineKeyboardButton("🎥 Video Broadcast", callback_data="broadcast_video")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]
+    ])
+
+    await update.message.reply_text(
+        "📢 **Interactive Broadcast**\n\n"
+        "Choose the type of broadcast you want to send:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=keyboard
+    )
+
+    return BROADCAST_TYPE
+
+
+async def broadcast_type_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle broadcast type selection"""
+    query = update.callback_query
+    await query.answer()
+
+    broadcast_type = query.data.replace("broadcast_", "")
+
+    if broadcast_type == "cancel":
+        await query.edit_message_text("❌ Broadcast cancelled.")
+        return ConversationHandler.END
+
+    context.user_data['broadcast_type'] = broadcast_type
+
+    if broadcast_type == "text":
+        await query.edit_message_text(
+            "📝 **Text Broadcast**\n\n"
+            "Please type your broadcast message:",
             parse_mode=ParseMode.MARKDOWN
         )
+    elif broadcast_type == "audio":
+        await query.edit_message_text(
+            "🎤 **Audio Broadcast**\n\n"
+            "Please send an audio message or voice note:",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    elif broadcast_type == "video":
+        await query.edit_message_text(
+            "🎥 **Video Broadcast**\n\n"
+            "Please send a video message:",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+    return BROADCAST_CONTENT
+
+
+async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle broadcast content submission"""
+    broadcast_type = context.user_data.get('broadcast_type')
+
+    if not broadcast_type:
+        await update.message.reply_text("❌ Missing broadcast type. Please try again.")
         return ConversationHandler.END
-    
-    message_text = " ".join(args)
-    
+
     try:
         # Get all verified users
         client = get_supabase()
         result = client.table('verified_users').select('telegram_id').eq('status', 'verified').execute()
         verified_users = result.data
-        
+
         if not verified_users:
             await update.message.reply_text("❌ No verified users found.")
             return ConversationHandler.END
-        
-        # Send message to each verified user
+
+        # Prepare broadcast content
         sent_count = 0
         failed_count = 0
-        
+
         for user in verified_users:
             try:
                 telegram_id = user.get('telegram_id')
-                if telegram_id:
+                if not telegram_id:
+                    failed_count += 1
+                    continue
+
+                if broadcast_type == "text":
+                    if not update.message.text:
+                        await update.message.reply_text("❌ Please send a text message.")
+                        return BROADCAST_CONTENT
+
                     await context.bot.send_message(
                         telegram_id,
-                        f"📢 **Broadcast Message**\n\n{message_text}",
+                        f"📢 **Broadcast Message**\n\n{update.message.text}",
                         parse_mode=ParseMode.MARKDOWN
                     )
-                    sent_count += 1
-                else:
-                    failed_count += 1
+
+                elif broadcast_type == "audio":
+                    if not update.message.voice:
+                        await update.message.reply_text("❌ Please send an audio/voice message.")
+                        return BROADCAST_CONTENT
+
+                    await context.bot.send_voice(
+                        telegram_id,
+                        voice=update.message.voice.file_id,
+                        caption="📢 **Audio Broadcast**"
+                    )
+
+                elif broadcast_type == "video":
+                    if not update.message.video:
+                        await update.message.reply_text("❌ Please send a video message.")
+                        return BROADCAST_CONTENT
+
+                    await context.bot.send_video(
+                        telegram_id,
+                        video=update.message.video.file_id,
+                        caption="📢 **Video Broadcast**"
+                    )
+
+                sent_count += 1
+
             except Exception as e:
-                logger.exception("Failed to send broadcast message: %s", e)
+                logger.exception("Failed to send broadcast: %s", e)
                 failed_count += 1
-        
+
         await update.message.reply_text(
-            f"✅ **Broadcast Complete!**\n\n"
+            f"✅ **{broadcast_type.title()} Broadcast Complete!**\n\n"
             f"Messages sent: {sent_count}\n"
             f"Failed: {failed_count}",
             parse_mode=ParseMode.MARKDOWN
         )
-        
+
     except Exception as e:
-        logger.exception("Failed to broadcast message: %s", e)
+        logger.exception("Failed to broadcast: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Broadcast failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to broadcast message. Please try again.")
-    
+        await update.message.reply_text("❌ Failed to broadcast. Please try again.")
+
     return ConversationHandler.END
 
 
@@ -317,8 +395,13 @@ message_achievers_conv = ConversationHandler(
 
 broadcast_conv = ConversationHandler(
     entry_points=[CommandHandler("broadcast", broadcast_all)],
-    states={},
-    fallbacks=[],
+    states={
+        BROADCAST_TYPE: [CallbackQueryHandler(broadcast_type_callback, pattern="^broadcast_")],
+        BROADCAST_CONTENT: [
+            MessageHandler(filters.TEXT | filters.VOICE | filters.VIDEO, broadcast_content)
+        ],
+    },
+    fallbacks=[get_cancel_fallback_handler()],
     per_message=False
 )
 
