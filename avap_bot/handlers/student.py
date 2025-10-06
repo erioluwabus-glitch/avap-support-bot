@@ -811,11 +811,15 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             ai_answer = await answer_question_with_ai(question_text)
             if ai_answer:
                 # Send AI answer immediately
+                # Escape special Markdown characters to prevent parsing errors
+                escaped_question = question_text.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_answer = ai_answer.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                
                 await context.bot.send_message(
                     user_id,
                     f"🤖 **AI-Generated Answer!**\n\n"
-                    f"**Your Question:** {question_text}\n\n"
-                    f"**Answer:** {ai_answer}",
+                    f"**Your Question:** {escaped_question}\n\n"
+                    f"**Answer:** {escaped_answer}",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 await update.message.reply_text(
@@ -1055,11 +1059,15 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             faq_match = await find_faq_match(question_text)
             if faq_match:
                 # Send FAQ answer immediately
+                # Escape special Markdown characters to prevent parsing errors
+                escaped_question = faq_match['question'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_answer = faq_match['answer'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                
                 await context.bot.send_message(
                     user.id,
                     f"💡 **Quick Answer Found!**\n\n"
-                    f"**Question:** {faq_match['question']}\n\n"
-                    f"**Answer:** {faq_match['answer']}",
+                    f"**Question:** {escaped_question}\n\n"
+                    f"**Answer:** {escaped_answer}",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_to_message_id=update.message.message_id
                 )
