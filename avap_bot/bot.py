@@ -147,21 +147,59 @@ def generate_activity():
         import socket
         import random
         import time
+        import hashlib
 
-        # Generate some network activity
-        try:
-            socket.gethostbyname(f'activity-{random.randint(1, 1000)}.example.com')
-        except:
-            pass
+        # Generate network activity with multiple domains
+        domains = ['google.com', 'api.telegram.org', 'github.com', 'stackoverflow.com']
+        for domain in domains:
+            try:
+                socket.gethostbyname(domain)
+            except:
+                pass
 
-        # Generate some CPU activity
-        _ = sum(i * i for i in range(100))
+        # Generate CPU activity with more intensive calculations
+        _ = sum(i * i * i for i in range(500))
+
+        # Hash operations to simulate cryptographic work
+        data = f"activity-{time.time()}-{random.randint(1, 10000)}".encode()
+        hashlib.sha256(data).hexdigest()
 
         # Small delay to simulate work
-        time.sleep(0.01)
+        time.sleep(0.005)
 
     except:
         pass  # Silent fail
+
+
+def webhook_health_check():
+    """Check webhook health and ensure it's working properly."""
+    try:
+        import httpx
+        import asyncio
+
+        # Test webhook endpoint
+        webhook_url = os.getenv("WEBHOOK_URL")
+        if webhook_url:
+            try:
+                # Make a simple request to the webhook URL to ensure it's responsive
+                response = httpx.get(f"{webhook_url}/health", timeout=5.0)
+                if response.status_code == 200:
+                    logger.debug("Webhook health check: OK")
+                else:
+                    logger.warning(f"Webhook health check: HTTP {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Webhook health check failed: {e}")
+
+        # Additional network activity to show the service is active
+        try:
+            import socket
+            socket.gethostbyname('api.telegram.org')
+            socket.gethostbyname('google.com')
+        except:
+            pass
+
+    except Exception as e:
+        logger.error(f"Webhook health check error: {e}")
 
 
 async def health_check():
@@ -300,36 +338,46 @@ async def initialize_services():
         # Schedule daily tips
         await schedule_daily_tips(bot_app.bot, scheduler)
 
-        # Schedule ultra-aggressive keep-alive health checks every 15 seconds
+        # Schedule ultra-aggressive keep-alive health checks every 10 seconds
         scheduler.add_job(
             keep_alive_check,
             'interval',
-            seconds=15,
+            seconds=10,
             args=[bot_app.bot],
             id='keep_alive',
             replace_existing=True
         )
-        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 15 seconds")
+        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 10 seconds")
 
-        # Schedule simple ping every 8 seconds
+        # Schedule simple ping every 6 seconds
         scheduler.add_job(
             ping_self,
             'interval',
-            seconds=8,
+            seconds=6,
             id='ping_self',
             replace_existing=True
         )
-        logger.debug("Simple ping scheduled every 8 seconds")
+        logger.debug("Simple ping scheduled every 6 seconds")
 
-        # Schedule additional activity every 5 seconds to prevent Render timeout
+        # Schedule additional activity every 3 seconds to prevent Render timeout
         scheduler.add_job(
             generate_activity,
             'interval',
-            seconds=5,
+            seconds=3,
             id='activity_generator',
             replace_existing=True
         )
-        logger.debug("Activity generator scheduled every 5 seconds")
+        logger.debug("Activity generator scheduled every 3 seconds")
+
+        # Schedule webhook health check every 12 seconds
+        scheduler.add_job(
+            webhook_health_check,
+            'interval',
+            seconds=12,
+            id='webhook_health',
+            replace_existing=True
+        )
+        logger.debug("Webhook health check scheduled every 12 seconds")
 
         # Schedule periodic memory cleanup every 10 minutes
         scheduler.add_job(
@@ -410,11 +458,19 @@ async def background_keepalive():
                 # 2. DNS resolution to generate network activity
                 try:
                     socket.gethostbyname('google.com')
+                    socket.gethostbyname('api.telegram.org')
+                    socket.gethostbyname('github.com')
                 except:
                     pass
 
                 # 3. Simple memory allocation to show CPU activity
-                _ = [i for i in range(1000)]
+                _ = [i * i for i in range(2000)]
+
+                # 4. Additional network activity
+                try:
+                    socket.gethostbyname(f'keepalive-{time.time()}.example.com')
+                except:
+                    pass
 
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
@@ -426,7 +482,7 @@ async def background_keepalive():
                 logger.debug(f"Background keepalive error: {e}")
             finally:
                 try:
-                    await asyncio.sleep(2)  # Ping every 2 seconds for ultra-aggressive keepalive
+                    await asyncio.sleep(1)  # Ping every 1 second for ultra-aggressive keepalive
                 except asyncio.CancelledError:
                     logger.info("Background keepalive sleep cancelled - shutting down")
                     break

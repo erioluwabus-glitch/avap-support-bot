@@ -291,7 +291,7 @@ grade_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 

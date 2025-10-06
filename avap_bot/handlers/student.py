@@ -1272,7 +1272,7 @@ start_conv = ConversationHandler(
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1284,7 +1284,7 @@ submit_conv = ConversationHandler(
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1295,7 +1295,7 @@ share_win_conv = ConversationHandler(
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1305,7 +1305,7 @@ ask_conv = ConversationHandler(
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
