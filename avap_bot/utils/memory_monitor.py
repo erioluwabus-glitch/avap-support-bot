@@ -82,8 +82,8 @@ async def monitor_memory(context) -> None:
         except (NameError, ImportError):
             logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
 
-        # Check for high memory usage (50% of 512MB = 256MB for very aggressive cleanup)
-        if rss_mb > 256:
+        # Check for high memory usage (40% of 512MB = 204MB for extremely aggressive cleanup)
+        if rss_mb > 204:
             logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking corrective action")
 
             # Force garbage collection

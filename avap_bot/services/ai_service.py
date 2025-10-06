@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Model cache with aggressive cleanup
 _model = None
 _model_last_used = None
-MODEL_CACHE_DURATION = 30  # 30 seconds for very aggressive memory management
+MODEL_CACHE_DURATION = 15  # 15 seconds for extremely aggressive memory management
 
 @contextmanager
 def managed_model():
@@ -64,8 +64,11 @@ def managed_model():
     try:
         yield _model
     finally:
-        # Model will be cleaned up by cache expiration logic
-        pass
+        # Force immediate cleanup after each use
+        gc.collect()
+        # Force garbage collection multiple times for aggressive cleanup
+        for _ in range(3):
+            gc.collect()
 
 def clear_model_cache():
     """Force clear the model cache"""
