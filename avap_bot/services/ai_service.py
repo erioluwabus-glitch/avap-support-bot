@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Model cache with aggressive cleanup
 _model = None
 _model_last_used = None
-MODEL_CACHE_DURATION = 15  # 15 seconds for extremely aggressive memory management
+MODEL_CACHE_DURATION = 5  # 5 seconds for extremely aggressive memory management
 
 @contextmanager
 def managed_model():
@@ -65,10 +65,10 @@ def managed_model():
         yield _model
     finally:
         # Force immediate cleanup after each use
-        gc.collect()
-        # Force garbage collection multiple times for aggressive cleanup
-        for _ in range(3):
+        for _ in range(5):
             gc.collect()
+        # Clear model cache after each use for maximum memory efficiency
+        clear_model_cache()
 
 def clear_model_cache():
     """Force clear the model cache"""
@@ -77,7 +77,10 @@ def clear_model_cache():
         del _model
         _model = None
     _model_last_used = None
-    gc.collect()
+
+    # Force aggressive garbage collection
+    for _ in range(5):
+        gc.collect()
     log_memory_usage("after model cache clear")
 
 
@@ -93,23 +96,25 @@ async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict
         with managed_model() as transformer:
             log_memory_usage("start FAQ matching")
 
-            # Limit FAQ list size to prevent memory issues (top 50 FAQs)
-            max_faqs = 50
+            # Limit FAQ list size to prevent memory issues (top 20 FAQs for memory efficiency)
+            max_faqs = 20
             if len(faqs) > max_faqs:
                 logger.info(f"Limiting FAQ search to {max_faqs} most recent FAQs")
                 faqs = faqs[:max_faqs]
 
-            # Encode question and FAQ questions in batches
+            # Encode question and FAQ questions in smaller batches
             question_embedding = transformer.encode([question])
             faq_questions = [faq['question'] for faq in faqs]
 
-            # Batch encode FAQs to reduce memory usage
-            batch_size = 10
+            # Batch encode FAQs to reduce memory usage (smaller batches)
+            batch_size = 5
             faq_embeddings = []
             for i in range(0, len(faq_questions), batch_size):
                 batch = faq_questions[i:i + batch_size]
                 batch_embeddings = transformer.encode(batch)
                 faq_embeddings.extend(batch_embeddings)
+                # Force garbage collection after each batch
+                gc.collect()
 
             faq_embeddings = np.array(faq_embeddings)
 
@@ -312,15 +317,50 @@ async def transcribe_audio(file_id: str, bot) -> Optional[str]:
         return None
 
 
-async def answer_question_with_ai(question: str) -> Optional[str]:
-    """Answer question using ChatGPT/OpenAI if no FAQ match found"""
+async def process_question_with_ai(question: str) -> Dict[str, Any]:
+    """
+    Process question with all AI services in one go to minimize memory usage.
+    Returns a dict with the best answer found and its source.
+    """
     try:
-        # First try FAQ matching
+        # First try FAQ matching (most memory efficient)
         faq_match = await find_faq_match(question)
         if faq_match:
-            return faq_match['answer']
+            return {
+                'answer': faq_match['answer'],
+                'source': 'faq',
+                'question': faq_match['question']
+            }
 
-        # If no FAQ match, use ChatGPT/OpenAI for intelligent answers
+        # Then try similar answered questions
+        similar_answer = await find_similar_answered_question(question)
+        if similar_answer:
+            return {
+                'answer': similar_answer['answer'],
+                'source': 'similar',
+                'question': similar_answer['question_text']
+            }
+
+        # Finally try AI generation
+        ai_answer = await answer_question_with_ai(question)
+        if ai_answer:
+            return {
+                'answer': ai_answer,
+                'source': 'ai',
+                'question': question
+            }
+
+        return None
+
+    except Exception as e:
+        logger.exception("Failed to process question with AI: %s", e)
+        return None
+
+
+async def answer_question_with_ai(question: str) -> Optional[str]:
+    """Answer question using ChatGPT/OpenAI for intelligent answers"""
+    try:
+        # Use ChatGPT/OpenAI for intelligent answers
         openai_key = os.getenv("OPENAI_API_KEY")
         if not openai_key:
             # Fallback to Hugging Face if OpenAI is not available

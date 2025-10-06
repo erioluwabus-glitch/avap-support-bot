@@ -21,7 +21,7 @@ from avap_bot.services.sheets_service import (
     get_student_submissions, get_student_wins, get_student_questions
 )
 from avap_bot.handlers.grading import create_grading_keyboard, view_grades_handler
-from avap_bot.services.ai_service import answer_question_with_ai, find_faq_match, find_similar_answered_question
+from avap_bot.services.ai_service import process_question_with_ai
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
@@ -705,6 +705,10 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle question submission"""
     try:
+        # Force memory cleanup before processing question
+        from avap_bot.utils.memory_monitor import log_memory_usage
+        log_memory_usage("before ask question processing")
+        
         user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
         
@@ -732,111 +736,57 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await update.message.reply_text("❌ Unsupported question type. Please send text, document, audio, or video.")
             return ASK_QUESTION
         
-        # Check for similar questions and auto-answer if found
+        # Check for similar questions and auto-answer if found using consolidated AI function
         try:
-            # Try previously answered questions first (pattern matching)
-            similar_answer = await find_similar_answered_question(question_text)
-            if similar_answer:
-                # Send previously answered question's answer
-                await context.bot.send_message(
-                    user_id,
-                    f"🔄 **Similar Question Found!**\n\n"
-                    f"**Your Question:** {question_text}\n\n"
-                    f"**Similar Question:** {similar_answer['question_text']}\n\n"
-                    f"**Previous Answer:** {similar_answer['answer']}",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                await update.message.reply_text(
-                    f"✅ **Question answered automatically!**\n\n"
-                    f"I found a similar question that was previously answered and provided that answer above.\n"
-                    f"If this doesn't fully address your question, please ask again for admin assistance.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-
-                # Store question in database for future FAQ matching
-                def _add_question_similar():
-                    return add_question(user_id, username, question_text, file_id, file_name, similar_answer['answer'], 'answered')
-                await run_blocking(_add_question_similar)
-
-                # Still save the question for tracking but mark as auto-answered with the answer
-                question_data = {
-                    'username': username,
-                    'telegram_id': user_id,
-                    'question_text': question_text,
-                    'file_id': file_id,
-                    'file_name': file_name,
-                    'asked_at': datetime.now(timezone.utc),
-                    'status': 'Auto-answered',
-                    'answer': similar_answer['answer']
-                }
-                await run_blocking(append_question, question_data)
-                return ConversationHandler.END
-
-            # Try FAQ matching
-            faq_match = await find_faq_match(question_text)
-            if faq_match:
-                # Send FAQ answer immediately
-                await context.bot.send_message(
-                    user_id,
-                    f"💡 **Quick Answer Found!**\n\n"
-                    f"**Question:** {faq_match['question']}\n\n"
-                    f"**Answer:** {faq_match['answer']}",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                await update.message.reply_text(
-                    f"✅ **Question answered automatically!**\n\n"
-                    f"I found a similar question in our FAQ database and provided the answer above.\n"
-                    f"If this doesn't fully address your question, please ask again for admin assistance.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-
-                # Store question in database for future FAQ matching
-                def _add_question_faq():
-                    return add_question(user_id, username, question_text, file_id, file_name, faq_match['answer'], 'answered')
-                await run_blocking(_add_question_faq)
-
-                # Still save the question for tracking but mark as auto-answered with the answer
-                question_data = {
-                    'username': username,
-                    'telegram_id': user_id,
-                    'question_text': question_text,
-                    'file_id': file_id,
-                    'file_name': file_name,
-                    'asked_at': datetime.now(timezone.utc),
-                    'status': 'Auto-answered',
-                    'answer': faq_match['answer']
-                }
-                await run_blocking(append_question, question_data)
-                return ConversationHandler.END
-
-            # Try AI matching for previously answered questions
-            ai_answer = await answer_question_with_ai(question_text)
-            if ai_answer:
-                # Send AI answer immediately
+            from avap_bot.services.ai_service import process_question_with_ai
+            ai_result = await process_question_with_ai(question_text)
+            
+            if ai_result:
+                answer = ai_result['answer']
+                source = ai_result['source']
+                similar_question = ai_result.get('question', question_text)
+                
+                # Determine the appropriate message based on source
+                if source == 'faq':
+                    title = "💡 **Quick Answer Found!**"
+                    subtitle = "I found a similar question in our FAQ database and provided the answer above."
+                elif source == 'similar':
+                    title = "🔄 **Similar Question Found!**"
+                    subtitle = "I found a similar question that was previously answered and provided that answer above."
+                else:  # ai
+                    title = "🤖 **AI-Generated Answer!**"
+                    subtitle = "Our AI assistant provided an answer above."
+                
                 # Escape special Markdown characters to prevent parsing errors
                 escaped_question = question_text.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
-                escaped_answer = ai_answer.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_answer = answer.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_similar = similar_question.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                
+                # Send the answer
+                if source == 'ai':
+                    message_text = f"{title}\n\n**Your Question:** {escaped_question}\n\n**Answer:** {escaped_answer}"
+                else:
+                    message_text = f"{title}\n\n**Your Question:** {escaped_question}\n\n**Similar Question:** {escaped_similar}\n\n**Answer:** {escaped_answer}"
                 
                 await context.bot.send_message(
                     user_id,
-                    f"🤖 **AI-Generated Answer!**\n\n"
-                    f"**Your Question:** {escaped_question}\n\n"
-                    f"**Answer:** {escaped_answer}",
+                    message_text,
                     parse_mode=ParseMode.MARKDOWN
                 )
+                
                 await update.message.reply_text(
-                    f"✅ **Question answered by AI!**\n\n"
-                    f"Our AI assistant provided an answer above.\n"
-                    f"If you need further clarification, please ask again!",
+                    f"✅ **Question answered automatically!**\n\n"
+                    f"{subtitle}\n"
+                    f"If this doesn't fully address your question, please ask again for admin assistance.",
                     parse_mode=ParseMode.MARKDOWN
                 )
 
                 # Store question in database for future FAQ matching
                 def _add_question_with_answer():
-                    return add_question(user_id, username, question_text, file_id, file_name, ai_answer, 'answered')
+                    return add_question(user_id, username, question_text, file_id, file_name, answer, 'answered')
                 await run_blocking(_add_question_with_answer)
 
-                # Save as AI-answered with the answer
+                # Save the question for tracking
                 question_data = {
                     'username': username,
                     'telegram_id': user_id,
@@ -844,10 +794,16 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     'file_id': file_id,
                     'file_name': file_name,
                     'asked_at': datetime.now(timezone.utc),
-                    'status': 'AI-answered',
-                    'answer': ai_answer
+                    'status': 'Auto-answered',
+                    'answer': answer
                 }
                 await run_blocking(append_question, question_data)
+                
+                # Force memory cleanup after AI processing
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                log_memory_usage("after AI processing")
+                
                 return ConversationHandler.END
 
         except Exception as e:
@@ -858,6 +814,11 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         def _add_question_pending():
             return add_question(user_id, username, question_text, file_id, file_name, None, 'pending')
         await run_blocking(_add_question_pending)
+        
+        # Force memory cleanup after processing (even if no AI answer found)
+        from avap_bot.services.ai_service import clear_model_cache
+        clear_model_cache()
+        log_memory_usage("after question processing")
 
         # Prepare question data for forwarding to admins
         question_data = {
@@ -1055,38 +1016,58 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     logger.info(f"Parsed question: {question_text}")
     
     try:
-        # Check for similar questions and auto-answer if found
+        # Check for similar questions and auto-answer if found using consolidated AI function
         try:
-            # Try FAQ matching first
-            faq_match = await find_faq_match(question_text)
-            if faq_match:
-                # Send FAQ answer immediately
+            ai_result = await process_question_with_ai(question_text)
+            
+            if ai_result:
+                answer = ai_result['answer']
+                source = ai_result['source']
+                similar_question = ai_result.get('question', question_text)
+                
+                # Determine the appropriate message based on source
+                if source == 'faq':
+                    title = "💡 **Quick Answer Found!**"
+                    subtitle = "I found a similar question in our FAQ database and provided the answer above."
+                elif source == 'similar':
+                    title = "🔄 **Similar Question Found!**"
+                    subtitle = "I found a similar question that was previously answered and provided that answer above."
+                else:  # ai
+                    title = "🤖 **AI-Generated Answer!**"
+                    subtitle = "Our AI assistant provided an answer above."
+                
                 # Escape special Markdown characters to prevent parsing errors
-                escaped_question = faq_match['question'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
-                escaped_answer = faq_match['answer'].replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_question = question_text.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_answer = answer.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_similar = similar_question.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                
+                # Send the answer
+                if source == 'ai':
+                    message_text = f"{title}\n\n**Your Question:** {escaped_question}\n\n**Answer:** {escaped_answer}"
+                else:
+                    message_text = f"{title}\n\n**Your Question:** {escaped_question}\n\n**Similar Question:** {escaped_similar}\n\n**Answer:** {escaped_answer}"
                 
                 await context.bot.send_message(
                     user.id,
-                    f"💡 **Quick Answer Found!**\n\n"
-                    f"**Question:** {escaped_question}\n\n"
-                    f"**Answer:** {escaped_answer}",
+                    message_text,
                     parse_mode=ParseMode.MARKDOWN,
                     reply_to_message_id=update.message.message_id
                 )
+                
                 await update.message.reply_text(
                     f"✅ **Question answered automatically!**\n\n"
-                    f"I found a similar question in our FAQ database and provided the answer above.\n"
+                    f"{subtitle}\n"
                     f"If this doesn't fully address your question, please ask again for admin assistance.",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_to_message_id=update.message.message_id
                 )
 
                 # Store question in database for future FAQ matching
-                def _add_question_faq_support():
-                    return add_question(user.id, username, question_text, None, None, faq_match['answer'], 'answered')
-                await run_blocking(_add_question_faq_support)
+                def _add_question_with_answer():
+                    return add_question(user.id, username, question_text, None, None, answer, 'answered')
+                await run_blocking(_add_question_with_answer)
 
-                # Still save the question for tracking but mark as auto-answered with the answer
+                # Save the question for tracking
                 question_data = {
                     'username': username,
                     'telegram_id': user.id,
@@ -1095,46 +1076,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     'file_name': None,
                     'asked_at': datetime.now(timezone.utc),
                     'status': 'Auto-answered',
-                    'answer': faq_match['answer']
-                }
-                await run_blocking(append_question, question_data)
-                return
-
-            # Try AI matching for previously answered questions
-            ai_answer = await answer_question_with_ai(question_text)
-            if ai_answer:
-                # Send AI answer immediately
-                await context.bot.send_message(
-                    user.id,
-                    f"🤖 **AI-Generated Answer!**\n\n"
-                    f"**Your Question:** {question_text}\n\n"
-                    f"**Answer:** {ai_answer}",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_to_message_id=update.message.message_id
-                )
-                await update.message.reply_text(
-                    f"✅ **Question answered by AI!**\n\n"
-                    f"Our AI assistant provided an answer above.\n"
-                    f"If you need further clarification, please ask again!",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_to_message_id=update.message.message_id
-                )
-
-                # Store question in database for future FAQ matching
-                def _add_question_ai_support():
-                    return add_question(user.id, username, question_text, None, None, faq_match['answer'], 'answered')
-                await run_blocking(_add_question_ai_support)
-
-                # Save as AI-answered with the answer
-                question_data = {
-                    'username': username,
-                    'telegram_id': user.id,
-                    'question_text': question_text,
-                    'file_id': None,
-                    'file_name': None,
-                    'asked_at': datetime.now(timezone.utc),
-                    'status': 'AI-answered',
-                    'answer': ai_answer
+                    'answer': answer
                 }
                 await run_blocking(append_question, question_data)
                 return
@@ -1142,11 +1084,6 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         except Exception as e:
             logger.exception("Error in support group auto-answer check: %s", e)
             # Continue with normal flow if auto-answer fails
-
-        # Store question in database for future FAQ matching
-        def _add_question_ai_final():
-            return add_question(user.id, username, question_text, None, None, ai_answer, 'answered')
-        await run_blocking(_add_question_ai_final)
 
         # Prepare question data for forwarding to admins
         question_data = {

@@ -82,19 +82,14 @@ async def monitor_memory(context) -> None:
         except (NameError, ImportError):
             logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
 
-        # Check for high memory usage (40% of 512MB = 204MB for extremely aggressive cleanup)
-        if rss_mb > 204:
+        # Check for high memory usage (30% of 512MB = 153MB for extremely aggressive cleanup)
+        if rss_mb > 153:
             logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking corrective action")
 
-            # Force garbage collection
-            gc.collect()
-
-            # Log memory consumers if available
-            if TRACEMALLOC_AVAILABLE:
-                top_consumers = get_memory_top_consumers(5)
-                for consumer, size_mb in top_consumers:
-                    logger.debug(f"Memory consumer: {consumer} - {size_mb:.1f}MB")
-
+            # Force aggressive garbage collection
+            for _ in range(3):
+                gc.collect()
+            
             # Force clear AI model cache if available
             try:
                 from avap_bot.services.ai_service import clear_model_cache
@@ -102,6 +97,16 @@ async def monitor_memory(context) -> None:
                 logger.info("Cleared AI model cache")
             except Exception as e:
                 logger.warning(f"Failed to clear AI model cache: {e}")
+            
+            # Force garbage collection again after cache clear
+            for _ in range(3):
+                gc.collect()
+
+            # Log memory consumers if available
+            if TRACEMALLOC_AVAILABLE:
+                top_consumers = get_memory_top_consumers(5)
+                for consumer, size_mb in top_consumers:
+                    logger.debug(f"Memory consumer: {consumer} - {size_mb:.1f}MB")
 
             # Check memory after cleanup
             new_rss_mb = get_memory_usage()

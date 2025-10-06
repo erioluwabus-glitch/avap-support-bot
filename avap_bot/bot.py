@@ -342,9 +342,9 @@ async def initialize_services():
 
         # Enhanced memory monitoring to prevent Render restarts
         enable_detailed_memory_monitoring()
-        bot_app.job_queue.run_repeating(monitor_memory, interval=120, first=30)  # Every 2 minutes, starting in 30 seconds
+        bot_app.job_queue.run_repeating(monitor_memory, interval=60, first=15)  # Every 1 minute, starting in 15 seconds
         await bot_app.job_queue.start()  # Start the job queue
-        logger.info("Memory monitoring scheduled every 2 minutes (starting in 30 seconds)")
+        logger.info("Memory monitoring scheduled every 1 minute (starting in 15 seconds)")
 
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:
@@ -399,21 +399,37 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - some keep-alive features disabled")
 
-        # Schedule periodic memory cleanup every 10 minutes (if scheduler available)
+        # Schedule periodic memory cleanup every 5 minutes (if scheduler available)
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     _periodic_memory_cleanup,
                     'interval',
-                    minutes=10,
+                    minutes=5,
                     id='memory_cleanup',
                     replace_existing=True
                 )
-                logger.debug("Memory cleanup scheduled every 10 minutes")
+                logger.debug("Memory cleanup scheduled every 5 minutes")
             except Exception as e:
                 logger.warning(f"Failed to schedule memory cleanup: {e}")
         else:
             logger.warning("Scheduler not available - memory cleanup not scheduled")
+            
+        # Schedule aggressive memory cleanup every 2 minutes for critical memory management
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
+                scheduler.add_job(
+                    _aggressive_memory_cleanup,
+                    'interval',
+                    minutes=2,
+                    id='aggressive_memory_cleanup',
+                    replace_existing=True
+                )
+                logger.debug("Aggressive memory cleanup scheduled every 2 minutes")
+            except Exception as e:
+                logger.warning(f"Failed to schedule aggressive memory cleanup: {e}")
+        else:
+            logger.warning("Scheduler not available - aggressive memory cleanup not scheduled")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
@@ -460,6 +476,44 @@ def _periodic_memory_cleanup():
             log_memory_usage("error in cleanup")
         except (NameError, ImportError) as e2:
             logger.error(f"log_memory_usage function not available for error logging: {e2}")
+
+
+def _aggressive_memory_cleanup():
+    """Aggressive memory cleanup for critical memory management"""
+    try:
+        import gc
+        from avap_bot.utils.memory_monitor import get_memory_usage, log_memory_usage
+        from avap_bot.services.ai_service import clear_model_cache
+        
+        memory_before = get_memory_usage()
+        log_memory_usage("before aggressive cleanup")
+        
+        # Force clear AI model cache
+        clear_model_cache()
+        
+        # Force aggressive garbage collection
+        for _ in range(5):
+            gc.collect()
+            
+        memory_after = get_memory_usage()
+        memory_freed = memory_before - memory_after
+        
+        log_memory_usage("after aggressive cleanup")
+        
+        if memory_freed > 5:  # Log if we freed any significant memory
+            logger.info(f"Aggressive memory cleanup completed. Freed {memory_freed:.1f}MB (before: {memory_before:.1f}MB, after: {memory_after:.1f}MB)")
+        else:
+            logger.debug(f"Aggressive memory cleanup completed. Freed {memory_freed:.1f}MB (before: {memory_before:.1f}MB, after: {memory_after:.1f}MB)")
+            
+    except Exception as e:
+        logger.error(f"Aggressive memory cleanup failed: {e}")
+        # Ensure log_memory_usage is available for error logging
+        try:
+            from avap_bot.utils.memory_monitor import log_memory_usage
+            log_memory_usage("error in aggressive cleanup")
+        except (NameError, ImportError) as e2:
+            logger.error(f"log_memory_usage function not available for error logging: {e2}")
+
 
 async def background_keepalive():
     """Background task that continuously pings the health endpoint."""
