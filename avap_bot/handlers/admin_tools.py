@@ -312,7 +312,12 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /broadcast command - start interactive broadcast"""
     if not _is_admin(update):
-        await update.message.reply_text("❌ This command is only for admins.")
+        await update.message.reply_text(
+            f"❌ This command is only for admins.\n"
+            f"Your ID: {update.effective_user.id}\n"
+            f"Admin ID: {ADMIN_USER_ID}\n"
+            f"Admin check: {_is_admin(update)}"
+        )
         return ConversationHandler.END
 
     # Show broadcast type options
@@ -384,7 +389,11 @@ async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         verified_users = result.data
 
         if not verified_users:
-            await update.message.reply_text("❌ No verified users found.")
+            await update.message.reply_text(
+                f"❌ No verified users found.\n"
+                f"Database query result: {result}\n"
+                f"Verified users count: {len(verified_users) if verified_users else 0}"
+            )
             return ConversationHandler.END
 
         # Create broadcast record in history
