@@ -20,7 +20,7 @@ from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 from avap_bot.services.ai_service import clear_model_cache
-from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage
+from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup
 
 # Initialize logging
 setup_logging()
@@ -342,9 +342,9 @@ async def initialize_services():
 
         # Enhanced memory monitoring to prevent Render restarts
         enable_detailed_memory_monitoring()
-        bot_app.job_queue.run_repeating(monitor_memory, interval=60, first=15)  # Every 1 minute, starting in 15 seconds
+        bot_app.job_queue.run_repeating(monitor_memory, interval=30, first=10)  # Every 30 seconds, starting in 10 seconds
         await bot_app.job_queue.start()  # Start the job queue
-        logger.info("Memory monitoring scheduled every 1 minute (starting in 15 seconds)")
+        logger.info("Memory monitoring scheduled every 30 seconds (starting in 10 seconds)")
 
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:
@@ -415,21 +415,21 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - memory cleanup not scheduled")
             
-        # Schedule aggressive memory cleanup every 2 minutes for critical memory management
+        # Schedule ULTRA aggressive memory cleanup every 1 minute for critical memory management
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
-                    _aggressive_memory_cleanup,
+                    ultra_aggressive_cleanup,
                     'interval',
-                    minutes=2,
-                    id='aggressive_memory_cleanup',
+                    minutes=1,
+                    id='ultra_aggressive_memory_cleanup',
                     replace_existing=True
                 )
-                logger.debug("Aggressive memory cleanup scheduled every 2 minutes")
+                logger.debug("ULTRA aggressive memory cleanup scheduled every 1 minute")
             except Exception as e:
-                logger.warning(f"Failed to schedule aggressive memory cleanup: {e}")
+                logger.warning(f"Failed to schedule ULTRA aggressive memory cleanup: {e}")
         else:
-            logger.warning("Scheduler not available - aggressive memory cleanup not scheduled")
+            logger.warning("Scheduler not available - ULTRA aggressive memory cleanup not scheduled")
 
         logger.info("Services initialized successfully.")
     except Exception as e:

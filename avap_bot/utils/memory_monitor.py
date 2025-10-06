@@ -82,12 +82,21 @@ async def monitor_memory(context) -> None:
         except (NameError, ImportError):
             logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
 
-        # Check for high memory usage (30% of 512MB = 153MB for extremely aggressive cleanup)
-        if rss_mb > 153:
-            logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking corrective action")
+        # Check for CRITICAL memory usage (78% of 512MB = 400MB) - NUCLEAR OPTION
+        if rss_mb > 400:
+            logger.critical(f"CRITICAL memory usage detected: {rss_mb:.1f}MB - Triggering NUCLEAR cleanup!")
+            try:
+                from avap_bot.utils.memory_monitor import ultra_aggressive_cleanup
+                await ultra_aggressive_cleanup()
+            except Exception as e:
+                logger.error(f"Failed to trigger ULTRA aggressive cleanup: {e}")
+        
+        # Check for high memory usage (25% of 512MB = 128MB for ULTRA aggressive cleanup)
+        elif rss_mb > 128:
+            logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking ULTRA aggressive corrective action")
 
-            # Force aggressive garbage collection
-            for _ in range(3):
+            # Force ULTRA aggressive garbage collection
+            for _ in range(10):
                 gc.collect()
             
             # Force clear AI model cache if available
@@ -98,9 +107,20 @@ async def monitor_memory(context) -> None:
             except Exception as e:
                 logger.warning(f"Failed to clear AI model cache: {e}")
             
-            # Force garbage collection again after cache clear
-            for _ in range(3):
+            # Force ULTRA aggressive garbage collection again after cache clear
+            for _ in range(10):
                 gc.collect()
+            
+            # Additional memory cleanup - clear all possible caches
+            try:
+                import sys
+                # Clear Python's internal caches
+                sys.modules.clear()
+                # Force another round of garbage collection
+                for _ in range(5):
+                    gc.collect()
+            except Exception as e:
+                logger.warning(f"Failed additional memory cleanup: {e}")
 
             # Log memory consumers if available
             if TRACEMALLOC_AVAILABLE:
@@ -120,6 +140,62 @@ async def monitor_memory(context) -> None:
 
     except Exception as e:
         logger.error(f"Memory monitoring failed: {e}")
+
+
+async def ultra_aggressive_cleanup() -> None:
+    """
+    ULTRA aggressive memory cleanup for critical situations.
+    This is the nuclear option for memory management.
+    """
+    try:
+        logger.warning("Starting ULTRA aggressive memory cleanup...")
+        
+        # Step 1: Force multiple rounds of garbage collection
+        for _ in range(20):
+            gc.collect()
+        
+        # Step 2: Clear AI model cache
+        try:
+            from avap_bot.services.ai_service import clear_model_cache
+            clear_model_cache()
+            logger.info("Cleared AI model cache during ULTRA cleanup")
+        except Exception as e:
+            logger.warning(f"Failed to clear AI model cache: {e}")
+        
+        # Step 3: Clear Python's internal caches
+        try:
+            import sys
+            # Clear module cache
+            modules_to_clear = [name for name in sys.modules.keys() 
+                              if name.startswith('avap_bot') or name.startswith('telegram')]
+            for module_name in modules_to_clear:
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+        except Exception as e:
+            logger.warning(f"Failed to clear module cache: {e}")
+        
+        # Step 4: Force more garbage collection
+        for _ in range(15):
+            gc.collect()
+        
+        # Step 5: Clear any remaining caches
+        try:
+            # Clear any remaining AI caches
+            from avap_bot.services.ai_service import clear_model_cache
+            clear_model_cache()
+        except:
+            pass
+        
+        # Final garbage collection
+        for _ in range(10):
+            gc.collect()
+        
+        # Log final memory usage
+        final_memory = get_memory_usage()
+        logger.warning(f"ULTRA cleanup completed. Final memory: {final_memory:.1f}MB")
+        
+    except Exception as e:
+        logger.error(f"ULTRA aggressive cleanup failed: {e}")
 
 
 async def cleanup_resources() -> None:
