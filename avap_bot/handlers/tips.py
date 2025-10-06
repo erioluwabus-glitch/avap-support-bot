@@ -190,7 +190,7 @@ async def _ensure_manual_tips():
             for tip_data in default_tips:
                 try:
                     from avap_bot.services.sheets_service import append_tip
-                    success = await append_tip(tip_data)
+                    success = append_tip(tip_data)
                     if success:
                         logger.info(f"Added default tip: {tip_data['content'][:50]}...")
                     else:
@@ -303,7 +303,7 @@ async def _get_daily_tip_content() -> Optional[str]:
             logger.warning("AI tip generation failed, falling back to manual tip")
         
         # Use manual tip (for odd days or as fallback)
-        manual_tips = await run_blocking(get_manual_tips)
+        manual_tips = get_manual_tips()
         
         if manual_tips:
             num_tips = len(manual_tips)
