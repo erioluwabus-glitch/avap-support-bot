@@ -639,8 +639,11 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         completed_modules = set()
         for sub in submissions:
             module = sub.get('module', '')
-            if module and module.isdigit():
-                completed_modules.add(module)
+            if module:
+                # Convert to string if it's not already, then check if it's a digit
+                module_str = str(module)
+                if module_str.isdigit():
+                    completed_modules.add(module_str)
 
         all_modules = set(str(i) for i in range(1, 13))
         modules_left = all_modules - completed_modules
