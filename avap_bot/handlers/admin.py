@@ -230,7 +230,7 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
         pending_id = query.data.split("_")[1]
         
         # Promote to verified (telegram_id will be None for admin verification until student does /start)
-        verified_data = promote_pending_to_verified(pending_id=pending_id, telegram_id=None)
+        verified_data = await promote_pending_to_verified(pending_id=pending_id, telegram_id=None)
         if not verified_data:
             await query.edit_message_text("❌ Failed to verify student.")
             return
