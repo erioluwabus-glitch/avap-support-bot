@@ -225,6 +225,7 @@ def _ensure_worksheets():
 
     try:
         existing_sheets = [ws.title for ws in spreadsheet.worksheets()]
+        logger.info(f"Existing worksheets: {existing_sheets}")
 
         for sheet_name in required_sheets:
             if sheet_name not in existing_sheets:
@@ -232,7 +233,12 @@ def _ensure_worksheets():
                     spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
                     logger.info("Created worksheet: %s", sheet_name)
                 except Exception as e:
-                    logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
+                    if "already exists" in str(e).lower():
+                        logger.info("Worksheet %s already exists, skipping creation", sheet_name)
+                    else:
+                        logger.warning("Failed to create worksheet %s: %s", sheet_name, e)
+            else:
+                logger.debug("Worksheet %s already exists, skipping creation", sheet_name)
     except Exception as e:
         logger.error("Failed to list existing worksheets: %s", e)
         logger.info("Continuing with existing worksheets")

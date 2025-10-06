@@ -137,7 +137,7 @@ async def _ensure_manual_tips():
     try:
         from avap_bot.services.sheets_service import get_manual_tips
 
-        tips = await get_manual_tips()
+        tips = get_manual_tips()
 
         # If no tips exist, add some default ones
         if not tips:

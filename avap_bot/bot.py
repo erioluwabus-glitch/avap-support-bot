@@ -352,48 +352,48 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-        # Schedule ultra-aggressive keep-alive health checks every 10 seconds (if scheduler available)
+                # Schedule keep-alive health checks every 30 seconds (reduced frequency for memory efficiency)
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
                     'interval',
-                    seconds=10,
+                    seconds=30,
                     args=[bot_app.bot],
                     id='keep_alive',
                     replace_existing=True
                 )
-                logger.debug("Ultra-aggressive keep-alive health checks scheduled every 10 seconds")
+                logger.debug("Keep-alive health checks scheduled every 30 seconds")
 
-                # Schedule simple ping every 6 seconds
+                # Schedule simple ping every 20 seconds
                 scheduler.add_job(
                     ping_self,
                     'interval',
-                    seconds=6,
+                    seconds=20,
                     id='ping_self',
                     replace_existing=True
                 )
-                logger.debug("Simple ping scheduled every 6 seconds")
+                logger.debug("Simple ping scheduled every 20 seconds")
 
-                # Schedule additional activity every 3 seconds to prevent Render timeout
+                # Schedule additional activity every 15 seconds to prevent Render timeout
                 scheduler.add_job(
                     generate_activity,
                     'interval',
-                    seconds=3,
+                    seconds=15,
                     id='activity_generator',
                     replace_existing=True
                 )
-                logger.debug("Activity generator scheduled every 3 seconds")
+                logger.debug("Activity generator scheduled every 15 seconds")
 
-                # Schedule webhook health check every 12 seconds
+                # Schedule webhook health check every 45 seconds
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=12,
+                    seconds=45,
                     id='webhook_health',
                     replace_existing=True
                 )
-                logger.debug("Webhook health check scheduled every 12 seconds")
+                logger.debug("Webhook health check scheduled every 45 seconds")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
