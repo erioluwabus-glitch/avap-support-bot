@@ -244,7 +244,7 @@ answer_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True
+    per_message=False
 )
 
 

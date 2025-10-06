@@ -6,3 +6,6 @@ id,username,telegram_id,email,win_type,file_id,file_name,shared_at
 5,testuser2,123456790,test2@example.com,text,,Win 1,2025-01-01T00:00:00Z
 6,testuser2,123456790,test2@example.com,text,,Win 2,2025-01-01T00:00:00Z
 7,testuser3,123456791,test3@example.com,text,,Win 1,2025-01-01T00:00:00Z
+test_win_123,testuser,123456789,text,,test_win.txt,This is a test win,2025-10-06 09:32:46
+test_win_456,testuser2,987654321,text,,test_win2.txt,This is another test win,2025-10-06 09:35:00
+test_win_456,testuser2,987654321,text,,test_win2.txt,This is another test win,2025-10-06 09:35:56
