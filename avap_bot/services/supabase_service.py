@@ -494,7 +494,7 @@ def get_answered_questions() -> List[Dict[str, Any]]:
     """Get all answered questions"""
     try:
         client = get_supabase()
-        res = client.table("questions").select("*").not_("answer", "is", None)
+        res = client.table("questions").select("*").not_("answer", "is", None).execute()
         data = _get_response_data(res)
         return data or []
     except Exception as e:

@@ -15,6 +15,13 @@ import numpy as np
 
 import psutil
 
+# Import sentence transformer
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    logger.warning("sentence-transformers not available. AI features will be limited.")
+    SentenceTransformer = None
+
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
 
@@ -45,6 +52,11 @@ def managed_model():
         from avap_bot.utils.memory_monitor import log_memory_usage
         log_memory_usage("before model loading")
         logger.info("Loading sentence transformer model...")
+        
+        if SentenceTransformer is None:
+            logger.error("SentenceTransformer not available - AI features disabled")
+            raise ImportError("sentence-transformers library not installed")
+            
         _model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
         _model_last_used = datetime.now(timezone.utc)
         log_memory_usage("after model loading")

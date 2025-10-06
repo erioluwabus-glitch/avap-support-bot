@@ -747,7 +747,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 )
 
                 # Store question in database for future FAQ matching
-                await run_blocking(add_question, user_id, username, question_text, file_id=file_id, file_name=file_name, answer=similar_answer['answer'], status='answered')
+                def _add_question_similar():
+                    return add_question(user_id, username, question_text, file_id, file_name, similar_answer['answer'], 'answered')
+                await run_blocking(_add_question_similar)
 
                 # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
@@ -782,7 +784,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 )
 
                 # Store question in database for future FAQ matching
-                await run_blocking(add_question, user_id, username, question_text, file_id=file_id, file_name=file_name, answer=faq_match['answer'], status='answered')
+                def _add_question_faq():
+                    return add_question(user_id, username, question_text, file_id, file_name, faq_match['answer'], 'answered')
+                await run_blocking(_add_question_faq)
 
                 # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
@@ -817,7 +821,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 )
 
                 # Store question in database for future FAQ matching
-                await run_blocking(add_question, user_id, username, question_text, file_id=file_id, file_name=file_name, answer=ai_answer, status='answered')
+                def _add_question_with_answer():
+                    return add_question(user_id, username, question_text, file_id, file_name, ai_answer, 'answered')
+                await run_blocking(_add_question_with_answer)
 
                 # Save as AI-answered with the answer
                 question_data = {
@@ -838,7 +844,9 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             # Continue with normal flow if auto-answer fails
 
         # Store question in database for future FAQ matching
-        await run_blocking(add_question, user_id, username, question_text, file_id=file_id, file_name=file_name, answer=None, status='pending')
+        def _add_question_pending():
+            return add_question(user_id, username, question_text, file_id, file_name, None, 'pending')
+        await run_blocking(_add_question_pending)
 
         # Prepare question data for forwarding to admins
         question_data = {
@@ -1059,7 +1067,9 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 )
 
                 # Store question in database for future FAQ matching
-                await run_blocking(add_question, user.id, username, question_text, file_id=None, file_name=None, answer=faq_match['answer'], status='answered')
+                def _add_question_faq_support():
+                    return add_question(user.id, username, question_text, None, None, faq_match['answer'], 'answered')
+                await run_blocking(_add_question_faq_support)
 
                 # Still save the question for tracking but mark as auto-answered with the answer
                 question_data = {
@@ -1096,7 +1106,9 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 )
 
                 # Store question in database for future FAQ matching
-                await run_blocking(add_question, user.id, username, question_text, file_id=None, file_name=None, answer=faq_match['answer'], status='answered')
+                def _add_question_ai_support():
+                    return add_question(user.id, username, question_text, None, None, faq_match['answer'], 'answered')
+                await run_blocking(_add_question_ai_support)
 
                 # Save as AI-answered with the answer
                 question_data = {
@@ -1117,7 +1129,9 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             # Continue with normal flow if auto-answer fails
 
         # Store question in database for future FAQ matching
-        await run_blocking(add_question, user.id, username, question_text, file_id=None, file_name=None, answer=ai_answer, status='answered')
+        def _add_question_ai_final():
+            return add_question(user.id, username, question_text, None, None, ai_answer, 'answered')
+        await run_blocking(_add_question_ai_final)
 
         # Prepare question data for forwarding to admins
         question_data = {
