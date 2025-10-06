@@ -504,8 +504,16 @@ def append_win(payload: Dict[str, Any]) -> bool:
             logger.warning(f"Failed to access wins worksheet: {sheet_error}")
             # Try to create a new wins worksheet with proper headers
             try:
-                new_sheet = spreadsheet.add_worksheet(title="wins_new", rows=1000, cols=10)
-                new_sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
+                # Check if wins_new already exists, if so use it
+                try:
+                    existing_sheet = spreadsheet.worksheet("wins_new")
+                    new_sheet = existing_sheet
+                    logger.info("Using existing wins_new worksheet")
+                except:
+                    # Create new sheet with timestamp to avoid duplicates
+                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    new_sheet = spreadsheet.add_worksheet(title=f"wins_{timestamp}", rows=1000, cols=10)
+                    new_sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
                 
                 row = [
                     payload.get("win_id", ""),

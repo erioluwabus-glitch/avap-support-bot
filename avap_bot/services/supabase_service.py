@@ -457,8 +457,15 @@ def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
-
-
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+    """Get all questions for a student"""
+    client = get_supabase()
+    try:
+        res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_student_questions error: %s", e)
         return []
 
 
@@ -492,6 +499,8 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         raise
 
 
+def get_student_questions(telegram_id: int) -> List[Dict[str, Any]]:
+    """Get all questions for a student"""
     client = get_supabase()
     try:
         res = client.table("questions").select("*").eq("telegram_id", telegram_id).execute()
@@ -502,6 +511,8 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         return []
 
 
+def update_question_answer(question_id: int, answer: str) -> bool:
+    """Update a question with an answer"""
     client = get_supabase()
     try:
         update_data = {
@@ -517,6 +528,8 @@ def add_question(telegram_id: int, username: str, question_text: str, file_id: O
         return False
 
 
+def get_faqs() -> List[Dict[str, Any]]:
+    """Get all FAQs"""
     client = get_supabase()
     try:
         res = client.table("faqs").select("*").execute()

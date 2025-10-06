@@ -542,9 +542,11 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
             if text_content:
                 # For text wins, include the actual text content with engaging intro
+                # Escape special Markdown characters to prevent parsing errors
+                escaped_content = text_content.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
                     f"{comment}\n\n"
-                    f"**Their Story:**\n{text_content}"
+                    f"**Their Story:**\n{escaped_content}"
                 )
             else:
                 # For file wins, show file info with engaging intro
