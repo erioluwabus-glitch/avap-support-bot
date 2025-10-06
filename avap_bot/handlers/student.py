@@ -20,6 +20,7 @@ from avap_bot.services.sheets_service import (
     append_submission, append_win, append_question,
     get_student_submissions, get_student_wins, get_student_questions
 )
+from avap_bot.handlers.grading import create_grading_keyboard, view_grades_handler
 from avap_bot.services.ai_service import answer_question_with_ai, find_faq_match, find_similar_answered_question
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
@@ -180,7 +181,8 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
 
         keyboard = ReplyKeyboardMarkup([
             ["📝 Submit Assignment", "🏆 Share Win"],
-            ["📊 Check Status", "❓ Ask Question"]
+            ["📊 View Grades", "📊 Check Status"],
+            ["❓ Ask Question"]
         ], resize_keyboard=True, one_time_keyboard=False)
 
         await update.message.reply_text(
@@ -356,7 +358,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             except Exception as forward_error:
                 logger.warning(f"Failed to forward original message: {forward_error}")
 
-            # Then send assignment details for grading
+            # Then send assignment details for grading with inline buttons
             assignment_details = (
                 f"📝 **New Assignment Submission**\n\n"
                 f"Student: @{username}\n"
@@ -364,11 +366,18 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 f"Module: {module}\n"
                 f"Type: {submission_type.title()}\n"
                 f"File: {file_name if file_name else 'Text submission'}\n"
-                f"Status: Pending Review\n\n"
-                f"Use `/grade` command to start grading this assignment."
+                f"Status: Pending Review"
             )
 
-            await context.bot.send_message(ASSIGNMENT_GROUP_ID, assignment_details, parse_mode=ParseMode.MARKDOWN)
+            # Create inline keyboard for grading
+            keyboard = create_grading_keyboard(submission_id)
+
+            await context.bot.send_message(
+                ASSIGNMENT_GROUP_ID,
+                assignment_details,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
 
             await update.message.reply_text(
                 f"✅ **Assignment Submitted Successfully!**\n\n"
@@ -1194,6 +1203,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🎯 **AVAP Support Bot Help**\n\n"
             "📝 **Submit Assignment** - Submit your course assignments\n"
             "🏆 **Share Win** - Share your achievements and wins\n"
+            "📊 **View Grades** - Check your graded assignments and comments\n"
             "📊 **Check Status** - View your progress and statistics\n"
             "❓ **Ask Question** - Get help from support team\n\n"
             "💡 **Tips:**\n"
@@ -1322,8 +1332,9 @@ def register_handlers(application):
     application.add_handler(share_win_conv)
     application.add_handler(ask_conv)
     
-    # Add message handlers for status
+    # Add message handlers for status and grades
     application.add_handler(MessageHandler(filters.Regex(r"📊 Check Status"), status_handler))
+    application.add_handler(MessageHandler(filters.Regex(r"📊 View Grades"), view_grades_handler))
     
     # Add support group /ask handler (only processes messages from support group)
     application.add_handler(CommandHandler("ask", support_group_ask_handler))

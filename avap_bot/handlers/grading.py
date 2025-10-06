@@ -25,6 +25,10 @@ GRADE_SCORE, GRADE_COMMENT = range(2)
 ASSIGNMENT_GROUP_ID = int(os.getenv("ASSIGNMENT_GROUP_ID", "0"))
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
+# Inline grading states for callback data
+WAITING_FOR_GRADE = "waiting_for_grade"
+WAITING_FOR_COMMENT = "waiting_for_comment"
+
 
 async def grade_assignment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle assignment grading"""
@@ -190,13 +194,14 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
             logger.warning("Could not notify student: telegram_id is missing from submission info.")
             await notify_admin_telegram(context.bot, f"Could not notify @{submission_info.get('username')}, telegram_id missing.")
             return
-        
+
         message = (
             f"🎉 **Your assignment has been graded!**\n\n"
             f"**Module:** {submission_info['module']}\n"
+            f"**Type:** {submission_info.get('type', 'Unknown')}\n"
             f"**Grade:** {grade}/10\n"
         )
-        
+
         if comment:
             message += f"\n**Comments:**\n{comment}"
         else:
@@ -215,10 +220,66 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
                 await context.bot.send_document(chat_id=telegram_id, document=comment_file_id)
 
         logger.info("Notified student %s about grade %s", telegram_id, grade)
-        
+
     except Exception as e:
         logger.exception("Failed to notify student about grade: %s", e)
         await notify_admin_telegram(context.bot, f"Failed to notify student {telegram_id} about grade. Error: {e}")
+
+
+async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle student request to view their grades"""
+    user_id = update.effective_user.id
+
+    # Check if user is verified
+    verified_user = check_verified_user(user_id)
+    if not verified_user:
+        await update.message.reply_text("❌ You need to be verified to view your grades. Use /start to begin verification.")
+        return
+
+    try:
+        # Get student's submissions
+        submissions = await run_blocking(get_student_submissions, verified_user['username'])
+
+        if not submissions:
+            await update.message.reply_text(
+                "📊 **Your Grades**\n\n"
+                "You haven't submitted any assignments yet.\n"
+                "Use the menu to submit your first assignment!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Filter graded submissions
+        graded_submissions = [s for s in submissions if s.get('status') == 'Graded']
+
+        if not graded_submissions:
+            await update.message.reply_text(
+                "📊 **Your Grades**\n\n"
+                "You have submitted assignments, but none have been graded yet.\n"
+                "Please wait for your assignments to be reviewed.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        # Show graded assignments
+        message = "📊 **Your Graded Assignments**\n\n"
+
+        for submission in graded_submissions:
+            module = submission.get('module', 'Unknown')
+            grade = submission.get('grade', 'N/A')
+            comments = submission.get('comments', 'No comments')
+
+            message += (
+                f"**Module:** {module}\n"
+                f"**Grade:** {grade}/10\n"
+                f"**Comments:** {comments}\n\n"
+            )
+
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logger.exception("Failed to show student grades: %s", e)
+        await update.message.reply_text("❌ Failed to retrieve your grades. Please try again later.")
 
 
 def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
@@ -280,6 +341,241 @@ def _is_admin(update: Update) -> bool:
     return user_id == ADMIN_USER_ID
 
 
+def create_grading_keyboard(submission_id: str) -> InlineKeyboardMarkup:
+    """Create inline keyboard for grading assignments"""
+    keyboard = [
+        [InlineKeyboardButton("📝 GRADE", callback_data=f"grade_start:{submission_id}")],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"grade_cancel:{submission_id}")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_score_keyboard(submission_id: str) -> InlineKeyboardMarkup:
+    """Create inline keyboard for selecting grade scores"""
+    keyboard = [
+        [InlineKeyboardButton(f"{i}", callback_data=f"grade_score:{submission_id}:{i}") for i in range(1, 6)],
+        [InlineKeyboardButton(f"{i}", callback_data=f"grade_score:{submission_id}:{i}") for i in range(6, 11)],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"grade_cancel:{submission_id}")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def create_comment_keyboard(submission_id: str) -> InlineKeyboardMarkup:
+    """Create inline keyboard for comment options"""
+    keyboard = [
+        [InlineKeyboardButton("💬 Add Comment", callback_data=f"grade_comment:{submission_id}:yes")],
+        [InlineKeyboardButton("✅ No Comment", callback_data=f"grade_comment:{submission_id}:no")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle inline grading button clicks"""
+    query = update.callback_query
+    await query.answer()
+
+    if not _is_admin(update):
+        await query.edit_message_text("❌ Only admins can grade assignments.")
+        return
+
+    callback_data = query.data
+
+    if callback_data.startswith("grade_start:"):
+        # Extract submission ID and show grade selection
+        submission_id = callback_data.split(":", 1)[1]
+
+        # Store submission info in context
+        context.user_data['grading_submission_id'] = submission_id
+        context.user_data['grading_message_id'] = query.message.message_id
+
+        # Update message with grade selection buttons
+        keyboard = create_score_keyboard(submission_id)
+        await query.edit_message_reply_markup(reply_markup=keyboard)
+
+    elif callback_data.startswith("grade_score:"):
+        # Extract submission ID and score
+        parts = callback_data.split(":")
+        submission_id = parts[1]
+        score = int(parts[2])
+
+        # Store grade in context
+        context.user_data['grading_score'] = score
+        context.user_data['grading_submission_id'] = submission_id
+
+        # Update message to show selected grade and ask for comment
+        keyboard = create_comment_keyboard(submission_id)
+
+        # Get submission info for display
+        submission_info = await get_submission_info(submission_id)
+        if submission_info:
+            await query.edit_message_text(
+                f"✅ **Grade Selected!**\n\n"
+                f"Student: @{submission_info['username']}\n"
+                f"Module: {submission_info['module']}\n"
+                f"Grade: {score}/10\n\n"
+                f"Would you like to add comments?",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
+        else:
+            await query.edit_message_text("❌ Error: Could not find submission information.")
+
+    elif callback_data.startswith("grade_comment:"):
+        # Extract submission ID and comment decision
+        parts = callback_data.split(":")
+        submission_id = parts[1]
+        wants_comment = parts[2] == "yes"
+
+        if not wants_comment:
+            # No comment - complete grading
+            await complete_grading_without_comment(update, context, submission_id)
+        else:
+            # Wants comment - ask for comment
+            await query.edit_message_text(
+                f"💬 **Add Comments**\n\n"
+                f"Please provide your comments (text, audio, or video).\n"
+                f"Reply to this message with your comment.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            context.user_data['waiting_for_comment'] = True
+
+    elif callback_data.startswith("grade_cancel:"):
+        # Cancel grading
+        submission_id = callback_data.split(":", 1)[1]
+        await query.edit_message_text("❌ Grading cancelled.")
+        # Clear context data
+        context.user_data.pop('grading_submission_id', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('grading_message_id', None)
+
+
+async def handle_comment_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle comment submission for grading"""
+    if not context.user_data.get('waiting_for_comment'):
+        return
+
+    submission_id = context.user_data.get('grading_submission_id')
+    score = context.user_data.get('grading_score')
+
+    if not submission_id or not score:
+        await update.message.reply_text("❌ Error: Grading session expired. Please try again.")
+        return
+
+    # Get comment content
+    comment_text = None
+    comment_file_id = None
+    comment_file_type = None
+
+    if update.message.text:
+        comment_text = update.message.text
+    elif update.message.voice:
+        comment_file_id = update.message.voice.file_id
+        comment_file_type = "voice"
+        comment_text = "(Voice comment attached)"
+    elif update.message.video:
+        comment_file_id = update.message.video.file_id
+        comment_file_type = "video"
+        comment_text = "(Video comment attached)"
+    elif update.message.document:
+        comment_file_id = update.message.document.file_id
+        comment_file_type = "document"
+        comment_text = f"(Document comment attached: {update.message.document.file_name})"
+    else:
+        await update.message.reply_text("❌ Unsupported comment type. Please send text, document, audio, or video.")
+        return
+
+    # Complete grading with comment
+    await complete_grading_with_comment(update, context, submission_id, score, comment_text, comment_file_id, comment_file_type)
+
+
+async def complete_grading_without_comment(update: Update, context: ContextTypes.DEFAULT_TYPE, submission_id: str) -> None:
+    """Complete grading without comment"""
+    score = context.user_data.get('grading_score')
+    submission_info = await get_submission_info(submission_id)
+
+    if not submission_info or not score:
+        await update.callback_query.edit_message_text("❌ Error: Could not complete grading.")
+        return
+
+    try:
+        # Update grade in Google Sheets
+        await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
+
+        # Update message to show completion
+        await update.callback_query.edit_message_text(
+            f"✅ **Grading Complete!**\n\n"
+            f"Student: @{submission_info['username']}\n"
+            f"Module: {submission_info['module']}\n"
+            f"Grade: {score}/10\n"
+            f"Comments: None",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # Notify student
+        await _notify_student_grade(context, submission_info, score, None)
+
+        # Clear context data
+        context.user_data.pop('grading_submission_id', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('grading_message_id', None)
+        context.user_data.pop('waiting_for_comment', None)
+
+    except Exception as e:
+        logger.exception("Failed to complete grading without comment: %s", e)
+        await notify_admin_telegram(context.bot, f"❌ Grading failed: {str(e)}")
+        await update.callback_query.edit_message_text("❌ Failed to complete grading. Please try again.")
+
+
+async def complete_grading_with_comment(update: Update, context: ContextTypes.DEFAULT_TYPE, submission_id: str, score: int, comment: str, comment_file_id: str = None, comment_file_type: str = None) -> None:
+    """Complete grading with comment"""
+    submission_info = await get_submission_info(submission_id)
+
+    if not submission_info:
+        await update.message.reply_text("❌ Error: Could not find submission information.")
+        return
+
+    try:
+        # Add comment to Google Sheets
+        await run_blocking(add_grade_comment, submission_info['username'], submission_info['module'], comment)
+
+        # Update message to show completion
+        await update.message.reply_text(
+            f"✅ **Comment Added & Grading Complete!**\n\n"
+            f"Student: @{submission_info['username']}\n"
+            f"Module: {submission_info['module']}\n"
+            f"Grade: {score}/10\n"
+            f"Comment: {comment}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # Notify student
+        await _notify_student_grade(context, submission_info, score, comment, comment_file_id, comment_file_type)
+
+        # Clear context data
+        context.user_data.pop('grading_submission_id', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('grading_message_id', None)
+        context.user_data.pop('waiting_for_comment', None)
+
+    except Exception as e:
+        logger.exception("Failed to complete grading with comment: %s", e)
+        await notify_admin_telegram(context.bot, f"❌ Grading with comment failed: {str(e)}")
+        await update.message.reply_text("❌ Failed to complete grading. Please try again.")
+
+
+async def get_submission_info(submission_id: str) -> Optional[Dict[str, Any]]:
+    """Get submission information by ID"""
+    from avap_bot.services.sheets_service import get_submission_by_id
+
+    try:
+        # Use run_blocking to call the synchronous sheets service function
+        submission_info = await run_blocking(get_submission_by_id, submission_id)
+        return submission_info
+    except Exception as e:
+        logger.exception(f"Failed to get submission info for {submission_id}: {e}")
+        return None
+
+
 # Conversation handler - available to admins in any chat
 grade_conv = ConversationHandler(
     entry_points=[CommandHandler("grade", grade_assignment)],
@@ -300,6 +596,13 @@ def register_handlers(application):
     """Register all grading handlers with the application"""
     # Add conversation handler - available to admins for grading assignments
     application.add_handler(grade_conv)
+
+    # Add inline grading handlers
+    application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
+    application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, handle_comment_submission))
+
+    # Add command for students to view their grades
+    application.add_handler(CommandHandler("grades", view_grades_handler))
 
     # Add global callback handlers to fix per_message=False warnings
     application.add_handler(CallbackQueryHandler(grade_score, pattern="^grade_|^grade_cancel$"))

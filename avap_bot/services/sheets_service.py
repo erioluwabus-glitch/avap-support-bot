@@ -1116,6 +1116,68 @@ def update_question_status(username: str, answer: str) -> bool:
         return False
 
 
+def get_submission_by_id(submission_id: str) -> Optional[Dict[str, Any]]:
+    """Get submission information by submission ID"""
+    try:
+        spreadsheet = _get_spreadsheet()
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                sheet = spreadsheet.worksheet("submissions")
+                # Get all data
+                records = sheet.get_all_records()
+                # Find submission by ID
+                for record in records:
+                    if record.get("submission_id") == submission_id:
+                        return {
+                            'submission_id': record.get("submission_id", ""),
+                            'username': record.get("username", ""),
+                            'telegram_id': record.get("telegram_id", ""),
+                            'module': record.get("module", ""),
+                            'type': record.get("type", ""),
+                            'file_id': record.get("file_id", ""),
+                            'file_name': record.get("file_name", ""),
+                            'text_content': record.get("text_content", ""),
+                            'submitted_at': record.get("submitted_at", ""),
+                            'status': record.get("status", ""),
+                        }
+                logger.warning(f"Submission not found in Google Sheets: {submission_id}")
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to get submission from Google Sheets, falling back to CSV: {e}")
+
+        # CSV fallback mode
+        logger.info("Using CSV fallback for submission lookup")
+        return _get_submission_by_id_csv(submission_id)
+
+    except Exception as e:
+        logger.exception("Failed to get submission by ID: %s", e)
+        # Try CSV as last resort
+        try:
+            return _get_submission_by_id_csv(submission_id)
+        except:
+            return None
+
+
+def _get_submission_by_id_csv(submission_id: str) -> Optional[Dict[str, Any]]:
+    """Get submission from CSV file (fallback mode)"""
+    try:
+        records = _read_csv_fallback("submissions.csv")
+
+        # Find submission by ID
+        for record in records:
+            if record.get("submission_id") == submission_id:
+                return record
+
+        logger.warning(f"Submission not found in CSV: {submission_id}")
+        return None
+
+    except Exception as e:
+        logger.exception("Failed to get submission from CSV: %s", e)
+        return None
+
+
 def test_sheets_connection() -> bool:
     """Test Google Sheets connection and return status"""
     try:
