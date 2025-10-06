@@ -529,7 +529,7 @@ get_submission_conv = ConversationHandler(
     entry_points=[CommandHandler("get_submission", get_submission)],
     states={},
     fallbacks=[],
-    per_message=True
+    per_message=False
 )
 
 message_achievers_conv = ConversationHandler(
@@ -551,7 +551,7 @@ broadcast_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True,
+    per_message=False,
     conversation_timeout=600
 )
 

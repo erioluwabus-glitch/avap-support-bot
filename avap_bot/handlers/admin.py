@@ -503,7 +503,7 @@ add_student_conv = ConversationHandler(
         ADD_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_student_email)],
     },
     fallbacks=fallbacks,
-    per_message=True
+    per_message=False
 )
 
 remove_student_conv = ConversationHandler(
@@ -513,7 +513,7 @@ remove_student_conv = ConversationHandler(
         REMOVE_CONFIRM: [CallbackQueryHandler(remove_student_confirm, pattern="^remove_")],
     },
     fallbacks=fallbacks,
-    per_message=True,
+    per_message=False,
     conversation_timeout=600
 )
 
