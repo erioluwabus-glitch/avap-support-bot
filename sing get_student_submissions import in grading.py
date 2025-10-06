@@ -1,0 +1,3 @@
+[33m72dc119[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m Fix AttributeError in status_handler - module.isdigit() on integer
+[33mb3ffd59[m Fix Supabase query syntax error in get_answered_questions
+[33m2289538[m Fix Systeme.io integration issues and improve error handling

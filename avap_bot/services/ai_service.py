@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Model cache with aggressive cleanup
 _model = None
 _model_last_used = None
-MODEL_CACHE_DURATION = 60  # 1 minute for aggressive memory management
+MODEL_CACHE_DURATION = 30  # 30 seconds for very aggressive memory management
 
 @contextmanager
 def managed_model():
