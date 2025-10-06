@@ -550,10 +550,12 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             else:
                 # For file wins, show file info with engaging intro
+                # Escape special Markdown characters in file name
+                escaped_file_name = (file_name or "").replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
                     f"{comment}\n\n"
                     f"**Achievement Details:**\n"
-                    f"📁 File: {file_name}\n"
+                    f"📁 File: {escaped_file_name}\n"
                     f"🆔 ID: `{file_id}`"
                 )
 
@@ -1313,7 +1315,7 @@ start_conv = ConversationHandler(
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1325,7 +1327,7 @@ submit_conv = ConversationHandler(
         SUBMIT_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, submit_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1336,7 +1338,7 @@ share_win_conv = ConversationHandler(
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
@@ -1346,7 +1348,7 @@ ask_conv = ConversationHandler(
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=True,
     conversation_timeout=600
 )
 
