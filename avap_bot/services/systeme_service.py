@@ -73,7 +73,8 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             endpoints_to_try = [
                 f"{SYSTEME_BASE_URL}/api/contacts",
                 f"{SYSTEME_BASE_URL}/contacts",
-                f"{SYSTEME_BASE_URL}/api/v1/contacts"
+                f"{SYSTEME_BASE_URL}/api/v1/contacts",
+                f"{SYSTEME_BASE_URL}/api/v2/contacts"
             ]
             
             response = None
@@ -103,14 +104,24 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                     break
             
             if response is None:
-                logger.error("All Systeme.io endpoints and payload formats failed")
+                logger.warning("All Systeme.io endpoints and payload formats failed - this is not critical")
+                logger.warning("Student verification will continue without Systeme.io integration")
+                logger.warning("Please check your Systeme.io API configuration if this is important")
                 return None
             
-            logger.info("✅ Successful endpoint: %s with payload format %d", successful_endpoint, successful_payload)
+            logger.info("✅ Successful endpoint: %s with payload format %s", successful_endpoint, successful_payload)
 
             logger.info("Systeme.io API response: %s - %s", response.status_code, response.text)
 
-            if response.status_code == 201:
+            if response.status_code == 404:
+                logger.warning("Systeme.io API endpoint not found (404) - API may have changed")
+                logger.warning("Student verification will continue without Systeme.io integration")
+                return None
+            elif response.status_code == 401:
+                logger.warning("Systeme.io API authentication failed (401) - check API key")
+                logger.warning("Student verification will continue without Systeme.io integration")
+                return None
+            elif response.status_code == 201:
                 result = response.json()
                 contact_id = result.get("id")
                 logger.info("✅ Created/Updated Systeme.io contact: %s (ID: %s)", contact_data.get("email"), contact_id)
