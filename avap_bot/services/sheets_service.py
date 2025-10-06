@@ -344,26 +344,66 @@ def append_submission(payload: Dict[str, Any]) -> bool:
                 ""
             ], ["submission_id", "username", "telegram_id", "module", "type", "file_id", "file_name", "text_content", "submitted_at", "status", "graded_at", "grade"])
 
-        sheet = spreadsheet.worksheet("submissions")
+        try:
+            sheet = spreadsheet.worksheet("submissions")
+            
+            # Check if sheet has headers, if not add them
+            try:
+                headers = sheet.row_values(1)
+                if not headers or headers[0] == "":
+                    # Add headers if sheet is empty
+                    sheet.update('A1:L1', [['submission_id', 'username', 'telegram_id', 'module', 'type', 'file_id', 'file_name', 'text_content', 'submitted_at', 'status', 'grade', 'comments']])
+                    logger.info("Added headers to submissions worksheet")
+            except Exception as header_error:
+                logger.warning(f"Could not check/update headers for submissions worksheet: {header_error}")
 
-        row = [
-            payload.get("submission_id", ""),
-            payload.get("username", ""),
-            payload.get("telegram_id", ""),
-            payload.get("module", ""),
-            payload.get("type", ""),
-            payload.get("file_id", ""),
-            payload.get("file_name", ""),
-            payload.get("text_content", ""),
-            payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
-            payload.get("status", "Pending"),
-            "",  # Grade column
-            ""   # Comments column
-        ]
+            row = [
+                payload.get("submission_id", ""),
+                payload.get("username", ""),
+                payload.get("telegram_id", ""),
+                payload.get("module", ""),
+                payload.get("type", ""),
+                payload.get("file_id", ""),
+                payload.get("file_name", ""),
+                payload.get("text_content", ""),
+                payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+                payload.get("status", "Pending"),
+                "",  # Grade column
+                ""   # Comments column
+            ]
 
-        sheet.append_row(row)
-        logger.info("Added submission to sheets: %s - Module %s", payload.get('username'), payload.get('module'))
-        return True
+            sheet.append_row(row)
+            logger.info("Added submission to sheets: %s - Module %s", payload.get('username'), payload.get('module'))
+            return True
+            
+        except Exception as sheet_error:
+            logger.warning(f"Failed to access submissions worksheet: {sheet_error}")
+            # Try to create a new submissions worksheet with proper headers
+            try:
+                new_sheet = spreadsheet.add_worksheet(title="submissions_new", rows=1000, cols=15)
+                new_sheet.update('A1:L1', [['submission_id', 'username', 'telegram_id', 'module', 'type', 'file_id', 'file_name', 'text_content', 'submitted_at', 'status', 'grade', 'comments']])
+                
+                row = [
+                    payload.get("submission_id", ""),
+                    payload.get("username", ""),
+                    payload.get("telegram_id", ""),
+                    payload.get("module", ""),
+                    payload.get("type", ""),
+                    payload.get("file_id", ""),
+                    payload.get("file_name", ""),
+                    payload.get("text_content", ""),
+                    payload.get("submitted_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+                    payload.get("status", "Pending"),
+                    "",  # Grade column
+                    ""   # Comments column
+                ]
+                
+                new_sheet.append_row(row)
+                logger.info("Added submission to new submissions worksheet: %s - Module %s", payload.get('username'), payload.get('module'))
+                return True
+            except Exception as create_error:
+                logger.error(f"Failed to create new submissions worksheet: {create_error}")
+                raise sheet_error
 
     except Exception as e:
         logger.warning("Failed to append submission to sheets (using CSV fallback): %s", e)
@@ -426,22 +466,58 @@ def append_win(payload: Dict[str, Any]) -> bool:
                 payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
             ], ["win_id", "username", "telegram_id", "type", "file_id", "file_name", "text_content", "shared_at"])
 
-        sheet = spreadsheet.worksheet("wins")
+        try:
+            sheet = spreadsheet.worksheet("wins")
+            
+            # Check if sheet has headers, if not add them
+            try:
+                headers = sheet.row_values(1)
+                if not headers or headers[0] == "":
+                    # Add headers if sheet is empty
+                    sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
+                    logger.info("Added headers to wins worksheet")
+            except Exception as header_error:
+                logger.warning(f"Could not check/update headers for wins worksheet: {header_error}")
 
-        row = [
-            payload.get("win_id", ""),
-            payload.get("username", ""),
-            payload.get("telegram_id", ""),
-            payload.get("type", ""),
-            payload.get("file_id", ""),
-            payload.get("file_name", ""),
-            payload.get("text_content", ""),
-            payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
-        ]
+            row = [
+                payload.get("win_id", ""),
+                payload.get("username", ""),
+                payload.get("telegram_id", ""),
+                payload.get("type", ""),
+                payload.get("file_id", ""),
+                payload.get("file_name", ""),
+                payload.get("text_content", ""),
+                payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+            ]
 
-        sheet.append_row(row)
-        logger.info("Added win to sheets: %s - %s", payload.get('username'), payload.get('type'))
-        return True
+            sheet.append_row(row)
+            logger.info("Added win to sheets: %s - %s", payload.get('username'), payload.get('type'))
+            return True
+            
+        except Exception as sheet_error:
+            logger.warning(f"Failed to access wins worksheet: {sheet_error}")
+            # Try to create a new wins worksheet with proper headers
+            try:
+                new_sheet = spreadsheet.add_worksheet(title="wins_new", rows=1000, cols=10)
+                new_sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
+                
+                row = [
+                    payload.get("win_id", ""),
+                    payload.get("username", ""),
+                    payload.get("telegram_id", ""),
+                    payload.get("type", ""),
+                    payload.get("file_id", ""),
+                    payload.get("file_name", ""),
+                    payload.get("text_content", ""),
+                    payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
+                ]
+                
+                new_sheet.append_row(row)
+                logger.info("Added win to new wins worksheet: %s - %s", payload.get('username'), payload.get('type'))
+                return True
+            except Exception as create_error:
+                logger.error(f"Failed to create new wins worksheet: {create_error}")
+                raise sheet_error
 
     except Exception as e:
         logger.warning("Failed to append win to sheets (using CSV fallback): %s", e)

@@ -286,10 +286,20 @@ def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
     """Extract submission info from forwarded message or bot message"""
     try:
         # Check if this is a forwarded message from a student
-        if message.forward_from:
+        # Note: forward_from was removed in newer versions of python-telegram-bot
+        # We'll check for forwarded message indicators in the text instead
+        text = message.text or message.caption or ""
+        
+        # Check if this looks like a forwarded assignment message
+        is_forwarded = (
+            "📝 **New Assignment Submission**" in text or
+            "Student:" in text or
+            "Telegram ID:" in text or
+            "Module:" in text
+        )
+        
+        if is_forwarded:
             # This is a forwarded message - extract from the forwarded message content
-            text = message.text or message.caption or ""
-
             # Look for student info in the forwarded message
             username_match = re.search(r"Student: @(\w+)", text)
             telegram_id_match = re.search(r"Telegram ID: (\d+)", text)
@@ -305,7 +315,6 @@ def _extract_submission_info(message) -> Optional[Dict[str, Any]]:
                 }
         else:
             # This might be a bot message with assignment details - look for the pattern
-            text = message.text or message.caption or ""
 
             # Look for assignment details pattern
             username_match = re.search(r"Student: @(\w+)", text)
