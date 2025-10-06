@@ -650,6 +650,7 @@ def get_answered_questions() -> List[Dict[str, Any]]:
         return False
 
 
+def get_assignment_by_id(assignment_id: str) -> Optional[Dict[str, Any]]:
     """Get assignment by ID"""
     client = get_supabase()
     try:
