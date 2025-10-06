@@ -350,14 +350,30 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         
         # Remove from all systems
         logger.info(f"Attempting to remove student with identifier: {identifier}")
-        success = remove_verified_by_identifier(identifier)
-        if not success:
-            logger.error(f"Failed to remove student from Supabase: {identifier}")
+        try:
+            success = remove_verified_by_identifier(identifier)
+            if not success:
+                logger.error(f"Failed to remove student from Supabase: {identifier}")
+                await query.edit_message_text(
+                    f"❌ **Failed to remove student from database.**\n\n"
+                    f"**Student:** {student.get('name', 'Unknown')}\n"
+                    f"**Identifier:** {identifier}\n\n"
+                    f"**Possible causes:**\n"
+                    f"• Student not found in database\n"
+                    f"• Database connection issue\n"
+                    f"• Student already removed\n\n"
+                    f"Please check the logs for more details or try again.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return ConversationHandler.END
+        except Exception as e:
+            logger.exception(f"Exception during student removal: {e}")
             await query.edit_message_text(
-                f"❌ **Failed to remove student from database.**\n\n"
+                f"❌ **Error removing student from database.**\n\n"
                 f"**Student:** {student.get('name', 'Unknown')}\n"
-                f"**Identifier:** {identifier}\n\n"
-                f"Please check the logs for more details or try again.",
+                f"**Identifier:** {identifier}\n"
+                f"**Error:** {str(e)}\n\n"
+                f"Please try again or contact support.",
                 parse_mode=ParseMode.MARKDOWN
             )
             return ConversationHandler.END
