@@ -60,9 +60,20 @@ register_cancel_handlers(bot_app)
 register_test_handlers(bot_app)
 
 # Create scheduler for daily tips
+try:
 scheduler = AsyncIOScheduler()
 scheduler.start()
 logger.debug("Scheduler started for daily tips")
+    SCHEDULER_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"APScheduler not available: {e}")
+    logger.warning("Daily tips will not be scheduled automatically")
+    scheduler = None
+    SCHEDULER_AVAILABLE = False
+except Exception as e:
+    logger.error(f"Failed to start scheduler: {e}")
+    scheduler = None
+    SCHEDULER_AVAILABLE = False
 
 # --- Webhook and Health Check ---
 def keep_alive_check(bot):
@@ -152,10 +163,10 @@ def generate_activity():
         # Generate network activity with multiple domains
         domains = ['google.com', 'api.telegram.org', 'github.com', 'stackoverflow.com']
         for domain in domains:
-            try:
+        try:
                 socket.gethostbyname(domain)
-            except:
-                pass
+        except:
+            pass
 
         # Generate CPU activity with more intensive calculations
         _ = sum(i * i * i for i in range(500))
@@ -335,51 +346,62 @@ async def initialize_services():
         await bot_app.job_queue.start()  # Start the job queue
         logger.info("Memory monitoring scheduled every 5 minutes (starting in 1 minute)")
 
-        # Schedule daily tips
+        # Schedule daily tips (if scheduler is available)
+        if SCHEDULER_AVAILABLE and scheduler:
         await schedule_daily_tips(bot_app.bot, scheduler)
+        else:
+            logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-        # Schedule ultra-aggressive keep-alive health checks every 10 seconds
+        # Schedule ultra-aggressive keep-alive health checks every 10 seconds (if scheduler available)
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
         scheduler.add_job(
             keep_alive_check,
             'interval',
-            seconds=10,
+                    seconds=10,
             args=[bot_app.bot],
             id='keep_alive',
             replace_existing=True
         )
-        logger.debug("Ultra-aggressive keep-alive health checks scheduled every 10 seconds")
+                logger.debug("Ultra-aggressive keep-alive health checks scheduled every 10 seconds")
 
-        # Schedule simple ping every 6 seconds
+                # Schedule simple ping every 6 seconds
         scheduler.add_job(
             ping_self,
             'interval',
-            seconds=6,
+                    seconds=6,
             id='ping_self',
             replace_existing=True
         )
-        logger.debug("Simple ping scheduled every 6 seconds")
+                logger.debug("Simple ping scheduled every 6 seconds")
 
-        # Schedule additional activity every 3 seconds to prevent Render timeout
+                # Schedule additional activity every 3 seconds to prevent Render timeout
         scheduler.add_job(
             generate_activity,
             'interval',
-            seconds=3,
+                    seconds=3,
             id='activity_generator',
             replace_existing=True
         )
-        logger.debug("Activity generator scheduled every 3 seconds")
+                logger.debug("Activity generator scheduled every 3 seconds")
 
-        # Schedule webhook health check every 12 seconds
-        scheduler.add_job(
-            webhook_health_check,
-            'interval',
-            seconds=12,
-            id='webhook_health',
-            replace_existing=True
-        )
-        logger.debug("Webhook health check scheduled every 12 seconds")
+                # Schedule webhook health check every 12 seconds
+                scheduler.add_job(
+                    webhook_health_check,
+                    'interval',
+                    seconds=12,
+                    id='webhook_health',
+                    replace_existing=True
+                )
+                logger.debug("Webhook health check scheduled every 12 seconds")
+            except Exception as e:
+                logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
+        else:
+            logger.warning("Scheduler not available - some keep-alive features disabled")
 
-        # Schedule periodic memory cleanup every 10 minutes
+        # Schedule periodic memory cleanup every 10 minutes (if scheduler available)
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
         scheduler.add_job(
             _periodic_memory_cleanup,
             'interval',
@@ -388,6 +410,10 @@ async def initialize_services():
             replace_existing=True
         )
         logger.debug("Memory cleanup scheduled every 10 minutes")
+            except Exception as e:
+                logger.warning(f"Failed to schedule memory cleanup: {e}")
+        else:
+            logger.warning("Scheduler not available - memory cleanup not scheduled")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
@@ -442,28 +468,28 @@ async def background_keepalive():
     import socket
 
     try:
-        while True:
+    while True:
+        try:
+            # Try multiple approaches to keep the service alive
+            tasks = []
+
+            # 1. HTTP ping to our own endpoints (if server is running locally)
             try:
-                # Try multiple approaches to keep the service alive
-                tasks = []
+                tasks.append(
+                    httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
+                )
+            except:
+                pass
 
-                # 1. HTTP ping to our own endpoints (if server is running locally)
-                try:
-                    tasks.append(
-                        httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
-                    )
-                except:
-                    pass
-
-                # 2. DNS resolution to generate network activity
-                try:
-                    socket.gethostbyname('google.com')
+            # 2. DNS resolution to generate network activity
+            try:
+                socket.gethostbyname('google.com')
                     socket.gethostbyname('api.telegram.org')
                     socket.gethostbyname('github.com')
-                except:
-                    pass
+            except:
+                pass
 
-                # 3. Simple memory allocation to show CPU activity
+            # 3. Simple memory allocation to show CPU activity
                 _ = [i * i for i in range(2000)]
 
                 # 4. Additional network activity
@@ -472,15 +498,15 @@ async def background_keepalive():
                 except:
                     pass
 
-                if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
 
             except asyncio.CancelledError:
                 logger.info("Background keepalive task cancelled - shutting down gracefully")
                 break
-            except Exception as e:
-                logger.debug(f"Background keepalive error: {e}")
-            finally:
+        except Exception as e:
+            logger.debug(f"Background keepalive error: {e}")
+        finally:
                 try:
                     await asyncio.sleep(1)  # Ping every 1 second for ultra-aggressive keepalive
                 except asyncio.CancelledError:
@@ -537,7 +563,7 @@ async def on_shutdown():
 
     # Enhanced memory monitoring to prevent Render restarts - cleanup resources
     try:
-        await cleanup_resources()
+    await cleanup_resources()
     except asyncio.CancelledError:
         logger.info("Resource cleanup cancelled during shutdown")
     except Exception as e:
@@ -546,7 +572,7 @@ async def on_shutdown():
     # Delete webhook if configured
     if os.getenv("WEBHOOK_URL"):
         try:
-            await bot_app.bot.delete_webhook()
+        await bot_app.bot.delete_webhook()
             logger.info("Webhook deleted successfully")
         except asyncio.CancelledError:
             logger.info("Webhook deletion cancelled during shutdown")

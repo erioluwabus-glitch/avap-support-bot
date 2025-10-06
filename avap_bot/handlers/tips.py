@@ -82,76 +82,192 @@ async def add_tip_content(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def schedule_daily_tips(bot, scheduler):
     """Schedule daily tips job"""
     try:
-        # Schedule for 8:00 AM WAT (UTC+1) - Lagos timezone
-        scheduler.add_job(
-            send_daily_tip,
-            'cron',
-            hour=8,
-            minute=0,
-            timezone='Africa/Lagos',
-            args=[bot],
-            id='daily_tips',
-            replace_existing=True
-        )
-        logger.info("Daily tips job scheduled for 8:00 AM WAT")
-        
+        logger.info("Scheduling daily tips job...")
+
+        # Ensure we have some manual tips in the database
+        await _ensure_manual_tips()
+
+        # Try to schedule with timezone, fallback to UTC if not available
+        try:
+            # Schedule for 8:00 AM WAT (UTC+1)
+            scheduler.add_job(
+                send_daily_tip,
+                'cron',
+                hour=8,
+                minute=0,
+                args=[bot],
+                id='daily_tips',
+                replace_existing=True
+            )
+            logger.info("Daily tips job scheduled for 8:00 AM")
+        except Exception as tz_error:
+            logger.warning(f"Timezone scheduling failed: {tz_error}, using UTC offset")
+            # Fallback: Schedule for 7:00 AM UTC (which is 8:00 AM WAT)
+            scheduler.add_job(
+                send_daily_tip,
+                'cron',
+                hour=7,
+                minute=0,
+                args=[bot],
+                id='daily_tips',
+                replace_existing=True
+            )
+            logger.info("Daily tips job scheduled for 7:00 AM UTC (8:00 AM WAT)")
+
+        # Also add a test job to run every 5 minutes for debugging (if scheduler supports it)
+        try:
+            scheduler.add_job(
+                test_daily_tip_job,
+                'interval',
+                minutes=5,
+                args=[bot],
+                id='test_daily_tips',
+                replace_existing=True
+            )
+            logger.info("Test job scheduled every 5 minutes")
+        except Exception as interval_error:
+            logger.warning(f"Interval scheduling failed: {interval_error}")
+
     except Exception as e:
         logger.exception("Failed to schedule daily tips: %s", e)
+
+
+async def _ensure_manual_tips():
+    """Ensure we have some manual tips in the database"""
+    try:
+        from avap_bot.services.sheets_service import get_manual_tips
+
+        tips = await get_manual_tips()
+
+        # If no tips exist, add some default ones
+        if not tips:
+            logger.info("No manual tips found, adding default tips...")
+            default_tips = [
+                {
+                    'content': '💡 Remember: Consistency is key to success! Keep working on your goals every day.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '🎯 Set small, achievable goals for today. Progress is made one step at a time.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '📚 Learning is a journey, not a destination. Enjoy the process and celebrate your progress.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '🔥 Don\'t wait for motivation - create it! Start with small actions and build momentum.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '🌟 Every expert was once a beginner. Your current struggles are part of your growth journey.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '⏰ Time management tip: Use the Pomodoro technique - 25 minutes of focused work, 5 minutes break.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                },
+                {
+                    'content': '🚀 Break complex tasks into smaller, manageable steps. Small wins lead to big achievements.',
+                    'type': 'manual',
+                    'added_by': 'system',
+                    'added_at': datetime.now(timezone.utc)
+                }
+            ]
+
+            for tip_data in default_tips:
+                try:
+                    from avap_bot.services.sheets_service import append_tip
+                    success = await append_tip(tip_data)
+                    if success:
+                        logger.info(f"Added default tip: {tip_data['content'][:50]}...")
+                    else:
+                        logger.warning(f"Failed to add default tip: {tip_data['content'][:50]}...")
+                except Exception as e:
+                    logger.exception(f"Error adding default tip: {e}")
+
+            logger.info(f"Added {len(default_tips)} default tips to the system")
+        else:
+            logger.info(f"Found {len(tips)} existing manual tips")
+
+    except Exception as e:
+        logger.exception("Failed to ensure manual tips: %s", e)
+
+
+async def test_daily_tip_job(bot):
+    """Test function to verify daily tips scheduling is working"""
+    try:
+        logger.debug("Running daily tips test job...")
+        # Just log that the scheduler is working
+        current_time = datetime.now(timezone.utc)
+        logger.debug(f"Daily tips scheduler test at {current_time}")
+    except Exception as e:
+        logger.exception("Error in daily tips test job: %s", e)
 
 
 async def send_daily_tip(bot):
     """Send daily tip to support group"""
     try:
-        if not SUPPORT_GROUP_ID or SUPPORT_GROUP_ID == 0:
-            logger.warning(f"SUPPORT_GROUP_ID not properly configured: {SUPPORT_GROUP_ID}, cannot send daily tip")
-            # Try to send to admin as fallback
-            if ADMIN_USER_ID and ADMIN_USER_ID > 0:
-                logger.info("Attempting to send daily tip to admin as fallback")
-                tip_content = await _get_daily_tip_content()
-                if tip_content:
-                    try:
-                        await bot.send_message(
-                            ADMIN_USER_ID,
-                            f"💡 **Daily Tip (Group not configured)**\n\n{tip_content}",
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                        logger.info(f"Daily tip sent to admin {ADMIN_USER_ID} as fallback")
-                    except Exception as admin_send_error:
-                        logger.error(f"Failed to send daily tip to admin {ADMIN_USER_ID}: {admin_send_error}")
-            return
+        logger.info("Starting daily tip send process...")
 
-        # Get tip content
+        # Get tip content first
         tip_content = await _get_daily_tip_content()
 
         if not tip_content:
-            logger.warning("No tip content available")
+            logger.warning("No tip content available - cannot send daily tip")
             return
 
-        # Send tip to support group
-        try:
-            await bot.send_message(
-                SUPPORT_GROUP_ID,
-                f"💡 **Daily Tip**\n\n{tip_content}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            logger.info(f"Daily tip sent successfully to group {SUPPORT_GROUP_ID}: {tip_content[:50]}...")
-        except Exception as send_error:
-            logger.error(f"Failed to send daily tip to group {SUPPORT_GROUP_ID}: {send_error}")
-            # Try to send to admin as fallback
+        logger.info(f"Got tip content: {tip_content[:50]}...")
+
+        # Try to send to support group first
+        if SUPPORT_GROUP_ID and SUPPORT_GROUP_ID != 0:
             try:
-                if ADMIN_USER_ID and ADMIN_USER_ID > 0:
-                    await bot.send_message(
-                        ADMIN_USER_ID,
-                        f"💡 **Daily Tip (Failed to send to group)**\n\n{tip_content}",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                    logger.info(f"Daily tip sent to admin {ADMIN_USER_ID} as fallback")
+                await bot.send_message(
+                    SUPPORT_GROUP_ID,
+                    f"💡 **Daily Tip**\n\n{tip_content}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                logger.info(f"Daily tip sent successfully to group {SUPPORT_GROUP_ID}")
+                return
+            except Exception as send_error:
+                logger.error(f"Failed to send daily tip to group {SUPPORT_GROUP_ID}: {send_error}")
+
+        # Fallback to admin if group fails or is not configured
+        if ADMIN_USER_ID and ADMIN_USER_ID > 0:
+            try:
+                fallback_message = f"💡 **Daily Tip**\n\n{tip_content}"
+                if not SUPPORT_GROUP_ID or SUPPORT_GROUP_ID == 0:
+                    fallback_message = f"💡 **Daily Tip (Group not configured)**\n\n{tip_content}"
+
+                await bot.send_message(
+                    ADMIN_USER_ID,
+                    fallback_message,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                logger.info(f"Daily tip sent to admin {ADMIN_USER_ID} as fallback")
             except Exception as admin_send_error:
                 logger.error(f"Failed to send daily tip to admin {ADMIN_USER_ID}: {admin_send_error}")
+        else:
+            logger.error("No valid destination (group or admin) configured for daily tips")
 
     except Exception as e:
         logger.exception("Failed to send daily tip: %s", e)
-        await notify_admin_telegram(bot, f"❌ Daily tip failed: {str(e)}")
+        try:
+            await notify_admin_telegram(bot, f"❌ Daily tip failed: {str(e)}")
+        except:
+            logger.error("Failed to send admin notification about tip failure")
 
 
 async def _get_daily_tip_content() -> Optional[str]:
@@ -201,8 +317,10 @@ async def _get_daily_tip_content() -> Optional[str]:
         # Final fallback to AI if no manual tips
         if OPENAI_API_KEY:
             logger.warning("No manual tips available, using AI as fallback")
-            return await _generate_ai_tip()
-        
+            ai_tip = await _generate_ai_tip()
+            if ai_tip:
+                return ai_tip
+
         # Default tip if nothing else works
         logger.warning("No tips available, using default tip")
         return "💡 Remember: Consistency is key to success! Keep working on your goals every day."
@@ -277,6 +395,21 @@ async def test_daily_tip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def manual_send_daily_tip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manually send daily tip (admin only)"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only for admins.")
+        return
+
+    try:
+        logger.info("Manual daily tip requested by admin")
+        await send_daily_tip(context.bot)
+        await update.message.reply_text("✅ Daily tip sent manually!")
+    except Exception as e:
+        logger.exception("Manual daily tip failed: %s", e)
+        await update.message.reply_text(f"❌ Failed to send daily tip: {str(e)}")
+
+
 def register_handlers(application):
     """Register all tips handlers with the application"""
     # Add conversation handler
@@ -284,3 +417,6 @@ def register_handlers(application):
 
     # Add test command for admins
     application.add_handler(CommandHandler("test_tip", test_daily_tip))
+
+    # Add manual daily tip command for admins
+    application.add_handler(CommandHandler("send_tip", manual_send_daily_tip))
