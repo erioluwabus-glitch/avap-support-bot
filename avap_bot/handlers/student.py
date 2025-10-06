@@ -315,8 +315,12 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             await update.message.reply_text("❌ Unsupported file type. Please send text, document, audio, or video.")
             return SUBMIT_FILE
         
+        # Generate unique submission ID
+        submission_id = f"sub_{user_id}_{int(datetime.now(timezone.utc).timestamp())}"
+        
         # Prepare submission data
         submission_data = {
+            'submission_id': submission_id,
             'username': username,
             'telegram_id': user_id,
             'module': module,
