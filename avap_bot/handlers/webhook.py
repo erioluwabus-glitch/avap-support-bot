@@ -7,6 +7,7 @@ import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
+from telegram import Update
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,9 @@ async def webhook_handler(request: Request) -> JSONResponse:
         logger.info("Received webhook update: %s", update_data.get("update_id"))
         
         # Process the update through the bot
-        from avap_bot.bot import application
-        await application.process_update(update_data)
+        from avap_bot.bot import bot_app
+        update = Update.de_json(update_data, bot_app.bot)
+        await bot_app.process_update(update)
         
         return JSONResponse(content={"status": "ok"})
     
