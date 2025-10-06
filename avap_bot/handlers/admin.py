@@ -349,9 +349,18 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
             return ConversationHandler.END
         
         # Remove from all systems
+        logger.info(f"Attempting to remove student with identifier: {identifier}")
         success = remove_verified_by_identifier(identifier)
         if not success:
-            raise Exception("Failed to remove from Supabase")
+            logger.error(f"Failed to remove student from Supabase: {identifier}")
+            await query.edit_message_text(
+                f"❌ **Failed to remove student from database.**\n\n"
+                f"**Student:** {student.get('name', 'Unknown')}\n"
+                f"**Identifier:** {identifier}\n\n"
+                f"Please check the logs for more details or try again.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return ConversationHandler.END
         
         # Remove from Systeme.io and update Google Sheets
         if student and student.get('email'):

@@ -318,22 +318,59 @@ def remove_verified_user(identifier: str) -> bool:
     """Identifier may be email, phone, or full name. Return True if deleted."""
     client = get_supabase()
     try:
-        # Try email exact match
-        res = client.table("verified_users").delete().eq("email", identifier).execute()
+        # First, check if user exists
+        user_exists = False
+        user_info = None
+        
+        # Check by email
+        res = client.table("verified_users").select("*").eq("email", identifier).execute()
         data = _get_response_data(res)
         if data:
-            return True
-
-        # Try phone
-        res = client.table("verified_users").delete().eq("phone", identifier).execute()
-        data = _get_response_data(res)
-        if data:
-            return True
-
-        # Try name (less exact)
-        res = client.table("verified_users").delete().eq("name", identifier).execute()
-        data = _get_response_data(res)
-        return bool(data)
+            user_exists = True
+            user_info = data[0]
+            logger.info(f"Found user by email: {identifier}")
+        else:
+            # Check by phone
+            res = client.table("verified_users").select("*").eq("phone", identifier).execute()
+            data = _get_response_data(res)
+            if data:
+                user_exists = True
+                user_info = data[0]
+                logger.info(f"Found user by phone: {identifier}")
+            else:
+                # Check by name
+                res = client.table("verified_users").select("*").eq("name", identifier).execute()
+                data = _get_response_data(res)
+                if data:
+                    user_exists = True
+                    user_info = data[0]
+                    logger.info(f"Found user by name: {identifier}")
+        
+        if not user_exists:
+            logger.warning(f"User not found for identifier: {identifier}")
+            return False
+        
+        # Now delete the user
+        if user_info:
+            # Delete by the primary key or unique identifier
+            if user_info.get('email'):
+                res = client.table("verified_users").delete().eq("email", user_info['email']).execute()
+            elif user_info.get('phone'):
+                res = client.table("verified_users").delete().eq("phone", user_info['phone']).execute()
+            else:
+                res = client.table("verified_users").delete().eq("name", user_info['name']).execute()
+            
+            data = _get_response_data(res)
+            if data:
+                logger.info(f"Successfully removed user: {identifier}")
+                return True
+            else:
+                logger.error(f"Failed to delete user record: {identifier}")
+                return False
+        else:
+            logger.error(f"No user info found for deletion: {identifier}")
+            return False
+            
     except Exception as e:
         logger.exception("Supabase remove_verified_user error: %s", e)
         return False
