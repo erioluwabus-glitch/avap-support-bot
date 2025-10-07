@@ -126,9 +126,14 @@ async def find_faq_match(question: str, threshold: float = 0.8, user_id: int = N
         return None
 
 
-async def find_similar_answered_question(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
+async def find_similar_answered_question(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find similar previously answered questions using semantic similarity with subprocess memory isolation"""
     try:
+        # Check user limits if user_id provided
+        if user_id and not await user_limits.can_handle_ai_request(user_id):
+            logger.warning(f"User {user_id} rate limited for AI requests")
+            return None
+
         from avap_bot.services.supabase_service import get_answered_questions
 
         # Get answered questions

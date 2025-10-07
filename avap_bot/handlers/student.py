@@ -21,7 +21,7 @@ from avap_bot.services.sheets_service import (
     get_student_submissions, get_student_wins, get_student_questions
 )
 from avap_bot.handlers.grading import create_grading_keyboard, view_grades_handler
-from avap_bot.services.ai_service import process_question_with_ai
+from avap_bot.services.ai_service import find_faq_match, find_similar_answered_question
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
@@ -761,10 +761,27 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             await update.message.reply_text("❌ Unsupported question type. Please send text, document, audio, or video.")
             return ASK_QUESTION
         
-        # Check for similar questions and auto-answer if found using consolidated AI function
+        # Check for similar questions and auto-answer if found using individual AI functions
         try:
-            from avap_bot.services.ai_service import process_question_with_ai
-            ai_result = await process_question_with_ai(question_text)
+            ai_result = None
+            
+            # First try FAQ matching
+            faq_match = await find_faq_match(question_text, user_id=user.id)
+            if faq_match:
+                ai_result = {
+                    'answer': faq_match['answer'],
+                    'source': 'faq',
+                    'question': faq_match['question']
+                }
+            else:
+                # Try similar answered questions
+                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                if similar_answer:
+                    ai_result = {
+                        'answer': similar_answer['answer'],
+                        'source': 'similar',
+                        'question': similar_answer['question_text']
+                    }
             
             if ai_result:
                 answer = ai_result['answer']
@@ -778,9 +795,6 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 elif source == 'similar':
                     title = "🔄 **Similar Question Found!**"
                     subtitle = "I found a similar question that was previously answered and provided that answer above."
-                else:  # ai
-                    title = "🤖 **AI-Generated Answer!**"
-                    subtitle = "Our AI assistant provided an answer above."
                 
                 # Escape special Markdown characters to prevent parsing errors
                 escaped_question = question_text.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
@@ -1050,9 +1064,27 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     logger.info(f"Parsed question: {question_text}")
     
     try:
-        # Check for similar questions and auto-answer if found using consolidated AI function
+        # Check for similar questions and auto-answer if found using individual AI functions
         try:
-            ai_result = await process_question_with_ai(question_text)
+            ai_result = None
+            
+            # First try FAQ matching
+            faq_match = await find_faq_match(question_text, user_id=user.id)
+            if faq_match:
+                ai_result = {
+                    'answer': faq_match['answer'],
+                    'source': 'faq',
+                    'question': faq_match['question']
+                }
+            else:
+                # Try similar answered questions
+                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                if similar_answer:
+                    ai_result = {
+                        'answer': similar_answer['answer'],
+                        'source': 'similar',
+                        'question': similar_answer['question_text']
+                    }
             
             if ai_result:
                 answer = ai_result['answer']
@@ -1066,9 +1098,6 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 elif source == 'similar':
                     title = "🔄 **Similar Question Found!**"
                     subtitle = "I found a similar question that was previously answered and provided that answer above."
-                else:  # ai
-                    title = "🤖 **AI-Generated Answer!**"
-                    subtitle = "Our AI assistant provided an answer above."
                 
                 # Escape special Markdown characters to prevent parsing errors
                 escaped_question = question_text.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
