@@ -234,9 +234,14 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
 
 
 async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle submit assignment message"""
+    """Handle assignment submission - only for verified users"""
+    # Check if user is verified
     if not await _is_verified(update):
-        await update.message.reply_text("❌ You need to be verified to submit assignments.")
+        await update.message.reply_text(
+            "❌ You must be a verified student to submit assignments.\n"
+            "Please send /start to verify your account first.",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return ConversationHandler.END
     
     from telegram import ReplyKeyboardMarkup
@@ -459,9 +464,14 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle share win message"""
+    """Handle share win - only for verified users"""
+    # Check if user is verified
     if not await _is_verified(update):
-        await update.message.reply_text("❌ You need to be verified to share wins.")
+        await update.message.reply_text(
+            "❌ You must be a verified student to share wins.\n"
+            "Please send /start to verify your account first.",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return ConversationHandler.END
     
     from telegram import ReplyKeyboardMarkup
@@ -627,9 +637,14 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle status check message"""
+    """Handle check status - only for verified users"""
+    # Check if user is verified
     if not await _is_verified(update):
-        await update.message.reply_text("❌ You need to be verified to check status.")
+        await update.message.reply_text(
+            "❌ You must be a verified student to check status.\n"
+            "Please send /start to verify your account first.",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return
     
     try:
@@ -715,9 +730,14 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle ask question message"""
+    """Handle ask question - only for verified users"""
+    # Check if user is verified
     if not await _is_verified(update):
-        await update.message.reply_text("❌ You need to be verified to ask questions.")
+        await update.message.reply_text(
+            "❌ You must be a verified student to ask questions.\n"
+            "Please send /start to verify your account first.",
+            parse_mode=ParseMode.MARKDOWN
+        )
         return ConversationHandler.END
     
     await update.message.reply_markdown(
@@ -873,8 +893,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
 
-        # Forward to assignment group (where admins monitor)
-        if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
+        # Forward to questions group (where admins monitor questions)
+        if QUESTIONS_GROUP_ID and QUESTIONS_GROUP_ID != 0:
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
@@ -1162,8 +1182,8 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         # Save to Google Sheets
         await run_blocking(append_question, question_data)
 
-        # Forward to assignment group (where admins monitor)
-        if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
+        # Forward to questions group (where admins monitor questions)
+        if QUESTIONS_GROUP_ID and QUESTIONS_GROUP_ID != 0:
             forward_text = (
                 f"❓ **New Question from Support Group**\n\n"
                 f"Student: @{username}\n"
@@ -1175,13 +1195,13 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user.id}_{username}")
             ]])
 
-            # Send to assignment group for admin to answer
-            await context.bot.send_message(
-                ASSIGNMENT_GROUP_ID,
-                forward_text,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard
-            )
+                # Send to questions group for admin to answer
+                await context.bot.send_message(
+                    QUESTIONS_GROUP_ID,
+                    forward_text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
 
             # Confirm in support group
             await update.message.reply_text(
