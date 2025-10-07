@@ -437,6 +437,12 @@ def graceful_restart(reason: str = "memory_threshold_exceeded"):
 def memory_watchdog_loop(check_interval: int = 30) -> None:
     """Memory watchdog that restarts process when RSS exceeds safe threshold"""
     try:
+        # Check if watchdog is disabled
+        watchdog_enabled = os.environ.get("WATCHDOG_ENABLED", "true").lower() == "true"
+        if not watchdog_enabled:
+            logger.info("Memory watchdog disabled by WATCHDOG_ENABLED=false")
+            return
+
         proc = psutil.Process()
         # Set RSS limit to 550MB (safer threshold before Render kills us at 512MB)
         rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "550")) * 1024 * 1024

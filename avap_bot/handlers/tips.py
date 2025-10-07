@@ -84,8 +84,9 @@ async def schedule_daily_tips(bot, scheduler):
     try:
         logger.info("Scheduling daily tips job...")
 
-        # Ensure we have some manual tips in the database
-        await _ensure_manual_tips()
+        # Schedule tips initialization as background task (defer heavy operations)
+        import asyncio
+        asyncio.create_task(_ensure_manual_tips_background())
 
         # Try to schedule with timezone, fallback to UTC if not available
         try:
@@ -132,9 +133,14 @@ async def schedule_daily_tips(bot, scheduler):
         logger.exception("Failed to schedule daily tips: %s", e)
 
 
-async def _ensure_manual_tips():
-    """Ensure we have some manual tips in the database"""
+async def _ensure_manual_tips_background():
+    """Ensure we have some manual tips in the database (background task)"""
     try:
+        # Wait a bit for server to fully start and bind to port
+        import asyncio
+        await asyncio.sleep(10)  # Allow server to bind to port first
+        
+        logger.info("Background task: Ensuring manual tips...")
         from avap_bot.services.sheets_service import get_manual_tips
 
         tips = get_manual_tips()
@@ -203,7 +209,7 @@ async def _ensure_manual_tips():
             logger.info(f"Found {len(tips)} existing manual tips")
 
     except Exception as e:
-        logger.exception("Failed to ensure manual tips: %s", e)
+        logger.exception("Background task failed to ensure manual tips: %s", e)
 
 
 async def test_daily_tip_job(bot):

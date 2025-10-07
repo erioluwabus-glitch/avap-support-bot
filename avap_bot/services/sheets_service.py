@@ -62,13 +62,14 @@ _ensure_csv_directory()
 
 
 def _get_sheets_client():
-    """Get Google Sheets client"""
+    """Get Google Sheets client (lazy initialization)"""
     global _sheets_client
     if not GSPREAD_AVAILABLE:
         logger.error("gspread library not available. Install with: pip install gspread google-auth")
         raise RuntimeError("gspread not available")
 
     if _sheets_client is None:
+        logger.info("Initializing Google Sheets client (lazy loading)...")
         # Check if we have any credentials available
         has_credentials = GOOGLE_CREDENTIALS_JSON or os.path.exists("credentials.json")
 
@@ -172,9 +173,10 @@ def _get_sheets_client():
 
 
 def _get_spreadsheet():
-    """Get the main spreadsheet"""
+    """Get the main spreadsheet (lazy initialization)"""
     global _spreadsheet
     if _spreadsheet is None:
+        logger.info("Initializing Google Sheets connection (lazy loading)...")
         client = _get_sheets_client()
 
         # If client is None, we're in fallback mode

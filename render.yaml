@@ -48,9 +48,11 @@ services:
         value: /opt/render/persistent/csv_backup
       # Memory management settings
       - key: RSS_LIMIT_MB
-        value: "600"
+        value: "800"
       - key: WATCHDOG_WARMUP
         value: "45"
+      - key: WATCHDOG_ENABLED
+        value: "true"
     scaling:
       minInstances: 1
       maxInstances: 1
