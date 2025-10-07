@@ -32,19 +32,19 @@ import requests
 logger = logging.getLogger(__name__)
 
 
-def send_message_with_retry(bot, chat_id: int, text: str, max_attempts: int = 3, **kwargs) -> bool:
+async def send_message_with_retry(bot, chat_id: int, text: str, max_attempts: int = 3, **kwargs) -> bool:
     """Send message with exponential backoff retry on rate limiting"""
     attempt = 0
     while attempt < max_attempts:
         try:
-            bot.send_message(chat_id, text, **kwargs)
+            await bot.send_message(chat_id, text, **kwargs)
             return True
         except Exception as e:
             if "429" in str(e) or "Too Many Requests" in str(e):
                 # Rate limited - respect Retry-After header if available
                 wait_time = 2 ** attempt  # Exponential backoff
                 logger.warning(f"Rate limited sending message, waiting {wait_time}s (attempt {attempt + 1}/{max_attempts})")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)
             else:
                 logger.error(f"Failed to send message: {e}")
                 break
@@ -405,7 +405,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
             # Send assignment details with retry on rate limiting
             try:
-                send_message_with_retry(
+                await send_message_with_retry(
                     context.bot,
                     ASSIGNMENT_GROUP_ID,
                     assignment_details,
@@ -600,7 +600,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
                 # For text wins, send the text message with retry
-                send_message_with_retry(context.bot, SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
+                await send_message_with_retry(context.bot, SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
         
         await update.message.reply_text(
             f"🎉 **Win Shared Successfully!**\n\n"
@@ -907,7 +907,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
                         # Send voice question with retry on rate limiting
-                        send_message_with_retry(
+                        await send_message_with_retry(
                             context.bot,
                             ASSIGNMENT_GROUP_ID,
                             f"❓ **New Voice Question**\n\n"
@@ -932,7 +932,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
                         # Send video question with retry on rate limiting
-                        send_message_with_retry(
+                        await send_message_with_retry(
                             context.bot,
                             ASSIGNMENT_GROUP_ID,
                             f"❓ **New Video Question**\n\n"
@@ -964,7 +964,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             else:
                 # Text question - send as message
                 # Send question with retry on rate limiting
-                send_message_with_retry(
+                await send_message_with_retry(
                     context.bot,
                     ASSIGNMENT_GROUP_ID,
                     f"❓ **New Question**\n\n"
