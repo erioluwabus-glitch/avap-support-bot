@@ -84,9 +84,9 @@ async def schedule_daily_tips(bot, scheduler):
     try:
         logger.info("Scheduling daily tips job...")
 
-        # Schedule tips initialization as background subprocess (prevents memory spikes)
-        import asyncio
-        asyncio.create_task(_ensure_manual_tips_subprocess())
+        # Disable tips initialization during startup to prevent memory spikes
+        # Tips will be initialized on first use instead
+        logger.info("Tips initialization disabled during startup to prevent memory issues")
 
         # Try to schedule with timezone, fallback to UTC if not available
         try:
