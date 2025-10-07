@@ -726,8 +726,8 @@ async def on_startup():
         # Construct proper webhook URL: https://your-app.com/webhook/BOT_TOKEN
         webhook_url = f"{webhook_base.rstrip('/')}/webhook/{bot_token}"
         logger.info(f"Setting webhook with WEBHOOK_URL: {webhook_base}")
-        logger.info(f"Setting webhook with BOT_TOKEN: {bot_token[:20]}...")  # Only log first 20 chars for security
-        logger.info(f"Setting webhook to: {webhook_url}")
+        logger.info(f"Setting webhook with BOT_TOKEN: {bot_token[:10]}...")  # Only log first 10 chars for security
+        logger.info(f"Setting webhook to: {webhook_url[:50]}...")  # Truncate webhook URL for security
         await bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
         logger.info("Webhook set successfully")
     elif webhook_base:
