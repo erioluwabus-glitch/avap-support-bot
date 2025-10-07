@@ -8,6 +8,10 @@ import logging
 import tracemalloc
 from typing import Dict, Any, List, Tuple
 import asyncio
+import os
+import sys
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +119,23 @@ async def monitor_memory(context) -> None:
             except (NameError, ImportError):
                 logger.info(f"Memory after light cleanup: {final_rss_mb:.1f}MB (freed: {rss_mb - final_rss_mb:.1f}MB)")
 
+        # Periodic detailed memory logging for debugging
+        if hasattr(monitor_memory, '_log_counter'):
+            monitor_memory._log_counter += 1
+        else:
+            monitor_memory._log_counter = 0
+
+        # Log detailed memory info every 5 monitoring cycles
+        if monitor_memory._log_counter % 5 == 0:
+            try:
+                import psutil
+                proc = psutil.Process()
+                mem = proc.memory_info()
+                logger.info(f"DETAILED_MEMORY: RSS={mem.rss / (1024*1024):.1f}MB, VMS={mem.vms / (1024*1024):.1f}MB, "
+                          f"Threads={proc.num_threads()}, FDs={proc.num_fds()}")
+            except Exception as e:
+                logger.warning(f"Failed to get detailed memory info: {e}")
+
     except Exception as e:
         logger.error(f"Memory monitoring failed: {e}")
 
@@ -191,6 +212,43 @@ async def cleanup_resources() -> None:
 
     except Exception as e:
         logger.error(f"Resource cleanup failed: {e}")
+
+
+def memory_watchdog_loop(check_interval: int = 30) -> None:
+    """Memory watchdog that restarts process when RSS exceeds safe threshold"""
+    try:
+        proc = psutil.Process()
+        # Set RSS limit to 600MB (safe threshold before Render kills us at 512MB)
+        rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "600")) * 1024 * 1024
+
+        logger.info(f"Memory watchdog started - RSS limit: {rss_limit_bytes / (1024*1024):.0f}MB")
+
+        while True:
+            try:
+                rss = proc.memory_info().rss
+                if rss > rss_limit_bytes:
+                    logger.critical(f"RSS {rss / (1024*1024):.1f}MB > {rss_limit_bytes / (1024*1024):.0f}MB limit. Restarting process.")
+                    # Graceful restart - Render will respawn the process
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                time.sleep(check_interval)
+            except Exception as e:
+                logger.error(f"Memory watchdog check failed: {e}")
+                time.sleep(check_interval)
+    except Exception as e:
+        logger.error(f"Memory watchdog loop failed: {e}")
+
+
+def start_memory_watchdog() -> threading.Thread:
+    """Start the memory watchdog in a separate thread"""
+    watchdog_thread = threading.Thread(
+        target=memory_watchdog_loop,
+        kwargs={'check_interval': 30},
+        daemon=True,
+        name="MemoryWatchdog"
+    )
+    watchdog_thread.start()
+    logger.info("Memory watchdog thread started")
+    return watchdog_thread
 
 
 def log_memory_usage(context: str = "") -> None:

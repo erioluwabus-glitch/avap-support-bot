@@ -26,8 +26,33 @@ from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
+import time
+import requests
 
 logger = logging.getLogger(__name__)
+
+
+def send_message_with_retry(bot, chat_id: int, text: str, max_attempts: int = 3, **kwargs) -> bool:
+    """Send message with exponential backoff retry on rate limiting"""
+    attempt = 0
+    while attempt < max_attempts:
+        try:
+            bot.send_message(chat_id, text, **kwargs)
+            return True
+        except Exception as e:
+            if "429" in str(e) or "Too Many Requests" in str(e):
+                # Rate limited - respect Retry-After header if available
+                wait_time = 2 ** attempt  # Exponential backoff
+                logger.warning(f"Rate limited sending message, waiting {wait_time}s (attempt {attempt + 1}/{max_attempts})")
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Failed to send message: {e}")
+                break
+        attempt += 1
+
+    logger.error(f"Failed to send message after {max_attempts} attempts")
+    return False
+
 
 # Conversation states
 VERIFY_IDENTIFIER = range(1)
@@ -372,7 +397,9 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             # Create inline keyboard for grading
             keyboard = create_grading_keyboard(submission_id)
 
-            await context.bot.send_message(
+            # Send assignment details with retry on rate limiting
+            send_message_with_retry(
+                context.bot,
                 ASSIGNMENT_GROUP_ID,
                 assignment_details,
                 parse_mode=ParseMode.MARKDOWN,
@@ -556,8 +583,8 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 # For file wins, send the file with caption
                 await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
-                # For text wins, send the text message
-                await context.bot.send_message(SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
+                # For text wins, send the text message with retry
+                send_message_with_retry(context.bot, SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
         
         await update.message.reply_text(
             f"🎉 **Win Shared Successfully!**\n\n"
@@ -839,7 +866,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         # Forward the voice message to preserve the original
                         await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
-                        await context.bot.send_message(ASSIGNMENT_GROUP_ID,
+                        # Send voice question with retry on rate limiting
+                        send_message_with_retry(
+                            context.bot,
+                            ASSIGNMENT_GROUP_ID,
                             f"❓ **New Voice Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -861,7 +891,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         # Forward the video message to preserve the original
                         await update.message.forward(ASSIGNMENT_GROUP_ID)
                         # Send the answer button as a separate message
-                        await context.bot.send_message(ASSIGNMENT_GROUP_ID,
+                        # Send video question with retry on rate limiting
+                        send_message_with_retry(
+                            context.bot,
+                            ASSIGNMENT_GROUP_ID,
                             f"❓ **New Video Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -890,7 +923,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     )
             else:
                 # Text question - send as message
-                await context.bot.send_message(ASSIGNMENT_GROUP_ID,
+                # Send question with retry on rate limiting
+                send_message_with_retry(
+                    context.bot,
+                    ASSIGNMENT_GROUP_ID,
                     f"❓ **New Question**\n\n"
                     f"Student: @{username}\n"
                     f"Telegram ID: {user_id}\n"

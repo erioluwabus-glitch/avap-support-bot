@@ -24,6 +24,7 @@ except ImportError:
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
+from avap_bot.utils.subprocess_runner import run_ai_model_in_subprocess
 
 logger = logging.getLogger(__name__)
 

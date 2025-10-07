@@ -21,7 +21,7 @@ from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 from avap_bot.services.ai_service import clear_model_cache
-from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup
+from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup, start_memory_watchdog
 
 # Initialize logging
 setup_logging()
@@ -383,6 +383,9 @@ async def initialize_services():
         await bot_app.job_queue.start()  # Start the job queue
         logger.info("Memory monitoring scheduled every 2 minutes (starting in 30 seconds)")
 
+        # Start memory watchdog thread (restarts process before Render kills us)
+        start_memory_watchdog()
+
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:
             await schedule_daily_tips(bot_app.bot, scheduler)
@@ -456,7 +459,10 @@ async def initialize_services():
                     'interval',
                     minutes=5,
                     id='memory_cleanup',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=60
                 )
                 logger.debug("Memory cleanup scheduled every 5 minutes")
             except Exception as e:
