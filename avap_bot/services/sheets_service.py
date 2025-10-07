@@ -1077,10 +1077,20 @@ def get_student_wins(username: str) -> List[Dict[str, Any]]:
         # If Google Sheets is available, use it
         if spreadsheet:
             try:
+                # Try wins_new worksheet first (new format)
+                try:
+                    sheet = spreadsheet.worksheet("wins_new")
+                    records = sheet.get_all_records()
+                    student_wins = [record for record in records if record.get("username") == username]
+                    if student_wins:
+                        logger.info(f"Found {len(student_wins)} wins in wins_new worksheet for {username}")
+                        return student_wins
+                except Exception as e:
+                    logger.debug(f"wins_new worksheet not found or empty: {e}")
+                
+                # Fallback to wins worksheet (old format)
                 sheet = spreadsheet.worksheet("wins")
-                # Get all data
                 records = sheet.get_all_records()
-                # Filter by username
                 student_wins = [record for record in records if record.get("username") == username]
                 return student_wins
             except Exception as e:
