@@ -158,7 +158,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         # Approve chat join request if the group ID is set
         if SUPPORT_GROUP_ID:
             try:
-                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user.id)
+                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user_id)
                 logger.info(f"Approved join request for user {user.id} to support group.")
             except Exception as e:
                 error_msg = str(e)
@@ -786,7 +786,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user.id)
+            faq_match = await find_faq_match(question_text, user_id=user_id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -795,7 +795,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],
@@ -1089,7 +1089,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user.id)
+            faq_match = await find_faq_match(question_text, user_id=user_id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -1098,7 +1098,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],
