@@ -29,20 +29,44 @@ class CancelRegistry:
 
     Provides cooperative cancellation for long-running operations and
     immediate asyncio task cancellation for responsive user experience.
+    Optimized for thousands of users with automatic cleanup.
     """
 
-    def __init__(self):
-        """Initialize the cancel registry."""
+    def __init__(self, max_entries: int = 1000):
+        """Initialize the cancel registry with user limit."""
         self._entries: Dict[int, CancelEntry] = {}
         self._lock = asyncio.Lock()
-        logger.info("CancelRegistry initialized")
+        self.max_entries = max_entries
+        logger.info(f"CancelRegistry initialized with max {max_entries} entries")
 
     async def _get_entry(self, user_id: int) -> CancelEntry:
-        """Get or create cancel entry for user (thread-safe)."""
+        """Get or create cancel entry for user (thread-safe) with cleanup."""
         async with self._lock:
+            # Clean up old entries if we're at the limit
+            if len(self._entries) >= self.max_entries:
+                await self._cleanup_old_entries()
+            
             if user_id not in self._entries:
                 self._entries[user_id] = CancelEntry()
             return self._entries[user_id]
+
+    async def _cleanup_old_entries(self):
+        """Clean up old entries to prevent memory leaks."""
+        try:
+            # Remove entries with no active tasks/jobs
+            to_remove = []
+            for user_id, entry in self._entries.items():
+                if not entry.tasks and not entry.jobs:
+                    to_remove.append(user_id)
+            
+            # Remove up to 20% of entries
+            cleanup_count = max(1, len(self._entries) // 5)
+            for user_id in to_remove[:cleanup_count]:
+                del self._entries[user_id]
+            
+            logger.info(f"Cleaned up {len(to_remove[:cleanup_count])} old cancel entries")
+        except Exception as e:
+            logger.error(f"Failed to cleanup cancel entries: {e}")
 
     async def register_task(self, user_id: int, task: asyncio.Task) -> None:
         """

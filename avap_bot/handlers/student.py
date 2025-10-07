@@ -1287,7 +1287,7 @@ start_conv = ConversationHandler(
     },
     fallbacks=[get_cancel_fallback_handler()],
     per_message=False,
-    conversation_timeout=600
+    conversation_timeout=300  # Reduced from 600 to 300 seconds (5 minutes)
 )
 
 submit_conv = ConversationHandler(
@@ -1299,7 +1299,7 @@ submit_conv = ConversationHandler(
     },
     fallbacks=[get_cancel_fallback_handler()],
     per_message=False,
-    conversation_timeout=600
+    conversation_timeout=300  # Reduced from 600 to 300 seconds (5 minutes)
 )
 
 share_win_conv = ConversationHandler(
@@ -1310,7 +1310,7 @@ share_win_conv = ConversationHandler(
     },
     fallbacks=[get_cancel_fallback_handler()],
     per_message=False,
-    conversation_timeout=600
+    conversation_timeout=300  # Reduced from 600 to 300 seconds (5 minutes)
 )
 
 ask_conv = ConversationHandler(
@@ -1320,7 +1320,7 @@ ask_conv = ConversationHandler(
     },
     fallbacks=[get_cancel_fallback_handler()],
     per_message=False,
-    conversation_timeout=600
+    conversation_timeout=300  # Reduced from 600 to 300 seconds (5 minutes)
 )
 
 

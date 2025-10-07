@@ -21,6 +21,7 @@ except ImportError:
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
+from avap_bot.utils.user_limits import user_limits
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,14 @@ def clear_model_cache():
     log_memory_usage("after model cache clear")
 
 
-async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
+async def find_faq_match(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find best FAQ match using semantic similarity with subprocess memory isolation"""
     try:
+        # Check user limits if user_id provided
+        if user_id and not await user_limits.can_handle_ai_request(user_id):
+            logger.warning(f"User {user_id} rate limited for AI requests")
+            return None
+
         # Get all FAQs
         faqs = get_faqs()
         
