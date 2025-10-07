@@ -78,7 +78,7 @@ def add_default_tips_worker():
             # Add tips one by one (batch operations can be added later)
             for tip_data in default_tips:
                 try:
-                    success = append_tip(tip_data['content'], tip_data['type'], tip_data['added_by'])
+                    success = append_tip(tip_data)
                     if success:
                         logger.info(f"Worker process: Added default tip: {tip_data['content'][:50]}...")
                     else:

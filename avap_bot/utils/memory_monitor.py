@@ -181,8 +181,8 @@ async def monitor_memory(context) -> None:
         except (NameError, ImportError):
             logger.info(f"Memory usage: {rss_mb:.1f}MB")
 
-        # Check for CRITICAL memory usage (78% of 512MB = 400MB) - FAST cleanup only
-        if rss_mb > 400:
+        # Check for CRITICAL memory usage (60% of 512MB = 307MB) - FAST cleanup only
+        if rss_mb > 307:
             logger.critical(f"CRITICAL memory usage detected: {rss_mb:.1f}MB - Triggering FAST cleanup!")
             try:
                 # Quick cleanup only - don't block other jobs
@@ -194,8 +194,8 @@ async def monitor_memory(context) -> None:
             except Exception as e:
                 logger.error(f"Failed to trigger FAST critical cleanup: {e}")
 
-        # Check for high memory usage (25% of 512MB = 128MB) - LIGHT cleanup only
-        elif rss_mb > 128:
+        # Check for high memory usage (20% of 512MB = 102MB) - LIGHT cleanup only
+        elif rss_mb > 102:
             logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking LIGHT corrective action")
 
             # LIGHT cleanup - don't block other jobs
@@ -444,8 +444,8 @@ def memory_watchdog_loop(check_interval: int = 30) -> None:
             return
 
         proc = psutil.Process()
-        # Set RSS limit to 800MB (allows for startup spikes, can be reduced after optimization)
-        rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "800")) * 1024 * 1024
+        # Set RSS limit to 400MB (more conservative to prevent restarts)
+        rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "400")) * 1024 * 1024
         # Add warmup delay to prevent restarts during normal startup spikes
         warmup_seconds = int(os.environ.get("WATCHDOG_WARMUP", "30"))
 
