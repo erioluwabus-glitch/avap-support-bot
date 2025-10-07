@@ -69,74 +69,51 @@ def get_memory_top_consumers(limit: int = 10) -> List[Tuple[str, float]]:
 async def monitor_memory(context) -> None:
     """
     Monitor memory usage and take corrective action if needed.
-    Called periodically by job queue.
+    Called periodically by job queue. FAST and non-blocking.
     """
     try:
-        process = psutil.Process()
-        mem_info = process.memory_info()
-        rss_mb = mem_info.rss / (1024 * 1024)
-        vms_mb = mem_info.vms / (1024 * 1024)
+        rss_mb = get_memory_usage()
 
         try:
             log_memory_usage("periodic monitoring")
         except (NameError, ImportError):
-            logger.info(f"Memory usage: RSS={rss_mb:.1f}MB, VMS={vms_mb:.1f}MB")
+            logger.info(f"Memory usage: {rss_mb:.1f}MB")
 
-        # Check for CRITICAL memory usage (78% of 512MB = 400MB) - NUCLEAR OPTION
+        # Check for CRITICAL memory usage (78% of 512MB = 400MB) - FAST cleanup only
         if rss_mb > 400:
-            logger.critical(f"CRITICAL memory usage detected: {rss_mb:.1f}MB - Triggering NUCLEAR cleanup!")
+            logger.critical(f"CRITICAL memory usage detected: {rss_mb:.1f}MB - Triggering FAST cleanup!")
             try:
-                from avap_bot.utils.memory_monitor import ultra_aggressive_cleanup
-                await ultra_aggressive_cleanup()
+                # Quick cleanup only - don't block other jobs
+                for _ in range(3):
+                    gc.collect()
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                logger.info("FAST critical cleanup completed")
             except Exception as e:
-                logger.error(f"Failed to trigger ULTRA aggressive cleanup: {e}")
-        
-        # Check for high memory usage (25% of 512MB = 128MB for ULTRA aggressive cleanup)
-        elif rss_mb > 128:
-            logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking ULTRA aggressive corrective action")
+                logger.error(f"Failed to trigger FAST critical cleanup: {e}")
 
-            # Force ULTRA aggressive garbage collection
-            for _ in range(10):
+        # Check for high memory usage (25% of 512MB = 128MB) - LIGHT cleanup only
+        elif rss_mb > 128:
+            logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking LIGHT corrective action")
+
+            # LIGHT cleanup - don't block other jobs
+            for _ in range(2):
                 gc.collect()
-            
-            # Force clear AI model cache if available
+
             try:
                 from avap_bot.services.ai_service import clear_model_cache
                 clear_model_cache()
                 logger.info("Cleared AI model cache")
             except Exception as e:
                 logger.warning(f"Failed to clear AI model cache: {e}")
-            
-            # Force ULTRA aggressive garbage collection again after cache clear
-            for _ in range(10):
-                gc.collect()
-            
-            # Additional memory cleanup - clear all possible caches
-            try:
-                import sys
-                # Clear Python's internal caches
-                sys.modules.clear()
-                # Force another round of garbage collection
-                for _ in range(5):
-                    gc.collect()
-            except Exception as e:
-                logger.warning(f"Failed additional memory cleanup: {e}")
 
-            # Log memory consumers if available
-            if TRACEMALLOC_AVAILABLE:
-                top_consumers = get_memory_top_consumers(5)
-                for consumer, size_mb in top_consumers:
-                    logger.debug(f"Memory consumer: {consumer} - {size_mb:.1f}MB")
-
-            # Check memory after cleanup
-            new_rss_mb = get_memory_usage()
+        # Check memory after cleanup
+        final_rss_mb = get_memory_usage()
+        if rss_mb - final_rss_mb > 10:  # Only log if we freed significant memory
             try:
-                log_memory_usage("after memory cleanup")
+                log_memory_usage("after light cleanup")
             except (NameError, ImportError):
-                logger.info(f"Memory after cleanup: {new_rss_mb:.1f}MB (freed: {rss_mb - new_rss_mb:.1f}MB)")
-
-        # Check for potential memory leaks (gradual increase)
-        # This could be enhanced with historical tracking
+                logger.info(f"Memory after light cleanup: {final_rss_mb:.1f}MB (freed: {rss_mb - final_rss_mb:.1f}MB)")
 
     except Exception as e:
         logger.error(f"Memory monitoring failed: {e}")
@@ -144,58 +121,45 @@ async def monitor_memory(context) -> None:
 
 async def ultra_aggressive_cleanup() -> None:
     """
-    ULTRA aggressive memory cleanup for critical situations.
-    This is the nuclear option for memory management.
+    FAST aggressive memory cleanup for critical situations.
+    Optimized for speed to prevent job conflicts.
     """
     try:
-        logger.warning("Starting ULTRA aggressive memory cleanup...")
-        
-        # Step 1: Force multiple rounds of garbage collection
-        for _ in range(20):
+        logger.warning("Starting FAST aggressive memory cleanup...")
+
+        # Step 1: Quick garbage collection (reduced iterations for speed)
+        for _ in range(5):
             gc.collect()
-        
+
         # Step 2: Clear AI model cache
         try:
             from avap_bot.services.ai_service import clear_model_cache
             clear_model_cache()
-            logger.info("Cleared AI model cache during ULTRA cleanup")
+            logger.info("Cleared AI model cache during FAST cleanup")
         except Exception as e:
             logger.warning(f"Failed to clear AI model cache: {e}")
-        
-        # Step 3: Clear Python's internal caches
+
+        # Step 3: Quick module cleanup (only critical modules)
         try:
             import sys
-            # Clear module cache
-            modules_to_clear = [name for name in sys.modules.keys() 
-                              if name.startswith('avap_bot') or name.startswith('telegram')]
-            for module_name in modules_to_clear:
+            # Clear only the most problematic modules
+            critical_modules = ['sentence_transformers', 'transformers', 'torch']
+            for module_name in critical_modules:
                 if module_name in sys.modules:
                     del sys.modules[module_name]
         except Exception as e:
-            logger.warning(f"Failed to clear module cache: {e}")
-        
-        # Step 4: Force more garbage collection
-        for _ in range(15):
+            logger.warning(f"Failed to clear critical modules: {e}")
+
+        # Step 4: Final garbage collection
+        for _ in range(3):
             gc.collect()
-        
-        # Step 5: Clear any remaining caches
-        try:
-            # Clear any remaining AI caches
-            from avap_bot.services.ai_service import clear_model_cache
-            clear_model_cache()
-        except:
-            pass
-        
-        # Final garbage collection
-        for _ in range(10):
-            gc.collect()
-        
+
         # Log final memory usage
         final_memory = get_memory_usage()
-        logger.warning(f"ULTRA cleanup completed. Final memory: {final_memory:.1f}MB")
-        
+        logger.warning(f"FAST cleanup completed. Final memory: {final_memory:.1f}MB")
+
     except Exception as e:
-        logger.error(f"ULTRA aggressive cleanup failed: {e}")
+        logger.error(f"FAST aggressive cleanup failed: {e}")
 
 
 async def cleanup_resources() -> None:
@@ -230,10 +194,21 @@ async def cleanup_resources() -> None:
 
 
 def log_memory_usage(context: str = "") -> None:
-    """Log current memory usage with optional context"""
+    """Log current memory usage with optional context and detailed info"""
     memory_mb = get_memory_usage()
     context_str = f" ({context})" if context else ""
-    logger.info(f"Memory usage{context_str}: {memory_mb:.1f}MB")
+
+    try:
+        detailed_info = get_detailed_memory_info()
+        if detailed_info:
+            cpu_percent = detailed_info.get('cpu_percent', 0)
+            num_threads = detailed_info.get('num_threads', 0)
+            logger.info(f"Memory usage{context_str}: {memory_mb:.1f}MB, CPU: {cpu_percent:.1f}%, Threads: {num_threads}")
+        else:
+            logger.info(f"Memory usage{context_str}: {memory_mb:.1f}MB")
+    except Exception as e:
+        logger.warning(f"Failed to get detailed memory info: {e}")
+        logger.info(f"Memory usage{context_str}: {memory_mb:.1f}MB")
 
 
 # Enhanced memory monitoring for development

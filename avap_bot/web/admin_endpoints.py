@@ -17,6 +17,35 @@ router = APIRouter()
 ADMIN_RESET_TOKEN = os.getenv("ADMIN_RESET_TOKEN")
 
 
+@router.get("/health")
+async def health_check() -> Dict[str, Any]:
+    """Health check endpoint for external monitoring (e.g., UptimeRobot)"""
+    try:
+        # Basic health checks
+        from avap_bot.utils.memory_monitor import get_memory_usage
+        memory_mb = get_memory_usage()
+
+        # Check if bot is running
+        from avap_bot.services.supabase_service import get_supabase
+        client = get_supabase()
+        # Simple query to test database connectivity
+        result = client.table("verified_users").select("id").limit(1).execute()
+
+        return {
+            "status": "healthy",
+            "memory_usage_mb": round(memory_mb, 1),
+            "database_connected": True,
+            "timestamp": "2025-10-07T07:20:00Z"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": "2025-10-07T07:20:00Z"
+        }
+
+
 @router.post("/admin/purge/email")
 async def purge_single_email(request: Request) -> Dict[str, Any]:
     """Purge single email from pending verifications"""

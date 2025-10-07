@@ -222,10 +222,9 @@ async def submit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ["❌ Cancel"]
     ], resize_keyboard=True, one_time_keyboard=True)
 
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         "📝 **Submit Assignment**\n\n"
         "Select the module for your assignment:",
-        parse_mode=ParseMode.MARKDOWN,
         reply_markup=keyboard
     )
     return SUBMIT_MODULE
@@ -249,10 +248,9 @@ async def submit_module(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         ["🎥 Video", "❌ Cancel"]
     ], resize_keyboard=True, one_time_keyboard=True)
 
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         f"📝 **Module {module} Assignment**\n\n"
         "What type of submission is this?",
-        parse_mode=ParseMode.MARKDOWN,
         reply_markup=keyboard
     )
     return SUBMIT_TYPE
@@ -271,11 +269,9 @@ async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     context.user_data['submit_type'] = submission_type
     
     # Remove keyboard and ask for content
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         f"📝 **Module {context.user_data['submit_module']} - {submission_type.title()}**\n\n"
-        "Please send your assignment file or text:",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=None  # Remove keyboard
+        "Please send your assignment file or text:"
     )
     return SUBMIT_FILE
 
@@ -442,10 +438,9 @@ async def share_win_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         ["🎥 Video", "❌ Cancel"]
     ], resize_keyboard=True, one_time_keyboard=True)
 
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         "🏆 **Share Your Win**\n\n"
         "What type of win are you sharing?",
-        parse_mode=ParseMode.MARKDOWN,
         reply_markup=keyboard
     )
     return SHARE_WIN_TYPE
@@ -464,11 +459,9 @@ async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data['win_type'] = win_type
     
     # Remove keyboard and ask for content
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         f"🏆 **Share {win_type.title()} Win**\n\n"
-        "Please share your win (text, audio, or video):",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=None  # Remove keyboard
+        "Please share your win (text, audio, or video):"
     )
     return SHARE_WIN_FILE
 
@@ -694,10 +687,9 @@ async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await update.message.reply_text("❌ You need to be verified to ask questions.")
         return ConversationHandler.END
     
-    await update.message.reply_text(
+    await update.message.reply_markdown(
         "❓ **Ask a Question**\n\n"
-        "Please type your question (text, audio, or video):",
-        parse_mode=ParseMode.MARKDOWN
+        "Please type your question (text, audio, or video):"
     )
     return ASK_QUESTION
 

@@ -43,6 +43,15 @@ if not BOT_TOKEN:
 # Create the FastAPI app
 app = FastAPI()
 
+# Include admin endpoints
+try:
+    from avap_bot.web.admin_endpoints import router as admin_router
+    if admin_router:
+        app.include_router(admin_router, prefix="/api")
+        logger.info("Admin endpoints registered successfully")
+except Exception as e:
+    logger.warning(f"Failed to register admin endpoints: {e}")
+
 # Create the Telegram bot application
 bot_app = Application.builder().token(BOT_TOKEN).build()
 
@@ -340,11 +349,11 @@ async def initialize_services():
         await bot_app.initialize()
         logger.debug("Telegram Application initialized successfully")
 
-        # Enhanced memory monitoring to prevent Render restarts
+        # Enhanced memory monitoring to prevent Render restarts (reduced frequency)
         enable_detailed_memory_monitoring()
-        bot_app.job_queue.run_repeating(monitor_memory, interval=30, first=10)  # Every 30 seconds, starting in 10 seconds
+        bot_app.job_queue.run_repeating(monitor_memory, interval=120, first=30)  # Every 2 minutes, starting in 30 seconds
         await bot_app.job_queue.start()  # Start the job queue
-        logger.info("Memory monitoring scheduled every 30 seconds (starting in 10 seconds)")
+        logger.info("Memory monitoring scheduled every 2 minutes (starting in 30 seconds)")
 
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:
@@ -352,48 +361,60 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-                # Schedule keep-alive health checks every 30 seconds (reduced frequency for memory efficiency)
+                # Schedule keep-alive health checks every 60 seconds (reduced frequency for memory efficiency)
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
                     'interval',
-                    seconds=30,
+                    seconds=60,
                     args=[bot_app.bot],
                     id='keep_alive',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=30
                 )
-                logger.debug("Keep-alive health checks scheduled every 30 seconds")
+                logger.debug("Keep-alive health checks scheduled every 60 seconds")
 
-                # Schedule simple ping every 20 seconds
+                # Schedule simple ping every 60 seconds
                 scheduler.add_job(
                     ping_self,
                     'interval',
-                    seconds=20,
+                    seconds=60,
                     id='ping_self',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=2,
+                    coalesce=True,
+                    misfire_grace_time=15
                 )
-                logger.debug("Simple ping scheduled every 20 seconds")
+                logger.debug("Simple ping scheduled every 60 seconds")
 
-                # Schedule additional activity every 15 seconds to prevent Render timeout
+                # Schedule additional activity every 60 seconds to prevent Render timeout
                 scheduler.add_job(
                     generate_activity,
                     'interval',
-                    seconds=15,
+                    seconds=60,
                     id='activity_generator',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=30
                 )
-                logger.debug("Activity generator scheduled every 15 seconds")
+                logger.debug("Activity generator scheduled every 60 seconds")
 
-                # Schedule webhook health check every 45 seconds
+                # Schedule webhook health check every 60 seconds
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=45,
+                    seconds=60,
                     id='webhook_health',
-                    replace_existing=True
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=15
                 )
-                logger.debug("Webhook health check scheduled every 45 seconds")
+                logger.debug("Webhook health check scheduled every 60 seconds")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
@@ -415,27 +436,76 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - memory cleanup not scheduled")
             
-        # Schedule ULTRA aggressive memory cleanup every 1 minute for critical memory management
+        # Schedule FAST aggressive memory cleanup every 5 minutes for critical memory management
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     ultra_aggressive_cleanup,
                     'interval',
-                    minutes=1,
-                    id='ultra_aggressive_memory_cleanup',
-                    replace_existing=True
+                    minutes=5,
+                    id='fast_aggressive_memory_cleanup',
+                    replace_existing=True,
+                    max_instances=1,  # Prevent overlapping instances
+                    coalesce=True,
+                    misfire_grace_time=60
                 )
-                logger.debug("ULTRA aggressive memory cleanup scheduled every 1 minute")
+                logger.debug("FAST aggressive memory cleanup scheduled every 5 minutes")
             except Exception as e:
-                logger.warning(f"Failed to schedule ULTRA aggressive memory cleanup: {e}")
+                logger.warning(f"Failed to schedule FAST aggressive memory cleanup: {e}")
         else:
-            logger.warning("Scheduler not available - ULTRA aggressive memory cleanup not scheduled")
+            logger.warning("Scheduler not available - FAST aggressive memory cleanup not scheduled")
+
+        # Schedule graceful restart daily at 3 AM (low usage time) to prevent memory leaks
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
+                scheduler.add_job(
+                    graceful_restart,
+                    'cron',
+                    hour=3,
+                    minute=0,
+                    id='graceful_restart',
+                    replace_existing=True,
+                    max_instances=1
+                )
+                logger.debug("Graceful restart scheduled daily at 3 AM")
+            except Exception as e:
+                logger.warning(f"Failed to schedule graceful restart: {e}")
 
         logger.info("Services initialized successfully.")
     except Exception as e:
         logger.critical(f"Failed to initialize services: {e}", exc_info=True)
         # Exit if services fail to initialize
         raise
+
+
+def graceful_restart():
+    """Graceful restart to prevent memory leaks"""
+    try:
+        logger.info("🔄 Graceful restart triggered - preventing memory leaks")
+
+        # Log memory before restart
+        from avap_bot.utils.memory_monitor import get_memory_usage
+        memory_mb = get_memory_usage()
+        logger.info(f"Memory before graceful restart: {memory_mb:.1f}MB")
+
+        # Gracefully shutdown scheduler
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
+                scheduler.shutdown(wait=True)
+                logger.info("Scheduler shut down gracefully")
+            except Exception as e:
+                logger.warning(f"Scheduler shutdown failed: {e}")
+
+        # Exit gracefully (Render will restart the service)
+        import sys
+        logger.info("Exiting for graceful restart")
+        sys.exit(0)
+
+    except Exception as e:
+        logger.error(f"Graceful restart failed: {e}")
+        # Force exit if graceful restart fails
+        import sys
+        sys.exit(1)
 
 async def main_polling():
     """Main function to start the bot in polling mode."""
