@@ -87,7 +87,7 @@ def check_tables_exist():
 
 
 def init_supabase() -> Client:
-    """Initialize Supabase client with optimized startup"""
+    """Initialize Supabase client (lightweight - no heavy operations during startup)"""
     global supabase_client
 
     if supabase_client:
@@ -96,20 +96,17 @@ def init_supabase() -> Client:
     try:
         validate_supabase_credentials()
 
-        logger.info("🚀 Initializing Supabase connection...")
+        logger.info("🚀 Creating Supabase client (lightweight initialization)...")
+        # Create client without heavy connection test during startup
         test_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-        # Quick connection test
-        test_client.table('verified_users').select('count', count='exact').limit(1).execute()
-        # Check if required tables exist
-        check_tables_exist()
-
+        # Store client - connection test will happen on first actual use via get_supabase()
         supabase_client = test_client
-        logger.info("✅ Supabase connected successfully")
+        logger.info("✅ Supabase client created (connection test deferred until first use)")
         return supabase_client
 
     except Exception as e:
-        logger.error(f"❌ Supabase connection failed: {str(e)}")
+        logger.error(f"❌ Supabase client creation failed: {str(e)}")
         raise
 
 
@@ -119,7 +116,17 @@ def get_supabase() -> Client:
     if supabase_client is None:
         if not SUPABASE_URL or not SUPABASE_KEY:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set")
+        logger.info("Creating Supabase client for first use...")
         supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+        # Do connection test on first use
+        try:
+            supabase_client.table('verified_users').select('count', count='exact').limit(1).execute()
+            logger.info("✅ Supabase connection test successful")
+        except Exception as e:
+            logger.error(f"❌ Supabase connection test failed: {str(e)}")
+            raise
+
     return supabase_client
 
 

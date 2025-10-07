@@ -11,9 +11,6 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 
 import requests
-import numpy as np
-
-import psutil
 
 # Import sentence transformer
 try:

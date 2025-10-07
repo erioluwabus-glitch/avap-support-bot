@@ -440,8 +440,15 @@ def memory_watchdog_loop(check_interval: int = 30) -> None:
         proc = psutil.Process()
         # Set RSS limit to 550MB (safer threshold before Render kills us at 512MB)
         rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "550")) * 1024 * 1024
+        # Add warmup delay to prevent restarts during normal startup spikes
+        warmup_seconds = int(os.environ.get("WATCHDOG_WARMUP", "30"))
 
-        logger.info(f"Memory watchdog started - RSS limit: {rss_limit_bytes / (1024*1024):.0f}MB")
+        logger.info(f"Memory watchdog starting - RSS limit: {rss_limit_bytes / (1024*1024):.0f}MB, warmup: {warmup_seconds}s")
+
+        # Wait for warmup period to allow startup to settle
+        logger.info(f"Memory watchdog warming up for {warmup_seconds} seconds...")
+        time.sleep(warmup_seconds)
+        logger.info("Memory watchdog warmup complete - monitoring active")
 
         while True:
             try:

@@ -46,6 +46,11 @@ services:
       # Optional: Set persistent storage for CSV fallback
       - key: STABLE_BACKUP_DIR
         value: /opt/render/persistent/csv_backup
+      # Memory management settings
+      - key: RSS_LIMIT_MB
+        value: "600"
+      - key: WATCHDOG_WARMUP
+        value: "45"
     scaling:
       minInstances: 1
       maxInstances: 1
