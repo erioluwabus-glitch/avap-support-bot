@@ -50,7 +50,7 @@ services:
       - key: RSS_LIMIT_MB
         value: "800"
       - key: WATCHDOG_WARMUP
-        value: "45"
+        value: "60"
       - key: WATCHDOG_ENABLED
         value: "true"
     scaling:

@@ -84,9 +84,9 @@ async def schedule_daily_tips(bot, scheduler):
     try:
         logger.info("Scheduling daily tips job...")
 
-        # Schedule tips initialization as background task (defer heavy operations)
+        # Schedule tips initialization as background subprocess (prevents memory spikes)
         import asyncio
-        asyncio.create_task(_ensure_manual_tips_background())
+        asyncio.create_task(_ensure_manual_tips_subprocess())
 
         # Try to schedule with timezone, fallback to UTC if not available
         try:
@@ -133,83 +133,33 @@ async def schedule_daily_tips(bot, scheduler):
         logger.exception("Failed to schedule daily tips: %s", e)
 
 
-async def _ensure_manual_tips_background():
-    """Ensure we have some manual tips in the database (background task)"""
+async def _ensure_manual_tips_subprocess():
+    """Ensure we have some manual tips in the database (subprocess task)"""
     try:
         # Wait a bit for server to fully start and bind to port
         import asyncio
         await asyncio.sleep(10)  # Allow server to bind to port first
         
-        logger.info("Background task: Ensuring manual tips...")
-        from avap_bot.services.sheets_service import get_manual_tips
-
-        tips = get_manual_tips()
-
-        # If no tips exist, add some default ones
-        if not tips:
-            logger.info("No manual tips found, adding default tips...")
-            default_tips = [
-                {
-                    'content': '💡 Remember: Consistency is key to success! Keep working on your goals every day.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '🎯 Set small, achievable goals for today. Progress is made one step at a time.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '📚 Learning is a journey, not a destination. Enjoy the process and celebrate your progress.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '🔥 Don\'t wait for motivation - create it! Start with small actions and build momentum.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '🌟 Every expert was once a beginner. Your current struggles are part of your growth journey.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '⏰ Time management tip: Use the Pomodoro technique - 25 minutes of focused work, 5 minutes break.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                },
-                {
-                    'content': '🚀 Break complex tasks into smaller, manageable steps. Small wins lead to big achievements.',
-                    'type': 'manual',
-                    'added_by': 'system',
-                    'added_at': datetime.now(timezone.utc)
-                }
-            ]
-
-            for tip_data in default_tips:
-                try:
-                    from avap_bot.services.sheets_service import append_tip
-                    success = append_tip(tip_data)
-                    if success:
-                        logger.info(f"Added default tip: {tip_data['content'][:50]}...")
-                    else:
-                        logger.warning(f"Failed to add default tip: {tip_data['content'][:50]}...")
-                except Exception as e:
-                    logger.exception(f"Error adding default tip: {e}")
-
-            logger.info(f"Added {len(default_tips)} default tips to the system")
+        logger.info("Starting tips initialization in subprocess...")
+        
+        # Run heavy operations in separate process to prevent memory spikes
+        from avap_bot.utils.background_process import run_heavy_operation_safely
+        from avap_bot.utils.tips_worker import add_default_tips_worker
+        
+        # Run the heavy operation in a subprocess
+        success = run_heavy_operation_safely(
+            operation_name="Default Tips Initialization",
+            func=add_default_tips_worker,
+            timeout=120
+        )
+        
+        if success:
+            logger.info("Tips initialization completed successfully in subprocess")
         else:
-            logger.info(f"Found {len(tips)} existing manual tips")
-
+            logger.error("Tips initialization failed or timed out in subprocess")
+            
     except Exception as e:
-        logger.exception("Background task failed to ensure manual tips: %s", e)
+        logger.exception("Subprocess task failed to ensure manual tips: %s", e)
 
 
 async def test_daily_tip_job(bot):
