@@ -9,8 +9,9 @@ import signal
 import sys
 from telegram import Update
 from telegram.ext import Application
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, HTTPException
 import uvicorn
+import time
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from avap_bot.utils.logging_config import setup_logging
@@ -42,6 +43,33 @@ if not BOT_TOKEN:
 
 # Create the FastAPI app
 app = FastAPI()
+
+# Health endpoint configuration
+HEALTH_TOKEN = os.environ.get("HEALTH_TOKEN", "")
+MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "8"))  # seconds
+_last_health_ts = 0
+
+# Health endpoint (lightweight monitoring)
+@app.get("/health")
+@app.head("/health")
+async def health_check(request: Request):
+    """Lightweight health check endpoint for external monitoring"""
+    global _last_health_ts
+
+    # Authentication
+    token = request.headers.get("X-Health-Token") or request.query_params.get("token")
+    if HEALTH_TOKEN and token != HEALTH_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Rate limiting
+    now = time.time()
+    if now - _last_health_ts < MIN_HEALTH_INTERVAL:
+        raise HTTPException(status_code=429, detail="Too Many Requests")
+    _last_health_ts = now
+
+    # Lightweight health check - no DB or model loads
+    headers = {"X-App-State": "ok"}
+    return Response(content="OK", status_code=200, headers=headers)
 
 # Include admin endpoints
 try:
