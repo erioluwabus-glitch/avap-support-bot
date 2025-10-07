@@ -15,13 +15,15 @@ import requests
 # Import sentence transformer
 # Disable AI features to prevent memory issues
 SentenceTransformer = None
-logger.info("AI features disabled to prevent memory issues")
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
 from avap_bot.utils.user_limits import user_limits
 
 logger = logging.getLogger(__name__)
+
+# Log that AI features are disabled
+logger.info("AI features disabled to prevent memory issues")
 
 # Model cache with aggressive cleanup
 _model = None
