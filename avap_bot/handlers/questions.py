@@ -35,13 +35,22 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     # Extract telegram_id and username from callback data (format: answer_{telegram_id}_{username})
     parts = query.data.split("_")
+    logger.info(f"Answer callback data: {query.data}, parts: {parts}")
+    
     if len(parts) >= 3:
-        telegram_id = int(parts[1])
-        username = parts[2]
+        try:
+            telegram_id = int(parts[1])
+            username = parts[2]
+            logger.info(f"Parsed telegram_id: {telegram_id}, username: {username}")
+        except ValueError as e:
+            logger.error(f"Failed to parse telegram_id from '{parts[1]}': {e}")
+            username = parts[1] if len(parts) > 1 else "unknown"
+            telegram_id = None
     else:
         # Fallback for old format
-        username = parts[1]
+        username = parts[1] if len(parts) > 1 else "unknown"
         telegram_id = None
+        logger.warning(f"Using fallback format for callback data: {query.data}")
     
     context.user_data['question_username'] = username
     context.user_data['question_telegram_id'] = telegram_id
@@ -62,6 +71,8 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     try:
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
+        
+        logger.info(f"Answer submission - username: {username}, telegram_id: {telegram_id}")
         
         # Get answer content
         answer_text = None
@@ -99,13 +110,23 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         
         # Send answer to student
         if telegram_id:
-            await _send_answer_to_student(
+            success = await _send_answer_to_student(
                 context, 
                 telegram_id, 
                 answer_text, 
                 answer_file_id, 
                 answer_file_type
             )
+            
+            if not success:
+                await update.message.reply_text(
+                    f"⚠️ **Answer saved but failed to send to student!**\n\n"
+                    f"Student: @{username}\n"
+                    f"Telegram ID: {telegram_id}\n\n"
+                    f"Please try sending the answer manually to the student.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return ConversationHandler.END
         else:
             await update.message.reply_text(
                 f"⚠️ Could not send answer to student (telegram_id not found).\n"
@@ -131,6 +152,8 @@ async def _send_answer_to_student(
 ):
     """Send answer to student"""
     try:
+        logger.info(f"Attempting to send answer to student {telegram_id}")
+        
         message = (
             f"✅ **Your question has been answered!**\n\n"
             f"**Answer:**\n{answer_text}"
@@ -143,6 +166,8 @@ async def _send_answer_to_student(
             parse_mode=ParseMode.MARKDOWN
         )
         
+        logger.info(f"Successfully sent text answer to student {telegram_id}")
+        
         # If there is a file answer, send it as a separate message
         if answer_file_id and answer_file_type:
             if answer_file_type == 'voice':
@@ -152,11 +177,12 @@ async def _send_answer_to_student(
             elif answer_file_type == 'document':
                 await context.bot.send_document(chat_id=telegram_id, document=answer_file_id)
         
-        logger.info(f"Sent answer to student {telegram_id}")
+        logger.info(f"Successfully sent answer to student {telegram_id}")
+        return True
         
     except Exception as e:
         logger.exception(f"Failed to send answer to student {telegram_id}: {e}")
-        raise
+        return False
 
 
 async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
