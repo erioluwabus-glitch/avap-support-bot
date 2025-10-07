@@ -1195,13 +1195,13 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user.id}_{username}")
             ]])
 
-                # Send to questions group for admin to answer
-                await context.bot.send_message(
-                    QUESTIONS_GROUP_ID,
-                    forward_text,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=keyboard
-                )
+            # Send to questions group for admin to answer
+            await context.bot.send_message(
+                QUESTIONS_GROUP_ID,
+                forward_text,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard
+            )
 
             # Confirm in support group
             await update.message.reply_text(
@@ -1211,7 +1211,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 reply_to_message_id=update.message.message_id
             )
         else:
-            # ASSIGNMENT_GROUP_ID not configured - question saved but not forwarded
+            # QUESTIONS_GROUP_ID not configured - question saved but not forwarded
             await update.message.reply_text(
                 f"⚠️ Your question has been recorded, @{username}!\n"
                 f"However, admin notifications are not properly configured.\n"
