@@ -413,8 +413,9 @@ async def initialize_services():
         await bot_app.job_queue.start()  # Start the job queue
         logger.info("Memory monitoring scheduled every 5 minutes (starting in 60 seconds)")
 
-        # Start memory watchdog thread (restarts process before Render kills us)
-        start_memory_watchdog()
+        # Disable memory watchdog to prevent restart loops
+        # start_memory_watchdog()
+        logger.info("Memory watchdog disabled to prevent restart loops")
 
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:

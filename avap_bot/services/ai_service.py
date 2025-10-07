@@ -13,11 +13,9 @@ from contextlib import contextmanager
 import requests
 
 # Import sentence transformer
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    logger.warning("sentence-transformers not available. AI features will be limited.")
-    SentenceTransformer = None
+# Disable AI features to prevent memory issues
+SentenceTransformer = None
+logger.info("AI features disabled to prevent memory issues")
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
@@ -84,92 +82,16 @@ def clear_model_cache():
 
 async def find_faq_match(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find best FAQ match using semantic similarity with subprocess memory isolation"""
-    try:
-        # Check user limits if user_id provided
-        if user_id and not await user_limits.can_handle_ai_request(user_id):
-            logger.warning(f"User {user_id} rate limited for AI requests")
-            return None
-
-        # Get all FAQs
-        faqs = get_faqs()
-        
-        if not faqs:
-            logger.warning("No FAQs available for matching")
-            return None
-
-        # Limit FAQs to prevent memory issues
-        max_faqs = 50  # Reduced from 100
-        if len(faqs) > max_faqs:
-            logger.info(f"Limiting FAQ search to {max_faqs} most recent FAQs")
-            faqs = faqs[:max_faqs]
-
-        # Use subprocess for heavy model operations to ensure memory cleanup
-        from avap_bot.utils.subprocess_runner import run_model_in_subprocess
-
-        log_memory_usage("start FAQ matching subprocess")
-
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            run_model_in_subprocess,
-            "find_faq_match",
-            question,
-            faqs,
-            threshold
-        )
-
-        log_memory_usage("end FAQ matching subprocess")
-
-        return result
-
-    except Exception as e:
-        logger.exception(f"FAQ matching failed: {e}")
-        return None
+    # AI features disabled to prevent memory issues
+    logger.info("AI features disabled - returning None for FAQ match")
+    return None
 
 
 async def find_similar_answered_question(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find similar previously answered questions using semantic similarity with subprocess memory isolation"""
-    try:
-        # Check user limits if user_id provided
-        if user_id and not await user_limits.can_handle_ai_request(user_id):
-            logger.warning(f"User {user_id} rate limited for AI requests")
-            return None
-
-        from avap_bot.services.supabase_service import get_answered_questions
-
-        # Get answered questions
-        answered_questions = get_answered_questions()
-        
-        if not answered_questions:
-            logger.warning("No answered questions available for matching")
-            return None
-
-        # Limit questions to prevent memory issues
-        max_questions = 30  # Reduced from 50
-        if len(answered_questions) > max_questions:
-            logger.info(f"Limiting similar question search to {max_questions} most recent questions")
-            answered_questions = answered_questions[:max_questions]
-
-        # Use subprocess for heavy model operations to ensure memory cleanup
-        from avap_bot.utils.subprocess_runner import run_model_in_subprocess
-
-        log_memory_usage("start similar question matching subprocess")
-
-        result = await asyncio.get_event_loop().run_in_executor(
-            None,
-            run_model_in_subprocess,
-            "find_similar_question",
-            question,
-            answered_questions,
-            threshold
-        )
-
-        log_memory_usage("end similar question matching subprocess")
-
-        return result
-
-    except Exception as e:
-        logger.exception(f"Similar question matching failed: {e}")
-        return None
+    # AI features disabled to prevent memory issues
+    logger.info("AI features disabled - returning None for similar question match")
+    return None
 
 
 async def generate_daily_tip() -> str:

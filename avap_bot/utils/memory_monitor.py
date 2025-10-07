@@ -444,8 +444,8 @@ def memory_watchdog_loop(check_interval: int = 30) -> None:
             return
 
         proc = psutil.Process()
-        # Set RSS limit to 300MB (very conservative to prevent restarts)
-        rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "300")) * 1024 * 1024
+        # Set RSS limit to 200MB (extremely conservative to prevent restarts)
+        rss_limit_bytes = int(os.environ.get("RSS_LIMIT_MB", "200")) * 1024 * 1024
         # Add warmup delay to prevent restarts during normal startup spikes
         warmup_seconds = int(os.environ.get("WATCHDOG_WARMUP", "30"))
 
