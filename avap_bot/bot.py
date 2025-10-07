@@ -21,7 +21,7 @@ from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 from avap_bot.services.ai_service import clear_model_cache
-from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup, start_memory_watchdog
+from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup, start_memory_watchdog, graceful_restart
 
 # Initialize logging
 setup_logging()
@@ -96,11 +96,22 @@ register_cancel_handlers(bot_app)
 # Register test handlers (development only)
 register_test_handlers(bot_app)
 
-# Create scheduler for daily tips
+# Create scheduler for daily tips with conservative configuration
 try:
-    scheduler = AsyncIOScheduler()
+    # Configure scheduler executors with very limited threads to prevent memory issues
+    from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
+    executors = {
+        'default': ThreadPoolExecutor(1),  # Single thread only
+        'processpool': ProcessPoolExecutor(1)  # Single process for heavy tasks
+    }
+    job_defaults = {
+        'coalesce': True,  # If multiple instances of same job triggered, only run once
+        'max_instances': 1,  # Only one instance of each job at a time
+        'misfire_grace_time': 30  # Grace period for missed jobs
+    }
+    scheduler = AsyncIOScheduler(executors=executors, job_defaults=job_defaults)
     scheduler.start()
-    logger.debug("Scheduler started for daily tips")
+    logger.debug("Scheduler started for daily tips with ultra-conservative settings")
     SCHEDULER_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"APScheduler not available: {e}")
@@ -224,17 +235,36 @@ def webhook_health_check():
     try:
         import httpx
         import asyncio
+        import time
 
         # Test webhook endpoint
         webhook_url = os.getenv("WEBHOOK_URL")
         if webhook_url:
             try:
                 # Make a simple request to the webhook URL to ensure it's responsive
-                response = httpx.get(f"{webhook_url}/health", timeout=5.0)
+                response = httpx.get(f"{webhook_url}/health", timeout=10.0)
+
                 if response.status_code == 200:
                     logger.debug("Webhook health check: OK")
+                elif response.status_code == 401:
+                    logger.warning("Webhook health check: HTTP 401 - Authentication failed (do not retry)")
+                    # Don't retry on 401 - it usually indicates credential issues
+                    return
+                elif response.status_code == 429:
+                    # Respect Retry-After header for rate limiting
+                    retry_after = response.headers.get("Retry-After")
+                    if retry_after:
+                        wait_time = min(int(retry_after), 300)  # Max 5 minutes
+                        logger.warning(f"Webhook health check: HTTP 429 - Rate limited, waiting {wait_time}s")
+                        time.sleep(wait_time)
+                    else:
+                        logger.warning("Webhook health check: HTTP 429 - Rate limited, waiting 60s")
+                        time.sleep(60)
                 else:
                     logger.warning(f"Webhook health check: HTTP {response.status_code}")
+
+            except httpx.TimeoutException as e:
+                logger.warning(f"Webhook health check timed out: {e}")
             except Exception as e:
                 logger.warning(f"Webhook health check failed: {e}")
 
@@ -379,9 +409,9 @@ async def initialize_services():
 
         # Enhanced memory monitoring to prevent Render restarts (reduced frequency)
         enable_detailed_memory_monitoring()
-        bot_app.job_queue.run_repeating(monitor_memory, interval=120, first=30)  # Every 2 minutes, starting in 30 seconds
+        bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)  # Every 5 minutes, starting in 60 seconds
         await bot_app.job_queue.start()  # Start the job queue
-        logger.info("Memory monitoring scheduled every 2 minutes (starting in 30 seconds)")
+        logger.info("Memory monitoring scheduled every 5 minutes (starting in 60 seconds)")
 
         # Start memory watchdog thread (restarts process before Render kills us)
         start_memory_watchdog()
@@ -392,98 +422,98 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-                # Schedule keep-alive health checks every 60 seconds (reduced frequency for memory efficiency)
+                # Schedule keep-alive health checks every 300 seconds (more conservative for memory)
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
                     'interval',
-                    seconds=60,
+                    seconds=300,  # Reduced frequency to 5 minutes
                     args=[bot_app.bot],
                     id='keep_alive',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=30
+                    misfire_grace_time=60
                 )
-                logger.debug("Keep-alive health checks scheduled every 60 seconds")
+                logger.debug("Keep-alive health checks scheduled every 300 seconds")
 
-                # Schedule simple ping every 60 seconds
+                # Schedule simple ping every 300 seconds (reduced frequency)
                 scheduler.add_job(
                     ping_self,
                     'interval',
-                    seconds=60,
+                    seconds=300,
                     id='ping_self',
                     replace_existing=True,
-                    max_instances=2,
+                    max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=15
+                    misfire_grace_time=30
                 )
-                logger.debug("Simple ping scheduled every 60 seconds")
+                logger.debug("Simple ping scheduled every 300 seconds")
 
-                # Schedule additional activity every 60 seconds to prevent Render timeout
+                # Schedule additional activity every 300 seconds (reduced frequency)
                 scheduler.add_job(
                     generate_activity,
                     'interval',
-                    seconds=60,
+                    seconds=300,
                     id='activity_generator',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=30
+                    misfire_grace_time=60
                 )
-                logger.debug("Activity generator scheduled every 60 seconds")
+                logger.debug("Activity generator scheduled every 300 seconds")
 
-                # Schedule webhook health check every 60 seconds
+                # Schedule webhook health check every 300 seconds (reduced frequency)
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=60,
+                    seconds=300,
                     id='webhook_health',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=15
+                    misfire_grace_time=30
                 )
-                logger.debug("Webhook health check scheduled every 60 seconds")
+                logger.debug("Webhook health check scheduled every 300 seconds")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
             logger.warning("Scheduler not available - some keep-alive features disabled")
 
-        # Schedule periodic memory cleanup every 5 minutes (if scheduler available)
+        # Schedule periodic memory cleanup every 10 minutes (if scheduler available)
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     _periodic_memory_cleanup,
                     'interval',
-                    minutes=5,
+                    minutes=10,
                     id='memory_cleanup',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
                     misfire_grace_time=60
                 )
-                logger.debug("Memory cleanup scheduled every 5 minutes")
+                logger.debug("Memory cleanup scheduled every 10 minutes")
             except Exception as e:
                 logger.warning(f"Failed to schedule memory cleanup: {e}")
         else:
             logger.warning("Scheduler not available - memory cleanup not scheduled")
-            
-        # Schedule FAST aggressive memory cleanup every 5 minutes for critical memory management
+
+        # Schedule FAST aggressive memory cleanup every 15 minutes for critical memory management
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     ultra_aggressive_cleanup,
                     'interval',
-                    minutes=5,
+                    minutes=15,
                     id='fast_aggressive_memory_cleanup',
                     replace_existing=True,
                     max_instances=1,  # Prevent overlapping instances
                     coalesce=True,
                     misfire_grace_time=60
                 )
-                logger.debug("FAST aggressive memory cleanup scheduled every 5 minutes")
+                logger.debug("FAST aggressive memory cleanup scheduled every 15 minutes")
             except Exception as e:
                 logger.warning(f"Failed to schedule FAST aggressive memory cleanup: {e}")
         else:

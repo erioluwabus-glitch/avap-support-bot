@@ -383,7 +383,10 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
 
+    logger.info(f"Inline grading callback received: {query.data} from user {update.effective_user.id}")
+
     if not _is_admin(update):
+        logger.warning(f"Non-admin user {update.effective_user.id} tried to grade assignment")
         await query.edit_message_text("❌ Only admins can grade assignments.")
         return
 
@@ -456,6 +459,7 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.pop('grading_submission_id', None)
         context.user_data.pop('grading_score', None)
         context.user_data.pop('grading_message_id', None)
+        context.user_data.pop('waiting_for_comment', None)
 
 
 async def handle_comment_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -606,13 +610,9 @@ def register_handlers(application):
     # Add conversation handler - available to admins for grading assignments
     application.add_handler(grade_conv)
 
-    # Add inline grading handlers
+    # Add inline grading handlers - handle all grading-related callbacks
     application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
     application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, handle_comment_submission))
 
     # Add command for students to view their grades
     application.add_handler(CommandHandler("grades", view_grades_handler))
-
-    # Add global callback handlers to fix per_message=False warnings
-    application.add_handler(CallbackQueryHandler(grade_score, pattern="^grade_|^grade_cancel$"))
-    application.add_handler(CallbackQueryHandler(grade_comment, pattern="^add_comment$|^no_comment$"))

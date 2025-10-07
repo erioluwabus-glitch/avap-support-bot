@@ -361,7 +361,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         
         # Forward to assignment group
         if ASSIGNMENT_GROUP_ID and ASSIGNMENT_GROUP_ID != 0:
-            logger.info(f"Forwarding assignment to group {ASSIGNMENT_GROUP_ID}")
+            logger.info(f"Forwarding assignment to group {ASSIGNMENT_GROUP_ID} (configured)")
             # First, forward the original student message
             try:
                 if file_id and (update.message.document or update.message.voice or update.message.video):
@@ -396,15 +396,21 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
             # Create inline keyboard for grading
             keyboard = create_grading_keyboard(submission_id)
+            logger.info(f"Created grading keyboard for submission {submission_id} with {len(keyboard.inline_keyboard)} rows")
 
             # Send assignment details with retry on rate limiting
-            send_message_with_retry(
-                context.bot,
-                ASSIGNMENT_GROUP_ID,
-                assignment_details,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard
-            )
+            try:
+                send_message_with_retry(
+                    context.bot,
+                    ASSIGNMENT_GROUP_ID,
+                    assignment_details,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
+                logger.info(f"Successfully sent assignment details to group {ASSIGNMENT_GROUP_ID}")
+            except Exception as e:
+                logger.error(f"Failed to send assignment details to group: {e}")
+                # Still continue since assignment was saved
 
             await update.message.reply_text(
                 f"✅ **Assignment Submitted Successfully!**\n\n"

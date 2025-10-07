@@ -86,52 +86,36 @@ def clear_model_cache():
 
 
 async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
-    """Find best FAQ match using semantic similarity with memory optimization"""
+    """Find best FAQ match using semantic similarity with subprocess memory isolation"""
     try:
         # Get all FAQs
         faqs = get_faqs()
         if not faqs:
             return None
 
-        # Use managed model context for automatic cleanup
-        with managed_model() as transformer:
-            log_memory_usage("start FAQ matching")
+        # Limit FAQ list size to prevent memory issues (top 20 FAQs for memory efficiency)
+        max_faqs = 20
+        if len(faqs) > max_faqs:
+            logger.info(f"Limiting FAQ search to {max_faqs} most recent FAQs")
+            faqs = faqs[:max_faqs]
 
-            # Limit FAQ list size to prevent memory issues (top 20 FAQs for memory efficiency)
-            max_faqs = 20
-            if len(faqs) > max_faqs:
-                logger.info(f"Limiting FAQ search to {max_faqs} most recent FAQs")
-                faqs = faqs[:max_faqs]
+        # Use subprocess for heavy model operations to ensure memory cleanup
+        from avap_bot.utils.subprocess_runner import run_model_in_subprocess
 
-            # Encode question and FAQ questions in smaller batches
-            question_embedding = transformer.encode([question])
-            faq_questions = [faq['question'] for faq in faqs]
+        log_memory_usage("start FAQ matching subprocess")
 
-            # Batch encode FAQs to reduce memory usage (smaller batches)
-            batch_size = 5
-            faq_embeddings = []
-            for i in range(0, len(faq_questions), batch_size):
-                batch = faq_questions[i:i + batch_size]
-                batch_embeddings = transformer.encode(batch)
-                faq_embeddings.extend(batch_embeddings)
-                # Force garbage collection after each batch
-                gc.collect()
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            run_model_in_subprocess,
+            "find_faq_match",
+            question,
+            faqs,
+            threshold
+        )
 
-            faq_embeddings = np.array(faq_embeddings)
+        log_memory_usage("end FAQ matching subprocess")
 
-            # Calculate similarities
-            similarities = np.dot(question_embedding, faq_embeddings.T)[0]
-
-            # Find best match
-            best_idx = np.argmax(similarities)
-            best_similarity = similarities[best_idx]
-
-            log_memory_usage("end FAQ matching")
-
-            if best_similarity >= threshold:
-                return faqs[best_idx]
-
-        return None
+        return result
 
     except Exception as e:
         logger.exception("Failed to find FAQ match: %s", e)
@@ -139,7 +123,7 @@ async def find_faq_match(question: str, threshold: float = 0.8) -> Optional[Dict
 
 
 async def find_similar_answered_question(question: str, threshold: float = 0.8) -> Optional[Dict[str, Any]]:
-    """Find similar previously answered questions using semantic similarity with memory optimization"""
+    """Find similar previously answered questions using semantic similarity with subprocess memory isolation"""
     try:
         from avap_bot.services.supabase_service import get_answered_questions
 
@@ -148,43 +132,29 @@ async def find_similar_answered_question(question: str, threshold: float = 0.8) 
         if not answered_questions:
             return None
 
-        # Use managed model context for automatic cleanup
-        with managed_model() as transformer:
-            log_memory_usage("start similar question matching")
+        # Limit answered questions to prevent memory issues (top 100)
+        max_questions = 100
+        if len(answered_questions) > max_questions:
+            logger.info(f"Limiting similar question search to {max_questions} most recent questions")
+            answered_questions = answered_questions[:max_questions]
 
-            # Limit answered questions to prevent memory issues (top 100)
-            max_questions = 100
-            if len(answered_questions) > max_questions:
-                logger.info(f"Limiting similar question search to {max_questions} most recent questions")
-                answered_questions = answered_questions[:max_questions]
+        # Use subprocess for heavy model operations to ensure memory cleanup
+        from avap_bot.utils.subprocess_runner import run_model_in_subprocess
 
-            # Encode question and answered questions in batches
-            question_embedding = transformer.encode([question])
-            answered_texts = [q['question_text'] for q in answered_questions]
+        log_memory_usage("start similar question matching subprocess")
 
-            # Batch encode answered questions to reduce memory usage
-            batch_size = 15
-            answered_embeddings = []
-            for i in range(0, len(answered_texts), batch_size):
-                batch = answered_texts[i:i + batch_size]
-                batch_embeddings = transformer.encode(batch)
-                answered_embeddings.extend(batch_embeddings)
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            run_model_in_subprocess,
+            "find_similar_question",
+            question,
+            answered_questions,
+            threshold
+        )
 
-            answered_embeddings = np.array(answered_embeddings)
+        log_memory_usage("end similar question matching subprocess")
 
-            # Calculate similarities
-            similarities = np.dot(question_embedding, answered_embeddings.T)[0]
-
-            # Find best match
-            best_idx = np.argmax(similarities)
-            best_similarity = similarities[best_idx]
-
-            log_memory_usage("end similar question matching")
-
-            if best_similarity >= threshold:
-                return answered_questions[best_idx]
-
-        return None
+        return result
 
     except Exception as e:
         logger.exception("Failed to find similar answered question: %s", e)
@@ -192,49 +162,32 @@ async def find_similar_answered_question(question: str, threshold: float = 0.8) 
 
 
 async def generate_daily_tip() -> str:
-    """Generate a daily tip using AI"""
+    """Generate a daily tip using AI with subprocess memory isolation"""
     try:
         # Check if there's already a manual tip for today
         today = datetime.now(timezone.utc).weekday()  # 0=Monday, 6=Sunday
         manual_tip = get_tip_for_day(today)
-        
+
         if manual_tip and manual_tip.get('is_manual'):
             return manual_tip['tip_text']
-        
-        # Generate AI tip using Hugging Face API
-        hf_token = os.getenv("HUGGINGFACE_TOKEN")
-        if not hf_token:
-            # Fallback to default tips
-            return _get_default_tip(today)
-        
-        # Use Hugging Face API for text generation
-        api_url = "https://api-inference.huggingface.co/models/gpt2"
-        headers = {"Authorization": f"Bearer {hf_token}"}
-        
-        prompt = "Here's an inspirational quote for students:"
-        data = {
-            "inputs": prompt,
-            "parameters": {
-                "max_length": 100,
-                "temperature": 0.8,
-                "do_sample": True
-            }
-        }
-        
-        response = requests.post(api_url, headers=headers, json=data, timeout=10)
-        
-        if response.status_code == 200:
-            result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                generated_text = result[0].get('generated_text', '')
-                # Clean up the generated text
-                tip = generated_text.replace(prompt, '').strip()
-                if tip:
-                    return tip
-        
-        # Fallback to default tips
-        return _get_default_tip(today)
-        
+
+        # Use subprocess for AI tip generation to ensure memory cleanup
+        from avap_bot.utils.subprocess_runner import run_model_in_subprocess
+
+        log_memory_usage("start AI tip generation subprocess")
+
+        openai_key = os.getenv("OPENAI_API_KEY")
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            run_model_in_subprocess,
+            "generate_ai_tip",
+            openai_key=openai_key
+        )
+
+        log_memory_usage("end AI tip generation subprocess")
+
+        return result if result else _get_default_tip(today)
+
     except Exception as e:
         logger.exception("Failed to generate daily tip: %s", e)
         return _get_default_tip(datetime.now(timezone.utc).weekday())
