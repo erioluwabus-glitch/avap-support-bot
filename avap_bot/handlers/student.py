@@ -904,12 +904,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 if question_text == "Voice question":
                     try:
                         # Forward the voice message to preserve the original
-                        await update.message.forward(ASSIGNMENT_GROUP_ID)
+                        await update.message.forward(QUESTIONS_GROUP_ID)
                         # Send the answer button as a separate message
                         # Send voice question with retry on rate limiting
                         await send_message_with_retry(
                             context.bot,
-                            ASSIGNMENT_GROUP_ID,
+                            QUESTIONS_GROUP_ID,
                             f"❓ **New Voice Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -919,7 +919,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                     except Exception as e:
                         # Fallback to sending as voice if forwarding fails
-                        await context.bot.send_voice(ASSIGNMENT_GROUP_ID, file_id,
+                        await context.bot.send_voice(QUESTIONS_GROUP_ID, file_id,
                             caption=f"❓ **New Voice Question**\n\n"
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
@@ -929,12 +929,12 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 elif question_text == "Video question":
                     try:
                         # Forward the video message to preserve the original
-                        await update.message.forward(ASSIGNMENT_GROUP_ID)
+                        await update.message.forward(QUESTIONS_GROUP_ID)
                         # Send the answer button as a separate message
                         # Send video question with retry on rate limiting
                         await send_message_with_retry(
                             context.bot,
-                            ASSIGNMENT_GROUP_ID,
+                            QUESTIONS_GROUP_ID,
                             f"❓ **New Video Question**\n\n"
                             f"Student: @{username}\n"
                             f"Telegram ID: {user_id}\n"
@@ -944,7 +944,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                     except Exception as e:
                         # Fallback to sending as video if forwarding fails
-                        await context.bot.send_video(ASSIGNMENT_GROUP_ID, file_id,
+                        await context.bot.send_video(QUESTIONS_GROUP_ID, file_id,
                             caption=f"❓ **New Video Question**\n\n"
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
@@ -953,7 +953,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                         )
                 else:
                     # Send as document for other file types with inline keyboard
-                    await context.bot.send_document(ASSIGNMENT_GROUP_ID, file_id,
+                    await context.bot.send_document(QUESTIONS_GROUP_ID, file_id,
                         caption=f"❓ **New Question**\n\n"
                                f"Student: @{username}\n"
                                f"Telegram ID: {user_id}\n"
@@ -966,7 +966,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 # Send question with retry on rate limiting
                 await send_message_with_retry(
                     context.bot,
-                    ASSIGNMENT_GROUP_ID,
+                    QUESTIONS_GROUP_ID,
                     f"❓ **New Question**\n\n"
                     f"Student: @{username}\n"
                     f"Telegram ID: {user_id}\n"
@@ -982,7 +982,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     parse_mode=ParseMode.MARKDOWN
                 )
         else:
-            # ASSIGNMENT_GROUP_ID not configured - question saved but not forwarded
+            # QUESTIONS_GROUP_ID not configured - question saved but not forwarded
             await update.message.reply_text(
                 f"⚠️ **Question Saved!**\n\n"
                 f"Your question has been recorded in our system.\n"
