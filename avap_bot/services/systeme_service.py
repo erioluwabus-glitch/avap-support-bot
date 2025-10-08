@@ -23,15 +23,24 @@ def validate_systeme_configuration() -> bool:
     elif len(SYSTEME_API_KEY) < 10:
         issues.append("SYSTEME_API_KEY appears to be invalid (too short)")
 
+    # Validate tag IDs more thoroughly
     if not SYSTEME_VERIFIED_TAG_ID:
         issues.append("SYSTEME_VERIFIED_TAG_ID environment variable not set")
     elif not SYSTEME_VERIFIED_TAG_ID.strip():
         issues.append("SYSTEME_VERIFIED_TAG_ID is empty")
+    elif not SYSTEME_VERIFIED_TAG_ID.isdigit():
+        issues.append(f"SYSTEME_VERIFIED_TAG_ID should be numeric, got: {SYSTEME_VERIFIED_TAG_ID}")
+    elif len(SYSTEME_VERIFIED_TAG_ID) < 3:
+        issues.append(f"SYSTEME_VERIFIED_TAG_ID too short: {SYSTEME_VERIFIED_TAG_ID}")
 
     if not SYSTEME_ACHIEVER_TAG_ID:
         issues.append("SYSTEME_ACHIEVER_TAG_ID environment variable not set")
     elif not SYSTEME_ACHIEVER_TAG_ID.strip():
         issues.append("SYSTEME_ACHIEVER_TAG_ID is empty")
+    elif not SYSTEME_ACHIEVER_TAG_ID.isdigit():
+        issues.append(f"SYSTEME_ACHIEVER_TAG_ID should be numeric, got: {SYSTEME_ACHIEVER_TAG_ID}")
+    elif len(SYSTEME_ACHIEVER_TAG_ID) < 3:
+        issues.append(f"SYSTEME_ACHIEVER_TAG_ID too short: {SYSTEME_ACHIEVER_TAG_ID}")
 
     if issues:
         logger.error("❌ Systeme.io configuration issues detected:")
@@ -39,7 +48,8 @@ def validate_systeme_configuration() -> bool:
             logger.error(f"  - {issue}")
         logger.error("Please fix these configuration issues to ensure proper tagging functionality")
         logger.error("Get your API key from: https://systeme.io/account/api")
-        logger.error("Tag IDs should be the numeric IDs of your tags in Systeme.io")
+        logger.error("Tag IDs should be the numeric IDs of your tags in Systeme.io (e.g., 1234567)")
+        logger.error("You can find tag IDs in your Systeme.io dashboard under Contacts > Tags")
         return False
 
     logger.info("✅ Systeme.io configuration appears valid")
@@ -66,12 +76,6 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             logger.warning("Get your API key from: https://systeme.io/account/api")
             return None
 
-        # Systeme.io API keys can have various formats - check if it's a reasonable length and contains valid characters
-        if not SYSTEME_API_KEY or len(SYSTEME_API_KEY) < 10:
-            logger.error("SYSTEME_API_KEY appears to be invalid - too short")
-            logger.warning("Please verify your Systeme.io API key from: https://systeme.io/account/api")
-            logger.warning("Make sure you're using a valid API Key (Secret or Publishable)")
-            return None
 
         headers = {
             "X-API-Key": SYSTEME_API_KEY,
@@ -206,18 +210,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 logger.info("✅ Created/Updated Systeme.io contact: %s (ID: %s)", contact_data.get("email"), contact_id)
 
                 # Apply verified tag if applicable and verified
-                logger.info(f"Checking tag conditions - contact_id: {contact_id}, SYSTEME_VERIFIED_TAG_ID: {'SET' if SYSTEME_VERIFIED_TAG_ID else 'NOT SET'}, SYSTEME_ACHIEVER_TAG_ID: {'SET' if SYSTEME_ACHIEVER_TAG_ID else 'NOT SET'}, status: {contact_data.get('status')}")
-
-                # Validate tag IDs before applying
-                if SYSTEME_VERIFIED_TAG_ID:
-                    logger.info(f"SYSTEME_VERIFIED_TAG_ID appears valid: {SYSTEME_VERIFIED_TAG_ID[:20]}...")
-                else:
-                    logger.warning("SYSTEME_VERIFIED_TAG_ID is not set - skipping verified tag application")
-
-                if SYSTEME_ACHIEVER_TAG_ID:
-                    logger.info(f"SYSTEME_ACHIEVER_TAG_ID appears valid: {SYSTEME_ACHIEVER_TAG_ID[:20]}...")
-                else:
-                    logger.warning("SYSTEME_ACHIEVER_TAG_ID is not set - skipping achiever tag application")
+                logger.info(f"Checking tag conditions - contact_id: {contact_id}, status: {contact_data.get('status')}")
 
                 if contact_id and SYSTEME_VERIFIED_TAG_ID and contact_data.get("status") == "verified":
                     logger.info(f"Applying verified tag to contact {contact_id}")
@@ -226,19 +219,14 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                         logger.info("✅ Successfully applied verified tag to contact %s", contact_id)
                     else:
                         logger.error("❌ Failed to apply verified tag to contact %s - contact created but not tagged", contact_id)
-                        logger.error("This may indicate API permission issues or incorrect tag ID")
-                        logger.error("Please verify SYSTEME_VERIFIED_TAG_ID is correct in your environment variables")
-                        # Don't fail the entire process for tagging issues, but log the problem
-                elif contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+
+                if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
                     logger.info(f"Applying achiever tag to contact {contact_id}")
                     tag_success = await _apply_achiever_tag(contact_id, client, headers)
                     if tag_success:
                         logger.info("✅ Successfully applied achiever tag to contact %s", contact_id)
                     else:
                         logger.error("❌ Failed to apply achiever tag to contact %s - contact created but not tagged", contact_id)
-                        logger.error("This may indicate API permission issues or incorrect tag ID")
-                        logger.error("Please verify SYSTEME_ACHIEVER_TAG_ID is correct in your environment variables")
-                        # Don't fail the entire process for tagging issues, but log the problem
 
                 return contact_id
             elif response.status_code == 409:
@@ -270,75 +258,69 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
         return None
 
 
-async def _apply_verified_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
-    """Apply verified tag to contact using correct Systeme.io API"""
+async def _apply_tag_to_contact(contact_id: str, tag_id: str, tag_type: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
+    """Apply tag to contact using correct Systeme.io API (unified function for verified and achiever tags)"""
     try:
-        logger.info(f"Applying verified tag '{SYSTEME_VERIFIED_TAG_ID}' to contact {contact_id}")
+        logger.info(f"Applying {tag_type} tag '{tag_id}' to contact {contact_id}")
 
         # Systeme.io API v4 format for applying tags
-        # Based on current Systeme.io API documentation
         tag_endpoints = [
-            # Primary endpoint for Systeme.io API v4
-            f"https://api.systeme.io/api/contacts/{contact_id}/tags",
-            # Alternative endpoint formats
+            f"https://api.systeme.io/api/contacts/{contact_id}/tags",  # Primary API v4 endpoint
             f"{SYSTEME_BASE_URL}/api/contacts/{contact_id}/tags",
             f"https://api.systeme.io/contacts/{contact_id}/tags",
-            # Legacy endpoints (for backwards compatibility)
             f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags"
         ]
 
-        tag_payload = {
-            "tagIds": [SYSTEME_VERIFIED_TAG_ID]
-        }
+        # Try different payload formats for Systeme.io API
+        tag_payloads = [
+            {"tagId": tag_id},  # Systeme.io format
+            {"tagIds": [tag_id]},  # Alternative format
+            {"tag_id": tag_id},  # Legacy format
+            tag_id  # Simple format
+        ]
 
         for endpoint in tag_endpoints:
-            try:
-                logger.debug("Trying verified tag endpoint: %s", endpoint)
-                response = await client.post(
-                    endpoint,
-                    headers=headers,
-                    json=tag_payload,
-                    timeout=15.0  # Increased timeout for tagging operations
-                )
-
-                logger.info("Tag endpoint %s returned: %s", endpoint, response.status_code)
-
-                if response.status_code == 200:
-                    logger.info("✅ Applied verified tag to contact %s using endpoint: %s", contact_id, endpoint)
-                    return True
-                elif response.status_code == 201:
-                    logger.info("✅ Created and applied verified tag to contact %s using endpoint: %s", contact_id, endpoint)
-                    return True
-                elif response.status_code == 404:
-                    logger.debug("Tag endpoint %s returned 404 (not found), trying next endpoint", endpoint)
-                    continue
-                elif response.status_code == 422:
-                    logger.warning("Tag endpoint %s returned 422 (validation error): %s", endpoint, response.text[:300])
-                    # Try alternative payload format
-                    alt_payload = [SYSTEME_VERIFIED_TAG_ID]
+            for payload in tag_payloads:
+                try:
+                    logger.debug("Trying %s tag endpoint: %s with payload: %s", tag_type, endpoint, payload)
                     response = await client.post(
                         endpoint,
                         headers=headers,
-                        json=alt_payload,
-                        timeout=10.0
+                        json=payload,
+                        timeout=15.0
                     )
-                    if response.status_code in [200, 201]:
-                        logger.info("✅ Applied verified tag using alternative payload format")
-                        return True
-                else:
-                    logger.warning("Tag endpoint %s returned %s: %s", endpoint, response.status_code, response.text[:300])
 
-            except Exception as e:
-                logger.debug("Tag endpoint %s failed: %s", endpoint, e)
-                continue
+                    logger.info("%s tag endpoint %s returned: %s", tag_type, endpoint, response.status_code)
+
+                    if response.status_code in [200, 201]:
+                        logger.info("✅ Applied %s tag to contact %s using endpoint: %s with payload: %s", tag_type, contact_id, endpoint, payload)
+                        return True
+                    elif response.status_code == 404:
+                        logger.debug("%s tag endpoint %s returned 404, trying next payload", tag_type, endpoint)
+                        continue
+                    elif response.status_code == 422:
+                        logger.warning("%s tag endpoint %s returned 422: %s", tag_type, endpoint, response.text[:300])
+                        # This payload didn't work, try next one
+                        continue
+                    else:
+                        logger.warning("%s tag endpoint %s returned %s: %s", tag_type, endpoint, response.status_code, response.text[:300])
+
+                except Exception as e:
+                    logger.debug("%s tag endpoint %s with payload %s failed: %s", tag_type, endpoint, payload, e)
+                    continue
 
         # If all direct tagging endpoints failed, try alternative methods
-        logger.warning("All direct tag endpoints failed, trying alternative tagging methods")
-        return await _apply_tag_alternative(contact_id, SYSTEME_VERIFIED_TAG_ID, client, headers)
+        logger.warning("All %s tag endpoints failed, trying alternative tagging methods", tag_type)
+        return await _apply_tag_alternative(contact_id, tag_id, client, headers)
 
     except Exception as e:
-        logger.exception("Failed to apply verified tag to contact %s: %s", contact_id, e)
+        logger.exception("Failed to apply %s tag to contact %s: %s", tag_type, contact_id, e)
         return False
+
+
+async def _apply_verified_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
+    """Apply verified tag to contact"""
+    return await _apply_tag_to_contact(contact_id, SYSTEME_VERIFIED_TAG_ID, "verified", client, headers)
 
 
 async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
@@ -347,9 +329,12 @@ async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.Asy
         logger.info("Trying alternative tag application methods for contact %s with tag %s", contact_id, tag_id)
 
         # Method 1: Try to update the contact with tags using correct Systeme.io API format
-        update_payload = {
-            "tagIds": [tag_id]  # Use tagIds instead of tags for Systeme.io API v4
-        }
+        update_payloads = [
+            {"tagId": tag_id},  # Systeme.io format
+            {"tagIds": [tag_id]},  # Alternative format
+            {"tag_id": tag_id},  # Legacy format
+            {"tags": [tag_id]}  # Another format
+        ]
 
         update_endpoints = [
             f"https://api.systeme.io/api/contacts/{contact_id}",  # Primary API v4 endpoint
@@ -358,98 +343,28 @@ async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.Asy
         ]
 
         for endpoint in update_endpoints:
-            try:
-                logger.debug("Trying alternative update endpoint: %s", endpoint)
-                response = await client.put(
-                    endpoint,
-                    headers=headers,
-                    json=update_payload,
-                    timeout=15.0
-                )
-
-                logger.info("Update endpoint %s returned: %s", endpoint, response.status_code)
-
-                if response.status_code in [200, 201, 204]:
-                    logger.info("✅ Applied tag via contact update at %s for contact %s", endpoint, contact_id)
-                    return True
-                elif response.status_code == 404:
-                    logger.debug("Update endpoint %s returned 404, trying next", endpoint)
-                    continue
-                elif response.status_code == 422:
-                    # Try alternative payload format
-                    alt_payload = {"tags": [tag_id]}
+            for payload in update_payloads:
+                try:
+                    logger.debug("Trying alternative update endpoint: %s with payload: %s", endpoint, payload)
                     response = await client.put(
-                        endpoint,
-                        headers=headers,
-                        json=alt_payload,
-                        timeout=10.0
-                    )
-                    if response.status_code in [200, 201, 204]:
-                        logger.info("✅ Applied tag using alternative payload format")
-                        return True
-                else:
-                    logger.debug("Update endpoint %s returned %s", endpoint, response.status_code)
-
-            except Exception as e:
-                logger.debug("Update endpoint %s failed: %s", endpoint, e)
-                continue
-
-        # Method 2: Try PATCH method with correct payload format
-        patch_endpoints = [
-            f"https://api.systeme.io/api/contacts/{contact_id}",
-            f"{SYSTEME_BASE_URL}/api/contacts/{contact_id}"
-        ]
-
-        for endpoint in patch_endpoints:
-            try:
-                logger.debug("Trying PATCH endpoint: %s", endpoint)
-                response = await client.patch(
-                    endpoint,
-                    headers=headers,
-                    json={"tagIds": [tag_id]},
-                    timeout=15.0
-                )
-
-                logger.info("PATCH endpoint %s returned: %s", endpoint, response.status_code)
-
-                if response.status_code in [200, 201, 204]:
-                    logger.info("✅ Applied tag via PATCH at %s for contact %s", endpoint, contact_id)
-                    return True
-                elif response.status_code == 404:
-                    logger.debug("PATCH endpoint %s returned 404, trying next", endpoint)
-                    continue
-
-            except Exception as e:
-                logger.debug("PATCH endpoint %s failed: %s", endpoint, e)
-                continue
-
-        # Method 3: Try to add tag using the contacts/{id}/tags endpoint with correct format
-        tag_endpoints_alt = [
-            f"https://api.systeme.io/api/contacts/{contact_id}/tags",
-            f"{SYSTEME_BASE_URL}/api/contacts/{contact_id}/tags"
-        ]
-
-        for endpoint in tag_endpoints_alt:
-            try:
-                logger.debug("Trying alternative tag endpoint: %s", endpoint)
-                # Try both payload formats
-                for payload in [{"tagIds": [tag_id]}, [tag_id]]:
-                    response = await client.post(
                         endpoint,
                         headers=headers,
                         json=payload,
                         timeout=15.0
                     )
 
-                    if response.status_code in [200, 201]:
-                        logger.info("✅ Applied tag via alternative endpoint %s for contact %s", endpoint, contact_id)
+                    if response.status_code in [200, 201, 204]:
+                        logger.info("✅ Applied tag via contact update at %s for contact %s with payload: %s", endpoint, contact_id, payload)
                         return True
+                    elif response.status_code == 404:
+                        logger.debug("Update endpoint %s returned 404, trying next payload", endpoint)
+                        continue
 
-            except Exception as e:
-                logger.debug("Alternative tag endpoint %s failed: %s", endpoint, e)
-                continue
+                except Exception as e:
+                    logger.debug("Update endpoint %s with payload %s failed: %s", endpoint, payload, e)
+                    continue
 
-        # Method 4: Try webhook as last resort (if configured)
+        # Method 2: Try webhook as last resort (if configured)
         webhook_url = os.getenv("SYSTEME_WEBHOOK_URL")
         if webhook_url:
             logger.info("Trying webhook for tag application as last resort")
@@ -457,8 +372,7 @@ async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.Asy
                 "contact_id": contact_id,
                 "tag_id": tag_id,
                 "action": "apply_tag",
-                "source": "avap_bot_fallback",
-                "email": "webhook_fallback@avapbot.local"  # Placeholder email for webhook
+                "source": "avap_bot_fallback"
             }
 
             try:
@@ -471,15 +385,12 @@ async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.Asy
                 if response.status_code == 200:
                     logger.info("✅ Applied tag via webhook for contact %s", contact_id)
                     return True
-                else:
-                    logger.warning("Webhook returned status %s: %s", response.status_code, response.text[:200])
 
             except Exception as e:
                 logger.debug("Webhook tag application failed: %s", e)
 
-        logger.warning("All alternative tag application methods failed for contact %s with tag %s", contact_id, tag_id)
-        logger.warning("This may indicate API permission issues or incorrect tag ID")
-        logger.warning("Please verify SYSTEME_VERIFIED_TAG_ID is correct and API key has tagging permissions")
+        logger.warning("All alternative tag application methods failed for contact %s", contact_id)
+        logger.warning("This indicates API permission issues or incorrect tag ID")
         return False
 
     except Exception as e:
@@ -488,66 +399,8 @@ async def _apply_tag_alternative(contact_id: str, tag_id: str, client: httpx.Asy
 
 
 async def _apply_achiever_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
-    """Apply achiever tag to contact using correct Systeme.io API"""
-    try:
-        logger.info(f"Applying achiever tag '{SYSTEME_ACHIEVER_TAG_ID}' to contact {contact_id}")
-
-        # Use the same corrected logic as verified tag
-        tag_endpoints = [
-            f"https://api.systeme.io/api/contacts/{contact_id}/tags",  # Primary API v4 endpoint
-            f"{SYSTEME_BASE_URL}/api/contacts/{contact_id}/tags",
-            f"https://api.systeme.io/contacts/{contact_id}/tags",
-            f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags"
-        ]
-
-        tag_payload = {
-            "tagIds": [SYSTEME_ACHIEVER_TAG_ID]
-        }
-
-        for endpoint in tag_endpoints:
-            try:
-                logger.debug("Trying achiever tag endpoint: %s", endpoint)
-                response = await client.post(
-                    endpoint,
-                    headers=headers,
-                    json=tag_payload,
-                    timeout=15.0
-                )
-
-                logger.info("Achiever tag endpoint %s returned: %s", endpoint, response.status_code)
-
-                if response.status_code in [200, 201]:
-                    logger.info("✅ Applied achiever tag to contact %s using endpoint: %s", contact_id, endpoint)
-                    return True
-                elif response.status_code == 404:
-                    logger.debug("Achiever tag endpoint %s returned 404, trying next endpoint", endpoint)
-                    continue
-                elif response.status_code == 422:
-                    # Try alternative payload format
-                    alt_payload = [SYSTEME_ACHIEVER_TAG_ID]
-                    response = await client.post(
-                        endpoint,
-                        headers=headers,
-                        json=alt_payload,
-                        timeout=10.0
-                    )
-                    if response.status_code in [200, 201]:
-                        logger.info("✅ Applied achiever tag using alternative payload format")
-                        return True
-                else:
-                    logger.warning("Achiever tag endpoint %s returned %s: %s", endpoint, response.status_code, response.text[:300])
-
-            except Exception as e:
-                logger.debug("Achiever tag endpoint %s failed: %s", endpoint, e)
-                continue
-
-        # If all direct tagging endpoints failed, try alternative methods
-        logger.warning("All achiever tag endpoints failed, trying alternative tagging methods")
-        return await _apply_tag_alternative(contact_id, SYSTEME_ACHIEVER_TAG_ID, client, headers)
-
-    except Exception as e:
-        logger.exception("Failed to apply achiever tag to contact %s: %s", contact_id, e)
-        return False
+    """Apply achiever tag to contact"""
+    return await _apply_tag_to_contact(contact_id, SYSTEME_ACHIEVER_TAG_ID, "achiever", client, headers)
 
 
 async def _find_existing_contact_and_update_tags(contact_data: Dict[str, Any], client: httpx.AsyncClient, headers: Dict[str, str]) -> Optional[str]:
@@ -580,15 +433,14 @@ async def _find_existing_contact_and_update_tags(contact_data: Dict[str, Any], c
                         logger.info("✅ Successfully applied verified tag to existing contact %s", contact_id)
                     else:
                         logger.error("❌ Failed to apply verified tag to existing contact %s", contact_id)
-                        logger.error("This may indicate API permission issues or incorrect tag ID")
-                elif SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+
+                if SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
                     logger.info(f"Applying achiever tag to existing contact {contact_id}")
                     tag_success = await _apply_achiever_tag(contact_id, client, headers)
                     if tag_success:
                         logger.info("✅ Successfully applied achiever tag to existing contact %s", contact_id)
                     else:
                         logger.error("❌ Failed to apply achiever tag to existing contact %s", contact_id)
-                        logger.error("This may indicate API permission issues or incorrect tag ID")
 
                 return contact_id
             else:
@@ -670,67 +522,13 @@ async def tag_achiever(contact_id: str) -> bool:
             logger.warning("SYSTEME_API_KEY or SYSTEME_ACHIEVER_TAG_ID not set, skipping achiever tagging")
             return False
 
-        logger.info(f"Adding achiever tag '{SYSTEME_ACHIEVER_TAG_ID}' to contact {contact_id}")
-
         headers = {
             "X-API-Key": SYSTEME_API_KEY,
             "Content-Type": "application/json"
         }
 
         async with httpx.AsyncClient() as client:
-            # Use corrected API endpoints and payload format
-            tag_endpoints = [
-                f"https://api.systeme.io/api/contacts/{contact_id}/tags",  # Primary API v4 endpoint
-                f"{SYSTEME_BASE_URL}/api/contacts/{contact_id}/tags",
-                f"https://api.systeme.io/contacts/{contact_id}/tags",
-                f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags"
-            ]
-
-            # Use correct payload format for Systeme.io API v4
-            tag_payload = {
-                "tagIds": [SYSTEME_ACHIEVER_TAG_ID]
-            }
-
-            for endpoint in tag_endpoints:
-                try:
-                    logger.debug("Trying achiever tag endpoint: %s", endpoint)
-                    response = await client.post(
-                        endpoint,
-                        headers=headers,
-                        json=tag_payload,
-                        timeout=15.0
-                    )
-
-                    logger.info("Achiever tag endpoint %s returned: %s", endpoint, response.status_code)
-
-                    if response.status_code in [200, 201]:
-                        logger.info("✅ Added achiever tag to contact %s using endpoint: %s", contact_id, endpoint)
-                        return True
-                    elif response.status_code == 404:
-                        logger.debug("Achiever tag endpoint %s returned 404, trying next endpoint", endpoint)
-                        continue
-                    elif response.status_code == 422:
-                        # Try alternative payload format
-                        alt_payload = [SYSTEME_ACHIEVER_TAG_ID]
-                        response = await client.post(
-                            endpoint,
-                            headers=headers,
-                            json=alt_payload,
-                            timeout=10.0
-                        )
-                        if response.status_code in [200, 201]:
-                            logger.info("✅ Added achiever tag using alternative payload format")
-                            return True
-                    else:
-                        logger.warning("Achiever tag endpoint %s returned %s: %s", endpoint, response.status_code, response.text[:300])
-
-                except Exception as e:
-                    logger.debug("Achiever tag endpoint %s failed: %s", endpoint, e)
-                    continue
-
-            # If all endpoints failed, try alternative approach
-            logger.warning("All achiever tag endpoints failed, trying alternative method")
-            return await _apply_tag_alternative(contact_id, SYSTEME_ACHIEVER_TAG_ID, client, headers)
+            return await _apply_tag_to_contact(contact_id, SYSTEME_ACHIEVER_TAG_ID, "achiever", client, headers)
 
     except Exception as e:
         logger.exception("Failed to tag achiever for contact %s: %s", contact_id, e)
@@ -807,37 +605,6 @@ async def untag_or_remove_contact(email: str, action: str = "untag") -> bool:
         return False
 
 
-def create_contact_and_tag_sync(payload: Dict[str, Any]) -> Optional[str]:
-    """Synchronous wrapper for create_contact_and_tag"""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(create_contact_and_tag(payload))
-    except Exception as e:
-        logger.exception("Sync wrapper failed: %s", e)
-        return None
-
-
-def remove_contact_by_email_sync(email: str) -> bool:
-    """Synchronous wrapper for remove_contact_by_email"""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(remove_contact_by_email(email))
-    except Exception as e:
-        logger.exception("Sync wrapper failed: %s", e)
-        return False
-
-
-def untag_or_remove_contact_sync(email: str, action: str = "untag") -> bool:
-    """Synchronous wrapper for untag_or_remove_contact"""
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(untag_or_remove_contact(email, action))
-    except Exception as e:
-        logger.exception("Sync wrapper failed: %s", e)
-        return False
 
 
 async def _try_webhook_integration(contact_data: Dict[str, Any]) -> Optional[str]:
