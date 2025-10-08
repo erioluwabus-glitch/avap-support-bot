@@ -14,7 +14,7 @@ import requests
 
 # Import sentence transformer
 # Disable AI features to prevent memory issues
-    SentenceTransformer = None
+SentenceTransformer = None
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
@@ -86,14 +86,14 @@ async def find_faq_match(question: str, threshold: float = 0.8, user_id: int = N
     """Find best FAQ match using semantic similarity with subprocess memory isolation"""
     # AI features disabled to prevent memory issues
     logger.info("AI features disabled - returning None for FAQ match")
-        return None
+    return None
 
 
 async def find_similar_answered_question(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find similar previously answered questions using semantic similarity with subprocess memory isolation"""
     # AI features disabled to prevent memory issues
     logger.info("AI features disabled - returning None for similar question match")
-        return None
+    return None
 
 
 async def generate_daily_tip() -> str:
