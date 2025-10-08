@@ -87,6 +87,11 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
 
     # Check if we're sending TO a group chat by checking known group IDs
     if target_chat_id:
+        # For admin operations, allow keyboards even in group chats
+        if allow_admin_operations:
+            logger.info(f"Admin operation detected - allowing inline keyboards even when sending to group chat (ID: {target_chat_id})")
+            return False
+            
         # Check against known group IDs from environment variables
         try:
             import os

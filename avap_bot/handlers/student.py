@@ -410,7 +410,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             logger.info(f"Created grading keyboard for submission {submission_id} with {len(keyboard.inline_keyboard)} rows")
 
             # Check if inline keyboards should be disabled for group chats
-            if should_disable_inline_keyboards(update, ASSIGNMENT_GROUP_ID):
+            if should_disable_inline_keyboards(update, ASSIGNMENT_GROUP_ID, allow_admin_operations=True):
                 logger.info("Disabling inline keyboard for assignment group chat")
                 keyboard = None
 
@@ -958,7 +958,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             logger.info(f"Forwarding question to questions group {QUESTIONS_GROUP_ID}")
 
             # Check if inline keyboards should be disabled (when message comes from group or going to group)
-            if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID):
+            if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID, allow_admin_operations=True):
                 logger.info("Disabling inline keyboard for group chat")
                 keyboard = None
             else:
@@ -1260,7 +1260,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             )
 
             # Check if inline keyboards should be disabled (when message comes from group or going to group)
-            if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID):
+            if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID, allow_admin_operations=True):
                 logger.info("Disabling inline keyboard for group chat")
                 keyboard = None
             else:
