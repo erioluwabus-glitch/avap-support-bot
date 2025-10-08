@@ -531,11 +531,14 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             # Wants comment - ask for comment
             # Ensure we have the required context data
-            if not context.user_data.get('grading_submission_id'):
-                context.user_data['grading_submission_id'] = submission_id
+            context.user_data['grading_submission_id'] = submission_id
             if not context.user_data.get('grading_score'):
                 # Try to get score from previous context, default to 0 if not found
                 context.user_data['grading_score'] = context.user_data.get('grading_score', 0)
+
+            # Log context setup for debugging
+            logger.info(f"Setting up grading context for comment: submission_id={submission_id}, score={context.user_data.get('grading_score')}")
+            logger.info(f"Context keys after setup: {list(context.user_data.keys())}")
 
             await query.edit_message_text(
                 f"💬 **Add Comments**\n\n"
@@ -544,6 +547,9 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
                 parse_mode=ParseMode.MARKDOWN
             )
             context.user_data['waiting_for_comment'] = True
+            
+            # Log final context state
+            logger.info(f"Final grading context: {context.user_data.get('grading_submission_id')}, {context.user_data.get('grading_score')}, {context.user_data.get('waiting_for_comment')}")
 
     elif callback_data.startswith("grade_cancel:"):
         # Cancel grading
@@ -572,13 +578,45 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
 
     if not submission_id or not score:
         logger.warning(f"❌ Incomplete grading context for user {update.effective_user.id}: submission_id={submission_id}, score={score}")
-        await update.message.reply_text("❌ Error: Grading session expired. Please try again.")
-        # Clear any stale context data
-        context.user_data.pop('grading_submission_id', None)
-        context.user_data.pop('grading_score', None)
-        context.user_data.pop('grading_message_id', None)
-        context.user_data.pop('waiting_for_comment', None)
-        return
+        
+        # Try to recover context from recent grading activity
+        # Look for any recent grading context in the user's data
+        if not submission_id and not score:
+            logger.info("Attempting to recover grading context...")
+            # Check if there are any recent grading-related keys
+            grading_keys = [k for k in context.user_data.keys() if 'grading' in k.lower()]
+            if grading_keys:
+                logger.info(f"Found grading-related keys: {grading_keys}")
+                # Try to extract submission_id from any available context
+                for key in grading_keys:
+                    if 'submission' in key.lower() and context.user_data[key]:
+                        submission_id = context.user_data[key]
+                        logger.info(f"Recovered submission_id from {key}: {submission_id}")
+                        break
+            
+            # If we still don't have context, ask user to restart grading
+            if not submission_id:
+                await update.message.reply_text(
+                    "❌ **Grading session expired**\n\n"
+                    "Your grading context was lost. Please:\n"
+                    "1. Click the 'Grade' button again on the assignment\n"
+                    "2. Select your grade\n"
+                    "3. Choose to add comments\n"
+                    "4. Then send your comment",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                # Clear any stale context data
+                context.user_data.pop('grading_submission_id', None)
+                context.user_data.pop('grading_score', None)
+                context.user_data.pop('grading_message_id', None)
+                context.user_data.pop('waiting_for_comment', None)
+                return
+        
+        # If we have submission_id but no score, try to get a default score
+        if submission_id and not score:
+            logger.info(f"Recovered submission_id but no score, using default score of 5")
+            score = 5  # Default score
+            context.user_data['grading_score'] = score
     
     logger.info(f"✅ Grading context found for user {update.effective_user.id}: submission_id={submission_id}, score={score}")
 
