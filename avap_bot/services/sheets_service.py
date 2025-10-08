@@ -1004,7 +1004,7 @@ def update_submission_grade(username_or_id: str, module_or_grade: Any, grade: Op
 
 def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Optional[str] = None) -> bool:
     """Add grade comment to submission in Google Sheets
-    
+
     Can be called as:
     - add_grade_comment(username, module, comment) - legacy
     - add_grade_comment(submission_id, comment) - new way
@@ -1012,6 +1012,16 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
     try:
         spreadsheet = _get_spreadsheet()
         sheet = spreadsheet.worksheet("submissions")
+
+        # Add timeout protection for sheets operations
+        import signal
+
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Google Sheets operation timed out")
+
+        # Set a 30-second timeout for sheets operations
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(30)
         
         # Detect which calling pattern is being used
         if comment is not None:
@@ -1032,7 +1042,7 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
                         sheet.update_cell(i, 12, f"Grade - {actual_comment}")  # Grade column with comment only
                     logger.info(f"Added grade comment for {username} module {module}: {actual_comment}")
                     return True
-            
+
             logger.warning(f"Submission not found for {username} module {module}")
             return False
         else:
@@ -1055,10 +1065,20 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
             except Exception as e:
                 logger.warning("Submission not found: %s", submission_id)
                 return False
-        
+
+    except TimeoutError as e:
+        logger.error("Google Sheets operation timed out: %s", e)
+        return False
     except Exception as e:
         logger.exception("Failed to add grade comment: %s", e)
         return False
+    finally:
+        # Always clean up the alarm
+        try:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+        except:
+            pass
 
 
 def get_all_verified_users() -> List[Dict[str, Any]]:

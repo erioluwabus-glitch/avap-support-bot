@@ -500,6 +500,13 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
             await complete_grading_without_comment(update, context, submission_id)
         else:
             # Wants comment - ask for comment
+            # Ensure we have the required context data
+            if not context.user_data.get('grading_submission_id'):
+                context.user_data['grading_submission_id'] = submission_id
+            if not context.user_data.get('grading_score'):
+                # Try to get score from previous context, default to 0 if not found
+                context.user_data['grading_score'] = context.user_data.get('grading_score', 0)
+
             await query.edit_message_text(
                 f"💬 **Add Comments**\n\n"
                 f"Please provide your comments (text, audio, or video).\n"
@@ -529,6 +536,11 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
 
     if not submission_id or not score:
         await update.message.reply_text("❌ Error: Grading session expired. Please try again.")
+        # Clear any stale context data
+        context.user_data.pop('grading_submission_id', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('grading_message_id', None)
+        context.user_data.pop('waiting_for_comment', None)
         return
 
     # Get comment content
@@ -631,6 +643,12 @@ async def complete_grading_with_comment(update: Update, context: ContextTypes.DE
         logger.exception("Failed to complete grading with comment: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Grading with comment failed: {str(e)}")
         await update.message.reply_text("❌ Failed to complete grading. Please try again.")
+
+        # Clear context data even on failure to prevent stuck state
+        context.user_data.pop('grading_submission_id', None)
+        context.user_data.pop('grading_score', None)
+        context.user_data.pop('grading_message_id', None)
+        context.user_data.pop('waiting_for_comment', None)
 
 
 async def get_submission_info(submission_id: str) -> Optional[Dict[str, Any]]:
