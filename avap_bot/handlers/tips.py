@@ -92,7 +92,7 @@ async def schedule_daily_tips(bot, scheduler):
         try:
             # Schedule for 8:00 AM WAT (UTC+1)
             scheduler.add_job(
-                send_daily_tip,
+                send_daily_tip_sync,
                 'cron',
                 hour=8,
                 minute=0,
@@ -105,7 +105,7 @@ async def schedule_daily_tips(bot, scheduler):
             logger.warning(f"Timezone scheduling failed: {tz_error}, using UTC offset")
             # Fallback: Schedule for 7:00 AM UTC (which is 8:00 AM WAT)
             scheduler.add_job(
-                send_daily_tip,
+                send_daily_tip_sync,
                 'cron',
                 hour=7,
                 minute=0,
@@ -115,19 +115,9 @@ async def schedule_daily_tips(bot, scheduler):
             )
             logger.info("Daily tips job scheduled for 7:00 AM UTC (8:00 AM WAT)")
 
-        # Also add a test job to run every 5 minutes for debugging (if scheduler supports it)
-        try:
-            scheduler.add_job(
-                test_daily_tip_job,
-                'interval',
-                minutes=5,
-                args=[bot],
-                id='test_daily_tips',
-                replace_existing=True
-            )
-            logger.info("Test job scheduled every 5 minutes")
-        except Exception as interval_error:
-            logger.warning(f"Interval scheduling failed: {interval_error}")
+        # Note: Test job disabled to prevent async coroutine warnings in web server environment
+        logger.info("Test job disabled to prevent async issues in web server environment")
+        # The main daily tips job should still work properly
 
     except Exception as e:
         logger.exception("Failed to schedule daily tips: %s", e)
@@ -171,6 +161,20 @@ async def test_daily_tip_job(bot):
         logger.debug(f"Daily tips scheduler test at {current_time}")
     except Exception as e:
         logger.exception("Error in daily tips test job: %s", e)
+
+
+def send_daily_tip_sync(bot):
+    """Synchronous wrapper for send_daily_tip to work with scheduler"""
+    try:
+        # Create a new event loop for this execution
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(send_daily_tip(bot))
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.exception("Error in sync wrapper for daily tip: %s", e)
 
 
 async def send_daily_tip(bot):

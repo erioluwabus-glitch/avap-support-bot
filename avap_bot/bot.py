@@ -21,7 +21,7 @@ from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 from avap_bot.services.ai_service import clear_model_cache
-from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup, start_memory_watchdog, graceful_restart
+from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, sync_ultra_aggressive_cleanup, start_memory_watchdog, graceful_restart
 
 # Initialize logging
 setup_logging()
@@ -102,18 +102,14 @@ register_test_handlers(bot_app)
 
 # Create scheduler for daily tips with conservative configuration
 try:
-    # Configure scheduler executors with very limited threads to prevent memory issues
-    from apscheduler.executors.pool import ThreadPoolExecutor, ProcessPoolExecutor
-    executors = {
-        'default': ThreadPoolExecutor(1),  # Single thread only
-        'processpool': ProcessPoolExecutor(1)  # Single process for heavy tasks
-    }
+    # Configure scheduler for async functions with minimal resource usage
     job_defaults = {
         'coalesce': True,  # If multiple instances of same job triggered, only run once
         'max_instances': 1,  # Only one instance of each job at a time
         'misfire_grace_time': 30  # Grace period for missed jobs
     }
-    scheduler = AsyncIOScheduler(executors=executors, job_defaults=job_defaults)
+    # Use default AsyncIOScheduler configuration which handles async functions properly
+    scheduler = AsyncIOScheduler(job_defaults=job_defaults)
     scheduler.start()
     logger.debug("Scheduler started for daily tips with ultra-conservative settings")
     SCHEDULER_AVAILABLE = True
