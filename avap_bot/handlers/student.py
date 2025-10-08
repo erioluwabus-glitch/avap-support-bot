@@ -1387,7 +1387,7 @@ async def faq_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 start_conv = ConversationHandler(
     entry_points=[CommandHandler("start", start_handler)],
     states={
-        VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND, verify_identifier_handler)],
+        VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, verify_identifier_handler)],
     },
     fallbacks=[get_cancel_fallback_handler()],
     per_message=False,
@@ -1395,7 +1395,7 @@ start_conv = ConversationHandler(
 )
 
 submit_conv = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r"📝 Submit Assignment"), submit_handler)],
+    entry_points=[MessageHandler(filters.Regex(r"📝 Submit Assignment") & filters.ChatType.PRIVATE, submit_handler)],
     states={
         SUBMIT_MODULE: [MessageHandler(filters.Regex(r"Module \d+") | filters.Regex(r"❌ Cancel"), submit_module)],
         SUBMIT_TYPE: [MessageHandler(filters.Regex(r"📝 Text|🎤 Audio|🎥 Video|❌ Cancel"), submit_type)],
@@ -1407,7 +1407,7 @@ submit_conv = ConversationHandler(
 )
 
 share_win_conv = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r"🏆 Share Win"), share_win_handler)],
+    entry_points=[MessageHandler(filters.Regex(r"🏆 Share Win") & filters.ChatType.PRIVATE, share_win_handler)],
     states={
         SHARE_WIN_TYPE: [MessageHandler(filters.Regex(r"📝 Text|🎤 Audio|🎥 Video|❌ Cancel"), share_win_type)],
         SHARE_WIN_FILE: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, share_win_file)],
@@ -1418,7 +1418,7 @@ share_win_conv = ConversationHandler(
 )
 
 ask_conv = ConversationHandler(
-    entry_points=[MessageHandler(filters.Regex(r"❓ Ask Question"), ask_handler)],
+    entry_points=[MessageHandler(filters.Regex(r"❓ Ask Question") & filters.ChatType.PRIVATE, ask_handler)],
     states={
         ASK_QUESTION: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, ask_question)],
     },
@@ -1440,9 +1440,15 @@ def register_handlers(application):
     application.add_handler(share_win_conv)
     application.add_handler(ask_conv)
     
-    # Add message handlers for status and grades
-    application.add_handler(MessageHandler(filters.Regex(r"📊 Check Status"), status_handler))
-    application.add_handler(MessageHandler(filters.Regex(r"📊 View Grades"), view_grades_handler))
+    # Add message handlers for status and grades (only in private chats)
+    application.add_handler(MessageHandler(
+        filters.Regex(r"📊 Check Status") & filters.ChatType.PRIVATE,
+        status_handler
+    ))
+    application.add_handler(MessageHandler(
+        filters.Regex(r"📊 View Grades") & filters.ChatType.PRIVATE,
+        view_grades_handler
+    ))
     
     # Add support group /ask handler (only processes messages from support group)
     application.add_handler(CommandHandler("ask", support_group_ask_handler))

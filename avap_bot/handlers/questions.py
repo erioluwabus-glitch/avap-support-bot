@@ -272,9 +272,9 @@ def register_handlers(application):
     # Register callback handler for answer button clicks
     application.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
     
-    # Register message handler for answer submissions
+    # Register message handler for answer submissions (only in private chats)
     application.add_handler(MessageHandler(
-        filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, 
+        (filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO) & filters.ChatType.PRIVATE,
         handle_answer_message
     ))
 

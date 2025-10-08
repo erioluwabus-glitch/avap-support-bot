@@ -666,7 +666,10 @@ def register_handlers(application):
 
     # Add inline grading handlers - handle all grading-related callbacks
     application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
-    application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, handle_comment_submission))
+    application.add_handler(MessageHandler(
+        (filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO) & filters.ChatType.PRIVATE,
+        handle_comment_submission
+    ))
 
-    # Add command for students to view their grades
+    # Add command for students to view their grades (only in private chats)
     application.add_handler(CommandHandler("grades", view_grades_handler))
