@@ -16,6 +16,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from avap_bot.utils.logging_config import setup_logging
 from avap_bot.services.supabase_service import init_supabase
+from avap_bot.services.systeme_service import validate_api_key
+from avap_bot.services.notifier import send_admin_notification
 from avap_bot.handlers import register_all
 from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
@@ -342,10 +344,6 @@ async def telegram_webhook(request: Request):
 # Handle webhook with bot token in path (Telegram standard format)
 app.post("/webhook/{bot_token}")(telegram_webhook)
 
-@app.get("/health")
-async def simple_health():
-    """Simple health endpoint for external monitors - returns 200 immediately."""
-    return {"status": "ok"}
 
 app.get("/health_check")(health_check)
 
@@ -427,6 +425,20 @@ async def initialize_services():
         except Exception as e:
             logger.error(f"❌ Supabase initialization failed: {e}")
             logger.warning("Continuing without Supabase - some features may not work")
+
+        # Validate Systeme API key
+        try:
+            if not validate_api_key():
+                logger.error("SYSTEME_API_KEY validation failed during startup. Please verify the env var in Render.")
+                try:
+                    send_admin_notification("ALERT: Systeme API key validation failed on startup (401). Check SYSTEME_API_KEY.")
+                except Exception:
+                    logger.exception("Failed to send admin notification for Systeme API key failure.")
+            else:
+                logger.info("Systeme API key validation successful")
+        except Exception as e:
+            logger.error(f"❌ Systeme API validation failed: {e}")
+            logger.warning("Continuing without Systeme API validation")
 
         # Initialize the Telegram Application with timeout protection
         logger.debug("Initializing Telegram Application...")

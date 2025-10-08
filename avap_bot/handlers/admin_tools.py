@@ -667,8 +667,7 @@ message_achievers_conv = ConversationHandler(
         MESSAGE_ACHIEVERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, message_achievers)],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=True,
-    conversation_timeout=600
+    per_message=True  # explicit
 )
 
 broadcast_conv = ConversationHandler(
@@ -680,7 +679,7 @@ broadcast_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=False,  # explicit
     conversation_timeout=600
 )
 

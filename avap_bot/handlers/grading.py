@@ -699,7 +699,7 @@ grade_conv = ConversationHandler(
         ],
     },
     fallbacks=[get_cancel_fallback_handler()],
-    per_message=False,
+    per_message=False,  # explicit
     conversation_timeout=600
 )
 
