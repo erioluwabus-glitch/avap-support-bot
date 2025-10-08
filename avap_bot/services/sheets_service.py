@@ -475,7 +475,20 @@ def append_win(payload: Dict[str, Any]) -> bool:
             ], ["win_id", "username", "telegram_id", "type", "file_id", "file_name", "text_content", "shared_at"])
 
         try:
-            sheet = spreadsheet.worksheet("wins")
+            # Try wins_new worksheet first (preferred)
+            try:
+                sheet = spreadsheet.worksheet("wins_new")
+                logger.info("Using wins_new worksheet")
+            except:
+                # Fallback to wins worksheet
+                try:
+                    sheet = spreadsheet.worksheet("wins")
+                    logger.info("Using wins worksheet")
+                except:
+                    # Create wins_new worksheet if neither exists
+                    sheet = spreadsheet.add_worksheet(title="wins_new", rows=1000, cols=10)
+                    sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
+                    logger.info("Created new wins_new worksheet")
             
             # Check if sheet has headers, if not add them
             try:
@@ -499,41 +512,12 @@ def append_win(payload: Dict[str, Any]) -> bool:
             ]
 
             sheet.append_row(row)
-            logger.info("Added win to sheets: %s - %s", payload.get('username'), payload.get('type'))
+            logger.info("Added win to new wins worksheet: %s - %s", payload.get('username'), payload.get('type'))
             return True
             
         except Exception as sheet_error:
-            logger.warning(f"Failed to access wins worksheet: {sheet_error}")
-            # Try to create a new wins worksheet with proper headers
-            try:
-                # Check if wins_new already exists, if so use it
-                try:
-                    existing_sheet = spreadsheet.worksheet("wins_new")
-                    new_sheet = existing_sheet
-                    logger.info("Using existing wins_new worksheet")
-                except:
-                    # Create new sheet with timestamp to avoid duplicates
-                    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    new_sheet = spreadsheet.add_worksheet(title=f"wins_{timestamp}", rows=1000, cols=10)
-                    new_sheet.update('A1:H1', [['win_id', 'username', 'telegram_id', 'type', 'file_id', 'file_name', 'text_content', 'shared_at']])
-                
-                row = [
-                    payload.get("win_id", ""),
-                    payload.get("username", ""),
-                    payload.get("telegram_id", ""),
-                    payload.get("type", ""),
-                    payload.get("file_id", ""),
-                    payload.get("file_name", ""),
-                    payload.get("text_content", ""),
-                    payload.get("shared_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
-                ]
-                
-                new_sheet.append_row(row)
-                logger.info("Added win to new wins worksheet: %s - %s", payload.get('username'), payload.get('type'))
-                return True
-            except Exception as create_error:
-                logger.error(f"Failed to create new wins worksheet: {create_error}")
-                raise sheet_error
+            logger.error(f"Failed to access any wins worksheet: {sheet_error}")
+            raise sheet_error
 
     except Exception as e:
         logger.warning("Failed to append win to sheets (using CSV fallback): %s", e)
