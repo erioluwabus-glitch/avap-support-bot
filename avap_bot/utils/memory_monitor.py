@@ -250,7 +250,29 @@ async def monitor_memory(context) -> None:
         logger.error(f"Memory monitoring failed: {e}")
 
 
-async def ultra_aggressive_cleanup() -> None:
+def ultra_aggressive_cleanup() -> None:
+    """
+    FAST aggressive memory cleanup function.
+    For use with APScheduler in web server environments.
+    """
+    try:
+        # Run the async function in the current event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If loop is running, create a task
+            asyncio.create_task(_async_ultra_aggressive_cleanup())
+        else:
+            # If no loop running, run directly
+            loop.run_until_complete(_async_ultra_aggressive_cleanup())
+    except Exception as e:
+        logger.exception(f"Error in ultra aggressive cleanup: {e}")
+
+
+# Backward compatibility alias
+sync_ultra_aggressive_cleanup = ultra_aggressive_cleanup
+
+
+async def _async_ultra_aggressive_cleanup() -> None:
     """
     FAST aggressive memory cleanup for critical situations.
     Optimized for speed to prevent job conflicts.
