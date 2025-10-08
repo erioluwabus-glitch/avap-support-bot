@@ -965,82 +965,82 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     keyboard = InlineKeyboardMarkup([[
                         InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
                     ]])
-            
-            if file_id:
-                # For voice and video, try to forward the original message first
-                if question_text == "Voice question":
-                    try:
-                        # Forward the voice message to preserve the original
-                        await update.message.forward(QUESTIONS_GROUP_ID)
-                        # Send the answer button as a separate message
-                        # Send voice question with retry on rate limiting
-                        await send_message_with_retry(
-                            context.bot,
-                            QUESTIONS_GROUP_ID,
-                            f"❓ **New Voice Question**\n\n"
-                            f"Student: @{username}\n"
-                            f"Telegram ID: {user_id}\n"
-                            f"Voice message forwarded above.",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard if keyboard else None if keyboard else None
-                        )
-                    except Exception as e:
-                        # Fallback to sending as voice if forwarding fails
-                        await context.bot.send_voice(QUESTIONS_GROUP_ID, file_id,
-                            caption=f"❓ **New Voice Question**\n\n"
+                
+                if file_id:
+                    # For voice and video, try to forward the original message first
+                    if question_text == "Voice question":
+                        try:
+                            # Forward the voice message to preserve the original
+                            await update.message.forward(QUESTIONS_GROUP_ID)
+                            # Send the answer button as a separate message
+                            # Send voice question with retry on rate limiting
+                            await send_message_with_retry(
+                                context.bot,
+                                QUESTIONS_GROUP_ID,
+                                f"❓ **New Voice Question**\n\n"
+                                f"Student: @{username}\n"
+                                f"Telegram ID: {user_id}\n"
+                                f"Voice message forwarded above.",
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard if keyboard else None
+                            )
+                        except Exception as e:
+                            # Fallback to sending as voice if forwarding fails
+                            await context.bot.send_voice(QUESTIONS_GROUP_ID, file_id,
+                                caption=f"❓ **New Voice Question**\n\n"
+                                       f"Student: @{username}\n"
+                                       f"Telegram ID: {user_id}",
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard if keyboard else None
+                            )
+                    elif question_text == "Video question":
+                        try:
+                            # Forward the video message to preserve the original
+                            await update.message.forward(QUESTIONS_GROUP_ID)
+                            # Send the answer button as a separate message
+                            # Send video question with retry on rate limiting
+                            await send_message_with_retry(
+                                context.bot,
+                                QUESTIONS_GROUP_ID,
+                                f"❓ **New Video Question**\n\n"
+                                f"Student: @{username}\n"
+                                f"Telegram ID: {user_id}\n"
+                                f"Video message forwarded above.",
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard if keyboard else None
+                            )
+                        except Exception as e:
+                            # Fallback to sending as video if forwarding fails
+                            await context.bot.send_video(QUESTIONS_GROUP_ID, file_id,
+                                caption=f"❓ **New Video Question**\n\n"
+                                       f"Student: @{username}\n"
+                                       f"Telegram ID: {user_id}",
+                                parse_mode=ParseMode.MARKDOWN,
+                                reply_markup=keyboard if keyboard else None
+                            )
+                    else:
+                        # Send as document for other file types with inline keyboard
+                        await context.bot.send_document(QUESTIONS_GROUP_ID, file_id,
+                            caption=f"❓ **New Question**\n\n"
                                    f"Student: @{username}\n"
-                                   f"Telegram ID: {user_id}",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard if keyboard else None
-                        )
-                elif question_text == "Video question":
-                    try:
-                        # Forward the video message to preserve the original
-                        await update.message.forward(QUESTIONS_GROUP_ID)
-                        # Send the answer button as a separate message
-                        # Send video question with retry on rate limiting
-                        await send_message_with_retry(
-                            context.bot,
-                            QUESTIONS_GROUP_ID,
-                            f"❓ **New Video Question**\n\n"
-                            f"Student: @{username}\n"
-                            f"Telegram ID: {user_id}\n"
-                            f"Video message forwarded above.",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard if keyboard else None
-                        )
-                    except Exception as e:
-                        # Fallback to sending as video if forwarding fails
-                        await context.bot.send_video(QUESTIONS_GROUP_ID, file_id,
-                            caption=f"❓ **New Video Question**\n\n"
-                                   f"Student: @{username}\n"
-                                   f"Telegram ID: {user_id}",
+                                   f"Telegram ID: {user_id}\n"
+                                   f"Question: Document: {file_name}",
                             parse_mode=ParseMode.MARKDOWN,
                             reply_markup=keyboard if keyboard else None
                         )
                 else:
-                    # Send as document for other file types with inline keyboard
-                    await context.bot.send_document(QUESTIONS_GROUP_ID, file_id,
-                        caption=f"❓ **New Question**\n\n"
-                               f"Student: @{username}\n"
-                               f"Telegram ID: {user_id}\n"
-                               f"Question: Document: {file_name}",
+                    # Text question - send as message
+                    # Send question with retry on rate limiting
+                    await send_message_with_retry(
+                        context.bot,
+                        QUESTIONS_GROUP_ID,
+                        f"❓ **New Question**\n\n"
+                        f"Student: @{username}\n"
+                        f"Telegram ID: {user_id}\n"
+                        f"Question: {question_text}",
                         parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=keyboard
+                        reply_markup=keyboard if keyboard else None
                     )
-            else:
-                # Text question - send as message
-                # Send question with retry on rate limiting
-                await send_message_with_retry(
-                    context.bot,
-                    QUESTIONS_GROUP_ID,
-                    f"❓ **New Question**\n\n"
-                    f"Student: @{username}\n"
-                    f"Telegram ID: {user_id}\n"
-                    f"Question: {question_text}",
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=keyboard
-                )
 
                 await update.message.reply_text(
                     f"✅ **Question Submitted!**\n\n"
