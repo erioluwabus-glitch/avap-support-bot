@@ -969,10 +969,9 @@ def update_submission_grade(username_or_id: str, module_or_grade: Any, grade: Op
             for i, record in enumerate(all_records, start=2):  # start at 2 for header
                 if record.get("username") == username and str(record.get("module")) == module:
                     sheet.update_cell(i, 10, "Graded")  # Status column (column 10)
-                    sheet.update_cell(i, 12, actual_grade)  # Grade column (column 12)
+                    sheet.update_cell(i, 11, actual_grade)  # Grade column (column 11)
                     if comment:
-                        # Note: Comments column doesn't exist in current schema, but we'll add it to grade column for now
-                        sheet.update_cell(i, 12, f"{actual_grade} - {comment}")  # Combine grade and comment
+                        sheet.update_cell(i, 12, comment)  # Comments column (column 12)
                     logger.info(f"Updated submission grade for {username} module {module}: {actual_grade}")
                     return True
             
@@ -987,10 +986,9 @@ def update_submission_grade(username_or_id: str, module_or_grade: Any, grade: Op
             try:
                 cell = sheet.find(submission_id)
                 sheet.update_cell(cell.row, 10, "Graded")  # Status column (column 10)
-                sheet.update_cell(cell.row, 12, actual_grade)  # Grade column (column 12)
+                sheet.update_cell(cell.row, 11, actual_grade)  # Grade column (column 11)
                 if comment:
-                    # Note: Comments column doesn't exist in current schema, but we'll add it to grade column for now
-                    sheet.update_cell(cell.row, 12, f"{actual_grade} - {comment}")  # Combine grade and comment
+                    sheet.update_cell(cell.row, 12, comment)  # Comments column (column 12)
                 logger.info("Updated submission grade: %s -> %s (comment: %s)", submission_id, actual_grade, comment)
                 return True
             except Exception as e:
@@ -1024,12 +1022,8 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
             all_records = sheet.get_all_records()
             for i, record in enumerate(all_records, start=2):  # start at 2 for header
                 if record.get("username") == username and str(record.get("module")) == module:
-                    # Since there's no comments column, we'll append the comment to the grade column
-                    current_grade = record.get('grade', '')
-                    if current_grade:
-                        sheet.update_cell(i, 12, f"{current_grade} - {actual_comment}")  # Grade column with comment
-                    else:
-                        sheet.update_cell(i, 12, f"Grade - {actual_comment}")  # Grade column with comment only
+                    # Update the comments column (column 12)
+                    sheet.update_cell(i, 12, actual_comment)
                     logger.info(f"Added grade comment for {username} module {module}: {actual_comment}")
                     return True
 
@@ -1043,13 +1037,8 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
             # Find row by submission_id
             try:
                 cell = sheet.find(submission_id)
-                # Since there's no comments column, we'll append the comment to the grade column
-                # First get the current grade value
-                current_grade = sheet.cell(cell.row, 12).value or ''
-                if current_grade:
-                    sheet.update_cell(cell.row, 12, f"{current_grade} - {actual_comment}")  # Grade column with comment
-                else:
-                    sheet.update_cell(cell.row, 12, f"Grade - {actual_comment}")  # Grade column with comment only
+                # Update the comments column (column 12)
+                sheet.update_cell(cell.row, 12, actual_comment)
                 logger.info("Added grade comment: %s -> %s", submission_id, actual_comment)
                 return True
             except Exception as e:

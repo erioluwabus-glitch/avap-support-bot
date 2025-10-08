@@ -320,24 +320,19 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         for submission in graded_submissions:
             module = submission.get('module', 'Unknown')
             grade_value = submission.get('grade', 'N/A')
+            comments = submission.get('comments', 'No comments')
 
-            logger.info(f"Processing submission: module={module}, grade_value='{grade_value}', type={type(grade_value)}")
+            logger.info(f"Processing submission: module={module}, grade_value='{grade_value}', comments='{comments}', type={type(grade_value)}")
 
-            # Parse grade and comments from the combined format
-            if isinstance(grade_value, str) and ' - ' in grade_value:
-                # Format: "3 - Good one" or "Grade - Good one"
-                parts = grade_value.split(' - ', 1)
-                logger.info(f"Parsed parts: {parts}")
-                if parts[0] == 'Grade':
-                    grade = 'N/A'
-                    comments = parts[1] if len(parts) > 1 else 'No comments'
-                else:
-                    grade = parts[0]
-                    comments = parts[1] if len(parts) > 1 else 'No comments'
-            else:
-                # Just a grade number
+            # Handle grade value - should be numeric now
+            if isinstance(grade_value, (int, float)) and grade_value > 0:
+                grade = str(grade_value)
+            elif isinstance(grade_value, str) and grade_value.isdigit():
                 grade = grade_value
-                comments = 'No comments'
+            else:
+                # Fallback for old format or invalid grades
+                grade = 'N/A'
+                logger.warning(f"Invalid grade format for module {module}: {grade_value}")
 
             logger.info(f"Displaying graded submission: module={module}, grade={grade}, comments={comments}")
 
