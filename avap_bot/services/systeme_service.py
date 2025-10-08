@@ -53,7 +53,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                     {"slug": "last_name", "value": last_name},
                     {"slug": "phone_number", "value": contact_data.get("phone", "")}
                 ],
-                "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 2: Standard format
             {
@@ -61,7 +61,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "firstName": first_name,
                 "lastName": last_name,
                 "phoneNumber": contact_data.get("phone", ""),
-                "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 3: Alternative format
             {
@@ -69,14 +69,14 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "first_name": first_name,
                 "last_name": last_name,
                 "phone": contact_data.get("phone", ""),
-                "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 4: Minimal format
             {
                 "email": contact_data.get("email"),
                 "name": contact_data.get("name", ""),
                 "phone": contact_data.get("phone", ""),
-                "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 5: Basic format
             {

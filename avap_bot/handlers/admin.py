@@ -152,8 +152,8 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         pending_data = {
             'name': name,
             'email': email,
-            'phone': phone
-            # Note: status column may not exist in database, using default value
+            'phone': phone,
+            'status': 'pending'
         }
         
         result = add_pending_verification(pending_data)
