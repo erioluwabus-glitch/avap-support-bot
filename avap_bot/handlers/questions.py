@@ -38,19 +38,20 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Extract telegram_id and username from callback data (format: answer_{telegram_id}_{username})
     parts = query.data.split("_")
     logger.info(f"Answer callback data: {query.data}, parts: {parts}")
-    
-    if len(parts) >= 3:
+
+    if len(parts) >= 3 and parts[0] == "answer":
         try:
             telegram_id = int(parts[1])
-            username = parts[2]
+            # Username is everything after telegram_id (parts[2:])
+            username = "_".join(parts[2:])
             logger.info(f"Parsed telegram_id: {telegram_id}, username: {username}")
         except ValueError as e:
             logger.error(f"Failed to parse telegram_id from '{parts[1]}': {e}")
-            username = parts[1] if len(parts) > 1 else "unknown"
+            username = "_".join(parts[2:]) if len(parts) > 2 else "unknown"
             telegram_id = None
     else:
-        # Fallback for old format
-        username = parts[1] if len(parts) > 1 else "unknown"
+        # Fallback for old format or malformed data
+        username = "_".join(parts[1:]) if len(parts) > 1 else "unknown"
         telegram_id = None
         logger.warning(f"Using fallback format for callback data: {query.data}")
     
@@ -81,9 +82,15 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
             logger.info(f"❌ User {update.effective_user.id} is not admin, ignoring message")
             return  # Not an admin, ignore
 
-        # Check if we have question info stored
+        # Check if we have question context stored (this is our specific trigger)
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
+
+        if not username or not telegram_id:
+            logger.info(f"❌ No question context found for user {update.effective_user.id}, ignoring message")
+            return  # No question context, ignore
+
+        # Get the stored question info
         question_text = context.user_data.get('question_text')
 
         logger.info(f"📋 Question info in context:")
@@ -272,9 +279,9 @@ def register_handlers(application):
     # Register callback handler for answer button clicks
     application.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
     
-    # Register message handler for answer submissions (only in private chats)
+    # Register message handler for answer submissions (works in any chat for admins)
     application.add_handler(MessageHandler(
-        (filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO) & filters.ChatType.PRIVATE,
+        filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_answer_message
     ))
 
