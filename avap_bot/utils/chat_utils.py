@@ -20,32 +20,75 @@ def is_group_chat(update: Update) -> bool:
     """
     try:
         chat_type = update.effective_chat.type
-        return chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]
+        if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            logger.debug(f"Detected group chat: {chat_type}")
+            return True
+        else:
+            logger.debug(f"Chat type is not group: {chat_type}")
+            return False
     except (AttributeError, TypeError) as e:
         logger.warning(f"Error checking chat type: {e}")
         return False
 
 
-def should_disable_inline_keyboards(update: Update) -> bool:
+def should_disable_inline_keyboards(update: Update, target_chat_id: int = None) -> bool:
     """
     Check if inline keyboards should be disabled for this update.
     We disable inline keyboards when:
-    1. The message is sent in a group chat (group or supergroup)
-    2. The message is being sent TO a group chat
+    1. The message/callback is from a group chat (group or supergroup)
+    2. The message/callback is being sent TO a group chat
 
     Args:
-        update: The Telegram update object
+        update: The Telegram update object (message or callback_query)
+        target_chat_id: Optional target chat ID to check if sending TO a group
 
     Returns:
         bool: True if inline keyboards should be disabled, False otherwise
     """
-    # Check if the message originated from a group chat
+    # Check if the message/callback originated from a group chat
     if is_group_chat(update):
+        logger.info("Message originated from group chat - disabling inline keyboards")
         return True
 
-    # For messages being sent (not replies), check if any destination is a group
-    # This is a simplified check - in practice, we'd need to check the specific
-    # destination of each message, but this covers the most common case
+    # For callback queries, also check the message's chat type
+    if update.callback_query:
+        try:
+            # Check the chat where the original message with the inline keyboard was sent
+            message_chat_type = update.callback_query.message.chat.type
+            if message_chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                logger.info(f"Callback query from group chat: {message_chat_type} - disabling inline keyboards")
+                return True
+        except (AttributeError, TypeError) as e:
+            logger.warning(f"Error checking callback query chat type: {e}")
+            return False
+
+    # Check if we're sending TO a group chat by checking known group IDs
+    if target_chat_id:
+        # Check against known group IDs from environment variables
+        try:
+            import os
+            assignment_group_id = int(os.getenv("ASSIGNMENT_GROUP_ID", "0"))
+            support_group_id = int(os.getenv("SUPPORT_GROUP_ID", "0"))
+            questions_group_id = int(os.getenv("QUESTIONS_GROUP_ID", "0"))
+
+            known_group_ids = [assignment_group_id, support_group_id, questions_group_id]
+
+            if target_chat_id in known_group_ids and target_chat_id != 0:
+                logger.info(f"Sending TO known group chat (ID: {target_chat_id}) - disabling inline keyboards")
+                return True
+
+            # Also check if it's a negative ID (group chat IDs are negative in Telegram)
+            if target_chat_id < 0:
+                logger.info(f"Sending TO group chat (negative ID: {target_chat_id}) - disabling inline keyboards")
+                return True
+
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Error checking target chat ID {target_chat_id}: {e}")
+            # If we can't determine, err on the side of caution for negative IDs
+            if target_chat_id < 0:
+                logger.info(f"Target chat ID is negative ({target_chat_id}), likely a group - disabling keyboards")
+                return True
+
     return False
 
 

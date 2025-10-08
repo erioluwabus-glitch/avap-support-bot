@@ -15,7 +15,7 @@ from avap_bot.services.sheets_service import update_submission_grade, add_grade_
 from avap_bot.services.supabase_service import update_assignment_grade, check_verified_user
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
-from avap_bot.utils.chat_utils import should_disable_inline_keyboards
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards, create_keyboard_for_chat
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
@@ -466,9 +466,13 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['grading_submission_id'] = submission_id
         context.user_data['grading_message_id'] = query.message.message_id
 
-        # Update message with grade selection buttons
+        # Update message with grade selection buttons (check if inline keyboards should be disabled)
         keyboard = create_score_keyboard(submission_id)
-        await query.edit_message_reply_markup(reply_markup=keyboard)
+        if should_disable_inline_keyboards(update):
+            logger.info("Disabling inline keyboard for group chat in callback query")
+            await query.edit_message_text("❌ Inline keyboards are disabled in group chats.")
+        else:
+            await query.edit_message_reply_markup(reply_markup=keyboard)
 
     elif callback_data.startswith("grade_score:"):
         # Extract submission ID and score
@@ -486,15 +490,26 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
         # Get submission info for display
         submission_info = await get_submission_info(submission_id)
         if submission_info:
-            await query.edit_message_text(
-                f"✅ **Grade Selected!**\n\n"
-                f"Student: @{submission_info['username']}\n"
-                f"Module: {submission_info['module']}\n"
-                f"Grade: {score}/10\n\n"
-                f"Would you like to add comments?",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard
-            )
+            if should_disable_inline_keyboards(update):
+                logger.info("Disabling inline keyboard for group chat in callback query")
+                await query.edit_message_text(
+                    f"✅ **Grade Selected!**\n\n"
+                    f"Student: @{submission_info['username']}\n"
+                    f"Module: {submission_info['module']}\n"
+                    f"Grade: {score}/10\n\n"
+                    f"❌ Inline keyboards are disabled in group chats. Please use DM for grading.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await query.edit_message_text(
+                    f"✅ **Grade Selected!**\n\n"
+                    f"Student: @{submission_info['username']}\n"
+                    f"Module: {submission_info['module']}\n"
+                    f"Grade: {score}/10\n\n"
+                    f"Would you like to add comments?",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard
+                )
         else:
             await query.edit_message_text("❌ Error: Could not find submission information.")
 
