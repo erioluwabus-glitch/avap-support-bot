@@ -199,10 +199,14 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
     """Notify student about their grade"""
     try:
         telegram_id = submission_info.get('telegram_id')
+        username = submission_info.get('username', 'Unknown')
+        
         if not telegram_id:
-            logger.warning("Could not notify student: telegram_id is missing from submission info.")
-            await notify_admin_telegram(context.bot, f"Could not notify @{submission_info.get('username')}, telegram_id missing.")
+            logger.warning(f"Could not notify student: telegram_id is missing from submission info for {username}")
+            await notify_admin_telegram(context.bot, f"Could not notify @{username}, telegram_id missing.")
             return
+
+        logger.info(f"Preparing to notify student {telegram_id} (@{username}) about grade {grade}")
 
         message = (
             f"🎉 **Your assignment has been graded!**\n\n"
@@ -217,10 +221,12 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
             message += "\n**Comments:**\nNo comments provided."
 
         # Send the main notification text
+        logger.info(f"Sending grade notification to student {telegram_id}")
         await context.bot.send_message(chat_id=telegram_id, text=message, parse_mode=ParseMode.MARKDOWN)
 
         # If there is a file comment, send it as a separate message
         if comment_file_id and comment_file_type:
+            logger.info(f"Sending {comment_file_type} comment to student {telegram_id}")
             if comment_file_type == 'voice':
                 await context.bot.send_voice(chat_id=telegram_id, voice=comment_file_id)
             elif comment_file_type == 'video':
@@ -228,11 +234,11 @@ async def _notify_student_grade(context: ContextTypes.DEFAULT_TYPE, submission_i
             elif comment_file_type == 'document':
                 await context.bot.send_document(chat_id=telegram_id, document=comment_file_id)
 
-        logger.info("Notified student %s about grade %s", telegram_id, grade)
+        logger.info(f"Successfully notified student {telegram_id} (@{username}) about grade {grade}")
 
     except Exception as e:
-        logger.exception("Failed to notify student about grade: %s", e)
-        await notify_admin_telegram(context.bot, f"Failed to notify student {telegram_id} about grade. Error: {e}")
+        logger.exception(f"Failed to notify student {telegram_id} (@{username}) about grade: {e}")
+        await notify_admin_telegram(context.bot, f"Failed to notify student {telegram_id} (@{username}) about grade. Error: {e}")
 
 
 async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -604,8 +610,15 @@ async def complete_grading_without_comment(update: Update, context: ContextTypes
         return
 
     try:
+        logger.info(f"Starting grading process for submission {submission_id} with score {score}")
+        
         # Update grade in Google Sheets
-        await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
+        logger.info(f"Updating grade in Google Sheets for {submission_info['username']} - {submission_info['module']}")
+        grade_updated = await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
+        
+        if not grade_updated:
+            logger.warning(f"Failed to update grade in Google Sheets for {submission_info['username']}")
+            await notify_admin_telegram(context.bot, f"⚠️ Warning: Grade may not have been recorded in Google Sheets for {submission_info['username']}")
 
         # Update message to show completion
         await update.callback_query.edit_message_text(
@@ -613,11 +626,13 @@ async def complete_grading_without_comment(update: Update, context: ContextTypes
             f"Student: @{submission_info['username']}\n"
             f"Module: {submission_info['module']}\n"
             f"Grade: {score}/10\n"
-            f"Comments: None",
+            f"Comments: None\n\n"
+            f"📧 Student has been notified of their grade.",
             parse_mode=ParseMode.MARKDOWN
         )
 
         # Notify student
+        logger.info(f"Notifying student {submission_info.get('telegram_id')} about grade {score}")
         await _notify_student_grade(context, submission_info, score, None)
 
         # Clear context data
@@ -625,6 +640,8 @@ async def complete_grading_without_comment(update: Update, context: ContextTypes
         context.user_data.pop('grading_score', None)
         context.user_data.pop('grading_message_id', None)
         context.user_data.pop('waiting_for_comment', None)
+        
+        logger.info(f"Grading process completed successfully for {submission_info['username']}")
 
     except Exception as e:
         logger.exception("Failed to complete grading without comment: %s", e)
@@ -641,8 +658,15 @@ async def complete_grading_with_comment(update: Update, context: ContextTypes.DE
         return
 
     try:
+        logger.info(f"Starting grading with comment process for submission {submission_id} with score {score}")
+        
         # Add comment to Google Sheets
-        await run_blocking(add_grade_comment, submission_info['username'], submission_info['module'], comment)
+        logger.info(f"Adding comment to Google Sheets for {submission_info['username']} - {submission_info['module']}")
+        comment_added = await run_blocking(add_grade_comment, submission_info['username'], submission_info['module'], comment)
+        
+        if not comment_added:
+            logger.warning(f"Failed to add comment to Google Sheets for {submission_info['username']}")
+            await notify_admin_telegram(context.bot, f"⚠️ Warning: Comment may not have been recorded in Google Sheets for {submission_info['username']}")
 
         # Update message to show completion
         await update.message.reply_text(
@@ -650,11 +674,13 @@ async def complete_grading_with_comment(update: Update, context: ContextTypes.DE
             f"Student: @{submission_info['username']}\n"
             f"Module: {submission_info['module']}\n"
             f"Grade: {score}/10\n"
-            f"Comment: {comment}",
+            f"Comment: {comment}\n\n"
+            f"📧 Student has been notified of their grade.",
             parse_mode=ParseMode.MARKDOWN
         )
 
         # Notify student
+        logger.info(f"Notifying student {submission_info.get('telegram_id')} about grade {score} with comment")
         await _notify_student_grade(context, submission_info, score, comment, comment_file_id, comment_file_type)
 
         # Clear context data
@@ -662,6 +688,8 @@ async def complete_grading_with_comment(update: Update, context: ContextTypes.DE
         context.user_data.pop('grading_score', None)
         context.user_data.pop('grading_message_id', None)
         context.user_data.pop('waiting_for_comment', None)
+        
+        logger.info(f"Grading with comment process completed successfully for {submission_info['username']}")
 
     except Exception as e:
         logger.exception("Failed to complete grading with comment: %s", e)
