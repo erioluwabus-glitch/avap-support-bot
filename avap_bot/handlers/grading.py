@@ -238,11 +238,18 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         # Get student's submissions
+        logger.info(f"Looking up submissions for username: '{verified_user['username']}'")
         submissions = await run_blocking(get_student_submissions, verified_user['username'])
-        
+
         logger.info(f"Retrieved {len(submissions)} submissions for user {verified_user['username']}")
+        logger.info(f"Verified user data: {verified_user}")
         for i, sub in enumerate(submissions):
-            logger.info(f"Submission {i}: status='{sub.get('status')}', grade='{sub.get('grade')}', module='{sub.get('module')}'")
+            logger.info(f"Submission {i}: username='{sub.get('username')}', status='{sub.get('status')}', grade='{sub.get('grade')}', module='{sub.get('module')}'")
+
+        # If no submissions found by username, try searching by telegram_id as fallback
+        if not submissions and verified_user.get('telegram_id'):
+            logger.info(f"No submissions found by username, trying telegram_id: {verified_user['telegram_id']}")
+            # Note: This would require updating the sheets_service to support telegram_id lookup
 
         if not submissions:
             await update.message.reply_text(
@@ -253,19 +260,41 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-        # Filter graded submissions - check for both 'Graded' and 'graded' to handle case variations
-        graded_submissions = [s for s in submissions if s.get('status') in ['Graded', 'graded']]
-        
+        # Filter graded submissions - check for various possible status values
+        # First, let's see what status values exist in the data
+        all_statuses = set(s.get('status') for s in submissions if s.get('status'))
+        logger.info(f"All status values found in submissions: {all_statuses}")
+
+        # Check for common graded status variations
+        graded_submissions = [s for s in submissions if s.get('status') in ['Graded', 'graded', 'GRADED', 'Complete', 'complete', 'COMPLETED']]
+
         logger.info(f"Found {len(graded_submissions)} graded submissions out of {len(submissions)} total submissions")
+        for i, sub in enumerate(graded_submissions):
+            logger.info(f"Graded submission {i}: status='{sub.get('status')}', grade='{sub.get('grade')}', module='{sub.get('module')}'")
 
         if not graded_submissions:
-            await update.message.reply_text(
-                "📊 **Your Grades**\n\n"
-                "You have submitted assignments, but none have been graded yet.\n"
-                "Please wait for your assignments to be reviewed.",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
+            # Also check if there are any submissions with grades but different status
+            submissions_with_grades = [s for s in submissions if s.get('grade') and s.get('grade') != 'N/A' and str(s.get('grade')).strip()]
+            logger.info(f"Found {len(submissions_with_grades)} submissions with grade values regardless of status")
+
+            if submissions_with_grades:
+                logger.info("Found submissions with grades but non-graded status, using those instead")
+                graded_submissions = submissions_with_grades
+
+                # Update the message to reflect this situation
+                await update.message.reply_text(
+                    "📊 **Your Grades**\n\n"
+                    "⚠️ Found assignments with grades but different status. Showing all assignments with grade data:\n\n",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text(
+                    "📊 **Your Grades**\n\n"
+                    "You have submitted assignments, but none have been graded yet.\n"
+                    "Please wait for your assignments to be reviewed.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
 
         # Show graded assignments
         message = "📊 **Your Graded Assignments**\n\n"
@@ -273,11 +302,14 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         for submission in graded_submissions:
             module = submission.get('module', 'Unknown')
             grade_value = submission.get('grade', 'N/A')
-            
+
+            logger.info(f"Processing submission: module={module}, grade_value='{grade_value}', type={type(grade_value)}")
+
             # Parse grade and comments from the combined format
             if isinstance(grade_value, str) and ' - ' in grade_value:
                 # Format: "3 - Good one" or "Grade - Good one"
                 parts = grade_value.split(' - ', 1)
+                logger.info(f"Parsed parts: {parts}")
                 if parts[0] == 'Grade':
                     grade = 'N/A'
                     comments = parts[1] if len(parts) > 1 else 'No comments'
@@ -288,7 +320,7 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
                 # Just a grade number
                 grade = grade_value
                 comments = 'No comments'
-            
+
             logger.info(f"Displaying graded submission: module={module}, grade={grade}, comments={comments}")
 
             message += (

@@ -73,21 +73,28 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer message from admin"""
     try:
-        logger.info(f"Answer message handler called from user {update.effective_user.id}")
-        
+        logger.info(f"🔄 ANSWER MESSAGE HANDLER CALLED from user {update.effective_user.id}")
+        logger.info(f"Message type: {type(update.message)}")
+
         # Check if this is an admin answering a question
         if not _is_admin(update):
-            logger.info(f"User {update.effective_user.id} is not admin, ignoring message")
+            logger.info(f"❌ User {update.effective_user.id} is not admin, ignoring message")
             return  # Not an admin, ignore
-        
+
         # Check if we have question info stored
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
-        
-        logger.info(f"Question info in context: username={username}, telegram_id={telegram_id}")
-        
+        question_text = context.user_data.get('question_text')
+
+        logger.info(f"📋 Question info in context:")
+        logger.info(f"  - username: {username}")
+        logger.info(f"  - telegram_id: {telegram_id}")
+        logger.info(f"  - question_text: {question_text}")
+        logger.info(f"  - All user_data keys: {list(context.user_data.keys())}")
+
         if not username or not telegram_id:
-            logger.info("No question info found in context, ignoring message")
+            logger.warning("⚠️ No question info found in context, ignoring message")
+            await update.message.reply_text("❌ No question context found. Please use the Answer button first.")
             return
         
         logger.info(f"Processing answer from admin {update.effective_user.id} for question from {username}")
@@ -102,39 +109,56 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
 async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer submission"""
     try:
-        logger.info(f"Answer text handler called from user {update.effective_user.id}")
+        logger.info(f"📝 ANSWER TEXT HANDLER CALLED from user {update.effective_user.id}")
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
-        
-        logger.info(f"Answer submission - username: {username}, telegram_id: {telegram_id}")
+
+        logger.info(f"📋 Answer submission - username: {username}, telegram_id: {telegram_id}")
+
+        if not username or not telegram_id:
+            logger.error("❌ Missing username or telegram_id in answer_text handler")
+            return
         
         # Get answer content
         answer_text = None
         answer_file_id = None
         answer_file_type = None
-        
+
+        logger.info(f"📨 Processing message content:")
+        logger.info(f"  - Has text: {bool(update.message.text)}")
+        logger.info(f"  - Has voice: {bool(update.message.voice)}")
+        logger.info(f"  - Has video: {bool(update.message.video)}")
+        logger.info(f"  - Has document: {bool(update.message.document)}")
+
         if update.message.text:
             answer_text = update.message.text
+            logger.info(f"📝 Text answer received: '{answer_text[:100]}{'...' if len(answer_text) > 100 else ''}'")
         elif update.message.voice:
             answer_file_id = update.message.voice.file_id
             answer_file_type = "voice"
             answer_text = "(Voice answer attached)"
+            logger.info(f"🎤 Voice answer received, file_id: {answer_file_id}")
         elif update.message.video:
             answer_file_id = update.message.video.file_id
             answer_file_type = "video"
             answer_text = "(Video answer attached)"
+            logger.info(f"🎥 Video answer received, file_id: {answer_file_id}")
         elif update.message.document:
             answer_file_id = update.message.document.file_id
             answer_file_type = "document"
             answer_text = f"(Document answer attached: {update.message.document.file_name})"
+            logger.info(f"📄 Document answer received, file_id: {answer_file_id}, filename: {update.message.document.file_name}")
         else:
+            logger.error("❌ Unsupported answer type received")
             await update.message.reply_text("❌ Unsupported answer type. Please send text, audio, or video.")
-            return ANSWER_TEXT
+            return
         
         # Update question status in Google Sheets
+        logger.info(f"📊 Updating question status in Google Sheets for user {username}")
         await run_blocking(update_question_status, username, answer_text)
-        
+
         # Send confirmation to admin
+        logger.info(f"✅ Sending confirmation to admin {update.effective_user.id}")
         await update.message.reply_text(
             f"✅ **Answer Sent!**\n\n"
             f"Student: @{username}\n"
@@ -143,16 +167,19 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         
         # Send answer to student
+        logger.info(f"📨 Attempting to send answer to student {telegram_id}")
         if telegram_id:
             success = await _send_answer_to_student(
-                context, 
-                telegram_id, 
-                answer_text, 
-                answer_file_id, 
+                context,
+                telegram_id,
+                answer_text,
+                answer_file_id,
                 answer_file_type
             )
-            
+
+            logger.info(f"📨 Answer sending result: {success}")
             if not success:
+                logger.error(f"❌ Failed to send answer to student {telegram_id}")
                 await update.message.reply_text(
                     f"⚠️ **Answer saved but failed to send to student!**\n\n"
                     f"Student: @{username}\n"
@@ -160,8 +187,11 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     f"Please try sending the answer manually to the student.",
                     parse_mode=ParseMode.MARKDOWN
                 )
-                return ConversationHandler.END
+                return
+            else:
+                logger.info(f"✅ Answer successfully sent to student {telegram_id}")
         else:
+            logger.warning(f"⚠️ No telegram_id found for student {username}")
             await update.message.reply_text(
                 f"⚠️ Could not send answer to student (telegram_id not found).\n"
                 f"Student username: @{username}",
