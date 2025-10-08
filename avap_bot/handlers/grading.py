@@ -15,6 +15,7 @@ from avap_bot.services.sheets_service import update_submission_grade, add_grade_
 from avap_bot.services.supabase_service import update_assignment_grade, check_verified_user
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
@@ -43,14 +44,18 @@ async def grade_assignment(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return ConversationHandler.END
     
     context.user_data['submission_info'] = submission_info
-    
-    # Show grading buttons
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{i}", callback_data=f"grade_{i}") for i in range(1, 6)],
-        [InlineKeyboardButton(f"{i}", callback_data=f"grade_{i}") for i in range(6, 11)],
-        [InlineKeyboardButton("❌ Cancel", callback_data="grade_cancel")]
-    ])
-    
+
+    # Show grading buttons (check if inline keyboards should be disabled)
+    if should_disable_inline_keyboards(update):
+        logger.info("Disabling inline keyboard for group chat")
+        keyboard = None
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"{i}", callback_data=f"grade_{i}") for i in range(1, 6)],
+            [InlineKeyboardButton(f"{i}", callback_data=f"grade_{i}") for i in range(6, 11)],
+            [InlineKeyboardButton("❌ Cancel", callback_data="grade_cancel")]
+        ])
+
     await update.message.reply_text(
         f"📝 **Grade Assignment**\n\n"
         f"Student: @{submission_info['username']}\n"
@@ -58,7 +63,7 @@ async def grade_assignment(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         f"Type: {submission_info['type']}\n\n"
         f"Select a grade (1-10):",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboard
+        reply_markup=keyboard if keyboard else None
     )
     return GRADE_SCORE
 
@@ -81,12 +86,16 @@ async def grade_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         # Update grade in Google Sheets
         await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
         
-        # Replace buttons with comment options
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Add Comments", callback_data="add_comment")],
-            [InlineKeyboardButton("✅ No Comments", callback_data="no_comment")]
-        ])
-        
+        # Replace buttons with comment options (check if inline keyboards should be disabled)
+        if should_disable_inline_keyboards(update):
+            logger.info("Disabling inline keyboard for group chat")
+            keyboard = None
+        else:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Add Comments", callback_data="add_comment")],
+                [InlineKeyboardButton("✅ No Comments", callback_data="no_comment")]
+            ])
+
         await query.edit_message_text(
             f"✅ **Assignment Graded!**\n\n"
             f"Student: @{submission_info['username']}\n"
@@ -94,7 +103,7 @@ async def grade_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             f"Grade: {score}/10\n\n"
             f"Would you like to add comments?",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
+            reply_markup=keyboard if keyboard else None
         )
         return GRADE_COMMENT
         
@@ -242,7 +251,7 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         telegram_id = verified_user.get('telegram_id')
 
         logger.info(f"Looking up submissions for username: '{username}', telegram_id: {telegram_id}")
-        submissions = await run_blocking(get_student_submissions, username, telegram_id=telegram_id)
+        submissions = await run_blocking(get_student_submissions, username, None, telegram_id)
 
         logger.info(f"Retrieved {len(submissions)} submissions for user {username or f'telegram_id:{telegram_id}'}")
         logger.info(f"Verified user data: {verified_user}")

@@ -25,6 +25,7 @@ from avap_bot.services.ai_service import find_faq_match, find_similar_answered_q
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.validators import validate_email, validate_phone
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards, create_keyboard_for_chat
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 import time
 import requests
@@ -950,9 +951,15 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         logger.info(f"Checking if forwarding is needed - QUESTIONS_GROUP_ID is truthy: {bool(QUESTIONS_GROUP_ID)}")
         if QUESTIONS_GROUP_ID and QUESTIONS_GROUP_ID != 0:
             logger.info(f"Forwarding question to questions group {QUESTIONS_GROUP_ID}")
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
-            ]])
+
+            # Check if inline keyboards should be disabled (when message comes from group)
+            if should_disable_inline_keyboards(update):
+                logger.info("Disabling inline keyboard for group chat")
+                keyboard = None
+            else:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
+                ]])
             
             if file_id:
                 # For voice and video, try to forward the original message first
@@ -970,7 +977,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                             f"Telegram ID: {user_id}\n"
                             f"Voice message forwarded above.",
                             parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard
+                            reply_markup=keyboard if keyboard else None if keyboard else None
                         )
                     except Exception as e:
                         # Fallback to sending as voice if forwarding fails
@@ -979,7 +986,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
                             parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard
+                            reply_markup=keyboard if keyboard else None
                         )
                 elif question_text == "Video question":
                     try:
@@ -995,7 +1002,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                             f"Telegram ID: {user_id}\n"
                             f"Video message forwarded above.",
                             parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard
+                            reply_markup=keyboard if keyboard else None
                         )
                     except Exception as e:
                         # Fallback to sending as video if forwarding fails
@@ -1004,7 +1011,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                                    f"Student: @{username}\n"
                                    f"Telegram ID: {user_id}",
                             parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=keyboard
+                            reply_markup=keyboard if keyboard else None
                         )
                 else:
                     # Send as document for other file types with inline keyboard
@@ -1247,16 +1254,21 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 f"Question: {question_text}\n"
             )
 
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
-            ]])
+            # Check if inline keyboards should be disabled (when message comes from group)
+            if should_disable_inline_keyboards(update):
+                logger.info("Disabling inline keyboard for group chat")
+                keyboard = None
+            else:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
+                ]])
 
             # Send to questions group for admin to answer
             await context.bot.send_message(
                 QUESTIONS_GROUP_ID,
                 forward_text,
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard
+                reply_markup=keyboard if keyboard else None
             )
 
             # Confirm in support group

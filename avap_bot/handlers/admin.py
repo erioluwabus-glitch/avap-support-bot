@@ -22,6 +22,7 @@ from avap_bot.services.systeme_service import create_contact_and_tag, untag_or_r
 from avap_bot.utils.validators import validate_email, validate_phone
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 # Get cancel fallback handler, but handle case where it might be None
@@ -163,11 +164,15 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         # Background tasks
         asyncio.create_task(_background_add_student_tasks(pending_data))
         
-        # Send confirmation with verify button
-        keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton("✅ Verify Now", callback_data=f"verify_{result['id']}")
-        ]])
-        
+        # Send confirmation with verify button (check if inline keyboards should be disabled)
+        if should_disable_inline_keyboards(update):
+            logger.info("Disabling inline keyboard for group chat")
+            keyboard = None
+        else:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Verify Now", callback_data=f"verify_{result['id']}")
+            ]])
+
         await update.message.reply_text(
             f"✅ **Student Added Successfully!**\n\n"
             f"Name: {name}\n"
@@ -176,7 +181,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             f"Status: Pending Verification\n\n"
             f"Click the button below to verify immediately:",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
+            reply_markup=keyboard if keyboard else None
         )
         
         # Notify verification group
@@ -303,11 +308,17 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
             return ConversationHandler.END
         
         context.user_data['student_to_remove'] = student
-        keyboard = InlineKeyboardMarkup([[ 
-            InlineKeyboardButton("🗑️ REMOVE", callback_data="remove_confirm"),
-            InlineKeyboardButton("❌ CANCEL", callback_data="remove_cancel")
-        ]])
-        
+
+        # Check if inline keyboards should be disabled (when message comes from group)
+        if should_disable_inline_keyboards(update):
+            logger.info("Disabling inline keyboard for group chat")
+            keyboard = None
+        else:
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("🗑️ REMOVE", callback_data="remove_confirm"),
+                InlineKeyboardButton("❌ CANCEL", callback_data="remove_cancel")
+            ]])
+
         await update.message.reply_text(
             f"⚠️ **Confirm Removal**\n\n"
             f"Student: {student['name']}\n"
@@ -316,7 +327,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
             f"Telegram ID: {student.get('telegram_id', 'Not set')}\n\n"
             f"Are you sure you want to remove this student? This will also ban them from the support group.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
+            reply_markup=keyboard if keyboard else None
         )
         return REMOVE_CONFIRM
         

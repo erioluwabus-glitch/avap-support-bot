@@ -15,6 +15,7 @@ from avap_bot.services.supabase_service import update_question_answer, get_faqs
 from avap_bot.services.sheets_service import update_question_status
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
@@ -47,22 +48,26 @@ async def answer_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
     
     context.user_data['question_info'] = question_info
-    
-    # Show answer type options
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Text Answer", callback_data="answer_text")],
-        [InlineKeyboardButton("🎤 Voice Answer", callback_data="answer_voice")],
-        [InlineKeyboardButton("🎥 Video Answer", callback_data="answer_video")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="answer_cancel")]
-    ])
-    
+
+    # Show answer type options (check if inline keyboards should be disabled)
+    if should_disable_inline_keyboards(update):
+        logger.info("Disabling inline keyboard for group chat")
+        keyboard = None
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Text Answer", callback_data="answer_text")],
+            [InlineKeyboardButton("🎤 Voice Answer", callback_data="answer_voice")],
+            [InlineKeyboardButton("🎥 Video Answer", callback_data="answer_video")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="answer_cancel")]
+        ])
+
     await update.message.reply_text(
         f"❓ **Answer Question**\n\n"
         f"Student: @{question_info.get('username', 'unknown')}\n"
         f"Question: {question_info.get('question', 'N/A')[:100]}...\n\n"
         f"Choose answer type:",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboard
+        reply_markup=keyboard if keyboard else None
     )
     
     return ANSWER_CONTENT

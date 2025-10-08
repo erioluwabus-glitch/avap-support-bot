@@ -16,6 +16,7 @@ from avap_bot.services.sheets_service import get_student_submissions, list_achie
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
+from avap_bot.utils.chat_utils import should_disable_inline_keyboards
 from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
@@ -143,15 +144,19 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
             message += f"   Assignments: {assignments}\n"
             message += f"   Wins: {wins}\n\n"
 
-        # Add broadcast button
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Broadcast to Achievers", callback_data="broadcast_achievers")]
-        ])
+        # Add broadcast button (check if inline keyboards should be disabled)
+        if should_disable_inline_keyboards(update):
+            logger.info("Disabling inline keyboard for group chat")
+            keyboard = None
+        else:
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("📢 Broadcast to Achievers", callback_data="broadcast_achievers")]
+            ])
 
         await update.message.reply_text(
             message,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard
+            reply_markup=keyboard if keyboard else None
         )
 
     except Exception as e:
@@ -200,16 +205,20 @@ async def broadcast_history_cmd(update: Update, context: ContextTypes.DEFAULT_TY
                 content_preview = broadcast['content'][:50] + "..." if len(broadcast['content']) > 50 else broadcast['content']
                 message += f"💬 Content: \"{content_preview}\"\n"
 
-            # Add delete button for this broadcast
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🗑️ Delete This Broadcast", callback_data=f"delete_broadcast_{broadcast_id}")],
-                [InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="admin_menu")]
-            ])
+            # Add delete button for this broadcast (check if inline keyboards should be disabled)
+            if should_disable_inline_keyboards(update):
+                logger.info("Disabling inline keyboard for group chat")
+                keyboard = None
+            else:
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🗑️ Delete This Broadcast", callback_data=f"delete_broadcast_{broadcast_id}")],
+                    [InlineKeyboardButton("🔙 Back to Admin Menu", callback_data="admin_menu")]
+                ])
 
             await update.message.reply_text(
                 message,
                 parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard
+                reply_markup=keyboard if keyboard else None
             )
 
     except Exception as e:
@@ -337,19 +346,23 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     logger.info(f"✅ Admin check passed for user {update.effective_user.id}, showing broadcast options")
 
-    # Show broadcast type options
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Text Broadcast", callback_data="broadcast_text")],
-        [InlineKeyboardButton("🎤 Audio Broadcast", callback_data="broadcast_audio")],
-        [InlineKeyboardButton("🎥 Video Broadcast", callback_data="broadcast_video")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]
-    ])
+    # Show broadcast type options (check if inline keyboards should be disabled)
+    if should_disable_inline_keyboards(update):
+        logger.info("Disabling inline keyboard for group chat")
+        keyboard = None
+    else:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📝 Text Broadcast", callback_data="broadcast_text")],
+            [InlineKeyboardButton("🎤 Audio Broadcast", callback_data="broadcast_audio")],
+            [InlineKeyboardButton("🎥 Video Broadcast", callback_data="broadcast_video")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")]
+        ])
 
     await update.message.reply_text(
         "📢 **Interactive Broadcast**\n\n"
         "Choose the type of broadcast you want to send:",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboard
+        reply_markup=keyboard if keyboard else None
     )
 
     logger.info(f"Broadcast options sent to user {update.effective_user.id}, returning BROADCAST_TYPE")
