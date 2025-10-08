@@ -558,13 +558,20 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_comment_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle comment submission for grading"""
+    logger.info(f"🔄 GRADING COMMENT HANDLER CALLED from user {update.effective_user.id}")
+    logger.info(f"Message type: {type(update.message)}")
+    logger.info(f"User data keys: {list(context.user_data.keys())}")
+    
+    # Check if this is a grading comment (more specific check)
     if not context.user_data.get('waiting_for_comment'):
+        logger.info(f"❌ No grading context found for user {update.effective_user.id}, ignoring message")
         return
 
     submission_id = context.user_data.get('grading_submission_id')
     score = context.user_data.get('grading_score')
 
     if not submission_id or not score:
+        logger.warning(f"❌ Incomplete grading context for user {update.effective_user.id}: submission_id={submission_id}, score={score}")
         await update.message.reply_text("❌ Error: Grading session expired. Please try again.")
         # Clear any stale context data
         context.user_data.pop('grading_submission_id', None)
@@ -572,6 +579,8 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
         context.user_data.pop('grading_message_id', None)
         context.user_data.pop('waiting_for_comment', None)
         return
+    
+    logger.info(f"✅ Grading context found for user {update.effective_user.id}: submission_id={submission_id}, score={score}")
 
     # Get comment content
     comment_text = None
@@ -740,7 +749,7 @@ def register_handlers(application):
     # Add inline grading handlers - handle all grading-related callbacks
     application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
     application.add_handler(MessageHandler(
-        (filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO) & filters.ChatType.PRIVATE,
+        filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_comment_submission
     ))
 
