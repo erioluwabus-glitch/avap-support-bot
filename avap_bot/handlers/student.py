@@ -74,17 +74,17 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     """Handle /start command. Check for verification and start verification if needed."""
     try:
         user = update.effective_user
-        logger.info(f"Start command received from user {user.id} ({user.username})")
+        logger.info(f"Start command received from user {user_id} ({user.username})")
 
         # Check if user is already verified
-        verified_user = check_verified_user(user.id)
+        verified_user = check_verified_user(user_id)
         if verified_user:
-            logger.info(f"User {user.id} is already verified, showing main menu")
+            logger.info(f"User {user_id} is already verified, showing main menu")
             await _show_main_menu(update, context, verified_user)
             return ConversationHandler.END
 
         # If not verified, start the verification process
-        logger.info(f"User {user.id} is not verified, starting verification process")
+        logger.info(f"User {user_id} is not verified, starting verification process")
         await update.message.reply_text(
             "👋 **Welcome to AVAP Support Bot!**\n\n"
             "To get started, please verify your account.\n"
@@ -93,7 +93,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
         )
         return VERIFY_IDENTIFIER
     except Exception as e:
-        logger.exception(f"Error in start_handler for user {update.effective_user.id}: {e}")
+        logger.exception(f"Error in start_handler for user {update.effective_user_id}: {e}")
         try:
             # Check if we have a valid message to reply to
             if update.message and update.message.message_id:
@@ -152,26 +152,26 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
-        logger.info(f"Promoting user {user.id} with pending_id {pending_id}")
-        verified_user = await promote_pending_to_verified(pending_id, user.id)
+        logger.info(f"Promoting user {user_id} with pending_id {pending_id}")
+        verified_user = await promote_pending_to_verified(pending_id, user_id)
         if not verified_user:
             raise Exception("Failed to promote user to verified status.")
 
-        logger.info(f"User {user.id} ({verified_user['name']}) successfully verified with status: {verified_user.get('status')}")
+        logger.info(f"User {user_id} ({verified_user['name']}) successfully verified with status: {verified_user.get('status')}")
 
         # Approve chat join request if the group ID is set
         if SUPPORT_GROUP_ID:
             try:
-                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user.id)
-                logger.info(f"Approved join request for user {user.id} to support group.")
+                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user_id)
+                logger.info(f"Approved join request for user {user_id} to support group.")
             except Exception as e:
                 error_msg = str(e)
                 if "User_already_participant" in error_msg:
-                    logger.info(f"User {user.id} is already a participant in the support group (expected).")
+                    logger.info(f"User {user_id} is already a participant in the support group (expected).")
                 elif "Hide_requester_missing" in error_msg:
-                    logger.info(f"User {user.id} didn't request to join the support group, or request already processed.")
+                    logger.info(f"User {user_id} didn't request to join the support group, or request already processed.")
                 else:
-                    logger.error(f"Failed to approve join request for user {user.id}: {e}")
+                    logger.error(f"Failed to approve join request for user {user_id}: {e}")
 
         await update.message.reply_text(
             f"🎉 **Congratulations, {verified_user['name']}! You are now verified!**\n\n"
@@ -184,7 +184,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
 
     except Exception as e:
         logger.exception(f"Verification failed for identifier '{identifier}': {e}")
-        await notify_admin_telegram(context.bot, f"Verification failed for user {user.full_name} ({user.id}) with identifier '{identifier}'. Error: {e}")
+        await notify_admin_telegram(context.bot, f"Verification failed for user {user.full_name} ({user_id}) with identifier '{identifier}'. Error: {e}")
         try:
             if update.message and update.message.message_id:
                 await update.message.reply_text(
@@ -221,7 +221,7 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
             reply_markup=keyboard
         )
     except Exception as e:
-        logger.exception(f"Error in _show_main_menu for user {update.effective_user.id}: {e}")
+        logger.exception(f"Error in _show_main_menu for user {update.effective_user_id}: {e}")
         try:
             if update.message and update.message.message_id:
                 await update.message.reply_text(
@@ -313,7 +313,7 @@ async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle file submission"""
     try:
-        user_id = update.effective_user.id
+        user_id = update.effective_user_id
         username = update.effective_user.username or "unknown"
         module = context.user_data['submit_module']
         submission_type = context.user_data['submit_type']
@@ -460,7 +460,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             logger.error(f"Failed to send assignment error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user.id)
+        verified_user = check_verified_user(update.effective_user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -516,7 +516,7 @@ async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win file submission"""
     try:
-        user_id = update.effective_user.id
+        user_id = update.effective_user_id
         # Use display name (first_name + last_name) instead of username
         user_display_name = update.effective_user.full_name or update.effective_user.first_name or "Unknown User"
         win_type = context.user_data['win_type']
@@ -664,7 +664,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.error(f"Failed to send share win error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user.id)
+        verified_user = check_verified_user(update.effective_user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -683,7 +683,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        user_id = update.effective_user.id
+        user_id = update.effective_user_id
         username = update.effective_user.username or "unknown"
         
         # Get student data with error handling
@@ -789,7 +789,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         from avap_bot.utils.memory_monitor import log_memory_usage
         log_memory_usage("before ask question processing")
         
-        user_id = update.effective_user.id
+        user_id = update.effective_user_id
         username = update.effective_user.username or "unknown"
         
         # Get question content
@@ -821,7 +821,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user.id)
+            faq_match = await find_faq_match(question_text, user_id=user_id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -830,7 +830,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],
@@ -1066,7 +1066,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             logger.error(f"Failed to send question error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user.id)
+        verified_user = check_verified_user(update.effective_user_id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -1078,7 +1078,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("❌ Operation cancelled.")
 
     # Show main menu after cancellation
-    verified_user = check_verified_user(update.effective_user.id)
+    verified_user = check_verified_user(update.effective_user_id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
 
@@ -1109,17 +1109,17 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
     username = user.username or "unknown"
     
     # Check if user is verified
-    logger.info(f"Checking verification for user {user.id} ({username})")
-    verified_user = check_verified_user(user.id)
+    logger.info(f"Checking verification for user {user_id} ({username})")
+    verified_user = check_verified_user(user_id)
     if not verified_user:
-        logger.warning(f"User {user.id} is not verified, rejecting /ask command")
+        logger.warning(f"User {user_id} is not verified, rejecting /ask command")
         await update.message.reply_text(
             "❌ You must be a verified student to ask questions.\n"
             "Please send /start to the bot in private to verify.",
             parse_mode=ParseMode.MARKDOWN
         )
         return
-    logger.info(f"User {user.id} is verified, proceeding with /ask command")
+    logger.info(f"User {user_id} is verified, proceeding with /ask command")
     
     # Get the question from the command
     # Format: /ask <question text>
@@ -1144,7 +1144,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user.id)
+            faq_match = await find_faq_match(question_text, user_id=user_id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -1153,7 +1153,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],
@@ -1186,7 +1186,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                     message_text = f"{title}\n\n**Your Question:** {escaped_question}\n\n**Similar Question:** {escaped_similar}\n\n**Answer:** {escaped_answer}"
                 
                 await context.bot.send_message(
-                    user.id,
+                    user_id,
                     message_text,
                     parse_mode=ParseMode.MARKDOWN,
                     reply_to_message_id=update.message.message_id
@@ -1202,13 +1202,13 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
                 # Store question in database for future FAQ matching
                 def _add_question_with_answer():
-                    return add_question(user.id, username, question_text, None, None, answer, 'answered')
+                    return add_question(user_id, username, question_text, None, None, answer, 'answered')
                 await run_blocking(_add_question_with_answer)
 
                 # Save the question for tracking
                 question_data = {
                     'username': username,
-                    'telegram_id': user.id,
+                    'telegram_id': user_id,
                     'question_text': question_text,
                     'file_id': None,
                     'file_name': None,
@@ -1226,7 +1226,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
         # Prepare question data for forwarding to admins
         question_data = {
             'username': username,
-            'telegram_id': user.id,
+            'telegram_id': user_id,
             'question_text': question_text,
             'file_id': None,
             'file_name': None,
@@ -1242,12 +1242,12 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             forward_text = (
                 f"❓ **New Question from Support Group**\n\n"
                 f"Student: @{username}\n"
-                f"Telegram ID: {user.id}\n"
+                f"Telegram ID: {user_id}\n"
                 f"Question: {question_text}\n"
             )
 
             keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user.id}_{username}")
+                InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
 
             # Send to questions group for admin to answer
@@ -1296,7 +1296,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
-    return check_verified_user(update.effective_user.id) is not None
+    return check_verified_user(update.effective_user_id) is not None
 
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1304,7 +1304,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
 
     # Check if user is verified
-    verified_user = check_verified_user(user.id)
+    verified_user = check_verified_user(user_id)
 
     if verified_user:
         help_text = (

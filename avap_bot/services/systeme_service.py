@@ -164,7 +164,9 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 logger.info("✅ Created/Updated Systeme.io contact: %s (ID: %s)", contact_data.get("email"), contact_id)
 
                 # Apply achiever tag if applicable and verified
+                logger.info(f"Checking tag conditions - contact_id: {contact_id}, SYSTEME_ACHIEVER_TAG_ID: {'SET' if SYSTEME_ACHIEVER_TAG_ID else 'NOT SET'}, status: {contact_data.get('status')}")
                 if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+                    logger.info(f"Applying achiever tag to contact {contact_id}")
                     await _apply_achiever_tag(contact_id, client, headers)
 
                 return contact_id
