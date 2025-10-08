@@ -321,10 +321,12 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /broadcast command - start interactive broadcast"""
-    logger.info(f"Broadcast command received from user {update.effective_user.id}")
+    logger.info(f"🔊 BROADCAST COMMAND RECEIVED from user {update.effective_user.id}")
+    logger.info(f"Admin check: {_is_admin(update)}")
+    logger.info(f"ADMIN_USER_ID from env: {ADMIN_USER_ID}")
     
     if not _is_admin(update):
-        logger.warning(f"Non-admin user {update.effective_user.id} tried to use broadcast command")
+        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use broadcast command")
         await update.message.reply_text(
             f"❌ This command is only for admins.\n"
             f"Your ID: {update.effective_user.id}\n"
@@ -333,7 +335,7 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         )
         return ConversationHandler.END
 
-    logger.info(f"Admin check passed for user {update.effective_user.id}, showing broadcast options")
+    logger.info(f"✅ Admin check passed for user {update.effective_user.id}, showing broadcast options")
 
     # Show broadcast type options
     keyboard = InlineKeyboardMarkup([
@@ -554,10 +556,12 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show bot statistics"""
-    logger.info(f"Stats command received from user {update.effective_user.id}")
+    logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
+    logger.info(f"Admin check: {_is_admin(update)}")
+    logger.info(f"ADMIN_USER_ID from env: {ADMIN_USER_ID}")
     
     if not _is_admin(update):
-        logger.warning(f"Non-admin user {update.effective_user.id} tried to use stats command")
+        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use stats command")
         await update.message.reply_text(
             f"❌ This command is only for admins.\n"
             f"Your ID: {update.effective_user.id}\n"
@@ -566,7 +570,7 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    logger.info(f"Admin check passed for user {update.effective_user.id}, retrieving stats")
+    logger.info(f"✅ Admin check passed for user {update.effective_user.id}, retrieving stats")
 
     try:
         # Get statistics from database
@@ -670,13 +674,17 @@ broadcast_conv = ConversationHandler(
 
 def register_handlers(application):
     """Register all admin tools handlers with the application"""
+    logger.info("🔧 Registering admin tools handlers...")
+    
     # Add command handlers
     application.add_handler(CommandHandler("get_submission", get_submission))
     application.add_handler(CommandHandler("stats", stats_handler))
+    logger.info("✅ Registered stats and get_submission command handlers")
     
     # Add conversation handlers
     application.add_handler(message_achievers_conv)
     application.add_handler(broadcast_conv)
+    logger.info("✅ Registered broadcast and message_achievers conversation handlers")
 
     # Add global callback handlers to fix per_message=False warnings
     application.add_handler(CallbackQueryHandler(broadcast_achievers, pattern="^broadcast_achievers$"))

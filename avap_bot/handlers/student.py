@@ -517,7 +517,8 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Handle win file submission"""
     try:
         user_id = update.effective_user.id
-        username = update.effective_user.username or "unknown"
+        # Use display name (first_name + last_name) instead of username
+        user_display_name = update.effective_user.full_name or update.effective_user.first_name or "Unknown User"
         win_type = context.user_data['win_type']
         
         # Get file info
@@ -545,7 +546,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Prepare win data
         win_data = {
             'win_id': f"win_{user_id}_{int(datetime.now(timezone.utc).timestamp())}",
-            'username': username,
+            'username': user_display_name,  # Use display name instead of username
             'telegram_id': user_id,
             'type': win_type,
             'file_id': file_id,
@@ -584,20 +585,26 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 # For text wins, include the actual text content with engaging intro
                 # Escape special Markdown characters to prevent parsing errors
                 escaped_content = text_content.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_name = user_display_name.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
+                    f"🎉 **{escaped_name}** shared their win!\n\n"
                     f"{comment}\n\n"
                     f"**Their Story:**\n{escaped_content}"
                 )
             elif win_type == 'audio':
                 # For audio wins, show audio-specific message
+                escaped_name = user_display_name.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
+                    f"🎉 **{escaped_name}** shared their win!\n\n"
                     f"{comment}\n\n"
                     f"🎤 **Audio Win Shared**\n"
                     f"Listen to their inspiring story!"
                 )
             elif win_type == 'video':
                 # For video wins, show video-specific message
+                escaped_name = user_display_name.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
+                    f"🎉 **{escaped_name}** shared their win!\n\n"
                     f"{comment}\n\n"
                     f"🎥 **Video Win Shared**\n"
                     f"Watch their amazing achievement!"
@@ -606,7 +613,9 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 # For document wins, show file info with engaging intro
                 # Escape special Markdown characters in file name
                 escaped_file_name = (file_name or "").replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
+                escaped_name = user_display_name.replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
+                    f"🎉 **{escaped_name}** shared their win!\n\n"
                     f"{comment}\n\n"
                     f"**Achievement Details:**\n"
                     f"📁 File: {escaped_file_name}\n"

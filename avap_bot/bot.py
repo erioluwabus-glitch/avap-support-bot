@@ -88,10 +88,14 @@ cancel_registry = CancelRegistry()
 bot_app.bot_data['cancel_registry'] = cancel_registry
 
 # Register all handlers
+logger.info("🔧 Registering all handlers...")
 register_all(bot_app)
+logger.info("✅ All handlers registered successfully")
 
 # Register cancel handlers
+logger.info("🔧 Registering cancel handlers...")
 register_cancel_handlers(bot_app)
+logger.info("✅ Cancel handlers registered successfully")
 
 # Register test handlers (development only)
 register_test_handlers(bot_app)
