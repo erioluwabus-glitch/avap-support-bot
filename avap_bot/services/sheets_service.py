@@ -1012,16 +1012,6 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
     try:
         spreadsheet = _get_spreadsheet()
         sheet = spreadsheet.worksheet("submissions")
-
-        # Add timeout protection for sheets operations
-        import signal
-
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Google Sheets operation timed out")
-
-        # Set a 30-second timeout for sheets operations
-        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(30)
         
         # Detect which calling pattern is being used
         if comment is not None:
@@ -1066,19 +1056,9 @@ def add_grade_comment(username_or_id: str, module_or_comment: Any, comment: Opti
                 logger.warning("Submission not found: %s", submission_id)
                 return False
 
-    except TimeoutError as e:
-        logger.error("Google Sheets operation timed out: %s", e)
-        return False
     except Exception as e:
         logger.exception("Failed to add grade comment: %s", e)
         return False
-    finally:
-        # Always clean up the alarm
-        try:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-        except:
-            pass
 
 
 def get_all_verified_users() -> List[Dict[str, Any]]:
