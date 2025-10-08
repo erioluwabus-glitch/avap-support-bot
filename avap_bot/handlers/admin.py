@@ -154,7 +154,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             'name': name,
             'email': email,
             'phone': phone,
-            'status': 'pending'
+            'status': 'verified'  # Create with verified status immediately
         }
         
         result = add_pending_verification(pending_data)
@@ -242,15 +242,8 @@ async def admin_verify_callback(update: Update, context: ContextTypes.DEFAULT_TY
         
         # Update Google Sheets
         await run_blocking(update_verification_status, verified_data['email'], 'Verified')
-        
-        # Update Systeme.io tag - ensure proper data structure
-        systeme_data = {
-            "name": verified_data.get("name", ""),
-            "email": verified_data.get("email", ""),
-            "phone": verified_data.get("phone", ""),
-            "status": "verified"
-        }
-        await create_contact_and_tag(systeme_data)
+
+        # Note: Systeme.io contact already created with verified status when student was added
         
         # Send confirmation
         await query.edit_message_text(

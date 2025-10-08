@@ -9,6 +9,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 SYSTEME_API_KEY = os.getenv("SYSTEME_API_KEY")
+SYSTEME_VERIFIED_TAG_ID = os.getenv("SYSTEME_VERIFIED_TAG_ID")
 SYSTEME_ACHIEVER_TAG_ID = os.getenv("SYSTEME_ACHIEVER_TAG_ID")
 SYSTEME_BASE_URL = os.getenv("SYSTEME_BASE_URL", "https://api.systeme.io")
 
@@ -53,7 +54,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                     {"slug": "last_name", "value": last_name},
                     {"slug": "phone_number", "value": contact_data.get("phone", "")}
                 ],
-                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_VERIFIED_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 2: Standard format
             {
@@ -61,7 +62,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "firstName": first_name,
                 "lastName": last_name,
                 "phoneNumber": contact_data.get("phone", ""),
-                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_VERIFIED_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 3: Alternative format
             {
@@ -69,14 +70,14 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "first_name": first_name,
                 "last_name": last_name,
                 "phone": contact_data.get("phone", ""),
-                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_VERIFIED_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 4: Minimal format
             {
                 "email": contact_data.get("email"),
                 "name": contact_data.get("name", ""),
                 "phone": contact_data.get("phone", ""),
-                "tags": [SYSTEME_ACHIEVER_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
+                "tags": [SYSTEME_VERIFIED_TAG_ID] if contact_data.get("status") == "verified" else ["pending"]
             },
             # Format 5: Basic format
             {
@@ -163,9 +164,12 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 contact_id = result.get("id")
                 logger.info("✅ Created/Updated Systeme.io contact: %s (ID: %s)", contact_data.get("email"), contact_id)
 
-                # Apply achiever tag if applicable and verified
-                logger.info(f"Checking tag conditions - contact_id: {contact_id}, SYSTEME_ACHIEVER_TAG_ID: {'SET' if SYSTEME_ACHIEVER_TAG_ID else 'NOT SET'}, status: {contact_data.get('status')}")
-                if contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+                # Apply verified tag if applicable and verified
+                logger.info(f"Checking tag conditions - contact_id: {contact_id}, SYSTEME_VERIFIED_TAG_ID: {'SET' if SYSTEME_VERIFIED_TAG_ID else 'NOT SET'}, SYSTEME_ACHIEVER_TAG_ID: {'SET' if SYSTEME_ACHIEVER_TAG_ID else 'NOT SET'}, status: {contact_data.get('status')}")
+                if contact_id and SYSTEME_VERIFIED_TAG_ID and contact_data.get("status") == "verified":
+                    logger.info(f"Applying verified tag to contact {contact_id}")
+                    await _apply_verified_tag(contact_id, client, headers)
+                elif contact_id and SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
                     logger.info(f"Applying achiever tag to contact {contact_id}")
                     await _apply_achiever_tag(contact_id, client, headers)
 
@@ -177,6 +181,11 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 # Note: Systeme.io doesn't provide easy way to update tags on existing contacts
                 # The tag update happens when the contact is processed by Systeme.io workflows
                 return "existing"
+            elif response.status_code == 422 and "already used" in str(response.text):
+                # Contact already exists - try to find and update it with verified tag
+                logger.info("Contact already exists in Systeme.io: %s - attempting to find and update", contact_data.get("email"))
+                existing_contact_id = await _find_existing_contact_and_update_tags(contact_data, client, headers)
+                return existing_contact_id
             elif response.status_code == 401:
                 logger.error("❌ Systeme.io API authentication failed - check your API key")
                 logger.error("Response: %s", response.text)
@@ -195,29 +204,97 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
         return None
 
 
-async def _apply_achiever_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
-    """Apply achiever tag to contact"""
+async def _apply_verified_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
+    """Apply verified tag to contact"""
     try:
         # Apply tag using Systeme.io API format
-        tag_payload = [SYSTEME_ACHIEVER_TAG_ID]
-        
+        tag_payload = [SYSTEME_VERIFIED_TAG_ID]
+
         response = await client.post(
             f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
             headers=headers,
             json=tag_payload,
             timeout=10.0
         )
-        
+
+        if response.status_code == 200:
+            logger.info("Applied verified tag to contact: %s", contact_id)
+            return True
+        else:
+            logger.warning("Failed to apply verified tag: %s", response.text)
+            return False
+
+    except Exception as e:
+        logger.exception("Failed to apply verified tag: %s", e)
+        return False
+
+
+async def _apply_achiever_tag(contact_id: str, client: httpx.AsyncClient, headers: Dict[str, str]) -> bool:
+    """Apply achiever tag to contact"""
+    try:
+        # Apply tag using Systeme.io API format
+        tag_payload = [SYSTEME_ACHIEVER_TAG_ID]
+
+        response = await client.post(
+            f"{SYSTEME_BASE_URL}/contacts/{contact_id}/tags",
+            headers=headers,
+            json=tag_payload,
+            timeout=10.0
+        )
+
         if response.status_code == 200:
             logger.info("Applied achiever tag to contact: %s", contact_id)
             return True
         else:
             logger.warning("Failed to apply achiever tag: %s", response.text)
             return False
-            
+
     except Exception as e:
         logger.exception("Failed to apply achiever tag: %s", e)
         return False
+
+
+async def _find_existing_contact_and_update_tags(contact_data: Dict[str, Any], client: httpx.AsyncClient, headers: Dict[str, str]) -> Optional[str]:
+    """Find existing contact and update tags"""
+    try:
+        email = contact_data.get("email")
+        logger.info(f"Finding existing contact for: {email}")
+
+        # Find contact by email
+        response = await client.get(
+            f"{SYSTEME_BASE_URL}/contacts",
+            headers=headers,
+            params={"email": email},
+            timeout=10.0
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            contacts = result.get("data", [])
+
+            if contacts:
+                contact_id = contacts[0].get("id")
+                logger.info(f"Found existing contact: {email} (ID: {contact_id})")
+
+                # Apply verified tag if applicable and verified
+                if SYSTEME_VERIFIED_TAG_ID and contact_data.get("status") == "verified":
+                    logger.info(f"Applying verified tag to existing contact {contact_id}")
+                    await _apply_verified_tag(contact_id, client, headers)
+                elif SYSTEME_ACHIEVER_TAG_ID and contact_data.get("status") == "verified":
+                    logger.info(f"Applying achiever tag to existing contact {contact_id}")
+                    await _apply_achiever_tag(contact_id, client, headers)
+
+                return contact_id
+            else:
+                logger.warning(f"No existing contact found for: {email}")
+                return None
+        else:
+            logger.warning(f"Failed to find existing contact: {response.status_code} - {response.text}")
+            return None
+
+    except Exception as e:
+        logger.exception(f"Failed to find and update existing contact: {e}")
+        return None
 
 
 async def remove_contact_by_email(email: str) -> bool:
@@ -431,7 +508,7 @@ async def _try_webhook_integration(contact_data: Dict[str, Any]) -> Optional[str
             "email": contact_data.get("email"),
             "name": contact_data.get("name", ""),
             "phone": contact_data.get("phone", ""),
-            "status": contact_data.get("status", "pending"),
+            "status": contact_data.get("status", "verified"),
             "source": "avap_bot",
             "timestamp": contact_data.get("timestamp", "")
         }

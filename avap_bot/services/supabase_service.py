@@ -297,21 +297,7 @@ async def promote_pending_to_verified(pending_id: int, telegram_id: int) -> Dict
         verified_user = ins.data[0]
         logger.info(f"Successfully inserted verified user: {verified_user['name']} ({verified_user['email']})")
 
-        # Update Systeme.io tag from "pending" to "verified"
-        try:
-            from avap_bot.services.systeme_service import create_contact_and_tag
-            # Update contact with verified status
-            contact_data = {
-                "name": row["name"],
-                "email": row["email"],
-                "phone": row["phone"],
-                "status": "verified"
-            }
-            # This will create/update the contact with "verified" tag
-            await create_contact_and_tag(contact_data)
-        except Exception as systeme_error:
-            logger.warning(f"Failed to update Systeme.io tag: {systeme_error}")
-            # Don't fail the verification if Systeme.io update fails
+        # Note: Systeme.io contact already created with verified status when student was added
 
         # Optionally delete pending row:
         client.table("pending_verifications").delete().eq("id", pending_id).execute()

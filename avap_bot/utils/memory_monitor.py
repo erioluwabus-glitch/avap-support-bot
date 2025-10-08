@@ -256,14 +256,23 @@ def ultra_aggressive_cleanup() -> None:
     For use with APScheduler in web server environments.
     """
     try:
-        # Run the async function in the current event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is running, create a task
-            asyncio.create_task(_async_ultra_aggressive_cleanup())
-        else:
-            # If no loop running, run directly
-            loop.run_until_complete(_async_ultra_aggressive_cleanup())
+        # Try to get the current event loop
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If loop is running, create a task
+                asyncio.create_task(_async_ultra_aggressive_cleanup())
+            else:
+                # If no loop running, run directly
+                loop.run_until_complete(_async_ultra_aggressive_cleanup())
+        except RuntimeError:
+            # No event loop in current thread, create a new one
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                new_loop.run_until_complete(_async_ultra_aggressive_cleanup())
+            finally:
+                new_loop.close()
     except Exception as e:
         logger.exception(f"Error in ultra aggressive cleanup: {e}")
 

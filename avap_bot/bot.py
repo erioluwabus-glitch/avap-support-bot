@@ -413,20 +413,42 @@ async def root():
 async def initialize_services():
     """Initializes services and sets up the bot."""
     logger.debug("Initializing services...")
-    try:
-        # Initialize Supabase
-        init_supabase()
 
-        # Initialize the Telegram Application
+    # Check for critical environment variables first
+    if not BOT_TOKEN:
+        logger.error("❌ BOT_TOKEN environment variable not set!")
+        raise Exception("BOT_TOKEN is required for bot operation")
+
+    try:
+        # Initialize Supabase (lightweight - no blocking operations)
+        try:
+            init_supabase()
+            logger.debug("Supabase initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Supabase initialization failed: {e}")
+            logger.warning("Continuing without Supabase - some features may not work")
+
+        # Initialize the Telegram Application with timeout protection
         logger.debug("Initializing Telegram Application...")
-        await bot_app.initialize()
-        logger.debug("Telegram Application initialized successfully")
+        try:
+            await asyncio.wait_for(bot_app.initialize(), timeout=60.0)  # 60 second timeout
+            logger.debug("Telegram Application initialized successfully")
+        except asyncio.TimeoutError:
+            logger.error("❌ Telegram Application initialization timed out")
+            raise Exception("Telegram Application initialization failed - cannot continue")
+        except Exception as e:
+            logger.error(f"❌ Telegram Application initialization failed: {e}")
+            raise Exception(f"Telegram Application initialization failed: {e}")
 
         # Enhanced memory monitoring to prevent Render restarts (reduced frequency)
-        enable_detailed_memory_monitoring()
-        bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)  # Every 5 minutes, starting in 60 seconds
-        await bot_app.job_queue.start()  # Start the job queue
-        logger.info("Memory monitoring scheduled every 5 minutes (starting in 60 seconds)")
+        try:
+            enable_detailed_memory_monitoring()
+            bot_app.job_queue.run_repeating(monitor_memory, interval=300, first=60)  # Every 5 minutes, starting in 60 seconds
+            await bot_app.job_queue.start()  # Start the job queue
+            logger.info("Memory monitoring scheduled every 5 minutes (starting in 60 seconds)")
+        except Exception as e:
+            logger.error(f"❌ Memory monitoring setup failed: {e}")
+            logger.warning("Continuing without memory monitoring")
 
         # Disable memory watchdog to prevent restart loops
         # start_memory_watchdog()
@@ -434,7 +456,12 @@ async def initialize_services():
 
         # Schedule daily tips (if scheduler is available)
         if SCHEDULER_AVAILABLE and scheduler:
-            await schedule_daily_tips(bot_app.bot, scheduler)
+            try:
+                await schedule_daily_tips(bot_app.bot, scheduler)
+                logger.debug("Daily tips scheduled successfully")
+            except Exception as e:
+                logger.error(f"❌ Daily tips scheduling failed: {e}")
+                logger.warning("Continuing without daily tips scheduling")
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
@@ -760,8 +787,20 @@ async def on_startup():
         logger.info(f"Setting webhook with WEBHOOK_URL: {webhook_base}")
         logger.info(f"Setting webhook with BOT_TOKEN: {bot_token[:10]}...")  # Only log first 10 chars for security
         logger.info(f"Setting webhook to: {webhook_url[:50]}...")  # Truncate webhook URL for security
-        await bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])
-        logger.info("Webhook set successfully")
+
+        try:
+            # Set webhook with timeout to prevent hanging
+            await asyncio.wait_for(
+                bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"]),
+                timeout=30.0  # 30 second timeout
+            )
+            logger.info("Webhook set successfully")
+        except asyncio.TimeoutError:
+            logger.error("❌ Webhook setting timed out - continuing without webhook")
+            logger.warning("Bot will run in polling mode if WEBHOOK_URL is not accessible")
+        except Exception as e:
+            logger.error(f"❌ Failed to set webhook: {e}")
+            logger.warning("Bot will run in polling mode if webhook setup fails")
     elif webhook_base:
         logger.warning("WEBHOOK_URL set but BOT_TOKEN missing. Webhook not configured.")
     else:
