@@ -956,15 +956,15 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         logger.info(f"Checking if forwarding is needed - QUESTIONS_GROUP_ID is truthy: {bool(QUESTIONS_GROUP_ID)}")
         if QUESTIONS_GROUP_ID and QUESTIONS_GROUP_ID != 0:
             logger.info(f"Forwarding question to questions group {QUESTIONS_GROUP_ID}")
-
-            # Check if inline keyboards should be disabled (when message comes from group or going to group)
-            if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID, allow_admin_operations=True):
-                logger.info("Disabling inline keyboard for group chat")
-                keyboard = None
-            else:
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
-                ]])
+            try:
+                # Check if inline keyboards should be disabled (when message comes from group or going to group)
+                if should_disable_inline_keyboards(update, QUESTIONS_GROUP_ID, allow_admin_operations=True):
+                    logger.info("Disabling inline keyboard for group chat")
+                    keyboard = None
+                else:
+                    keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
+                    ]])
             
             if file_id:
                 # For voice and video, try to forward the original message first
@@ -1046,6 +1046,18 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                     f"✅ **Question Submitted!**\n\n"
                     f"Your question has been forwarded to the support team.\n"
                     f"You'll receive an answer soon.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                logger.info(f"Successfully forwarded question to questions group {QUESTIONS_GROUP_ID}")
+                
+            except Exception as e:
+                logger.exception(f"Failed to forward question to questions group {QUESTIONS_GROUP_ID}: {e}")
+                await update.message.reply_text(
+                    f"⚠️ **Question Saved!**\n\n"
+                    f"Your question has been recorded in our system.\n"
+                    f"However, there was an issue forwarding it to the support team.\n"
+                    f"An admin will check the system for new questions.",
                     parse_mode=ParseMode.MARKDOWN
                 )
         else:
@@ -1269,12 +1281,24 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 ]])
 
             # Send to questions group for admin to answer
-            await context.bot.send_message(
-                QUESTIONS_GROUP_ID,
-                forward_text,
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=keyboard if keyboard else None
-            )
+            try:
+                await context.bot.send_message(
+                    QUESTIONS_GROUP_ID,
+                    forward_text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=keyboard if keyboard else None
+                )
+                logger.info(f"Successfully forwarded support group question to questions group {QUESTIONS_GROUP_ID}")
+            except Exception as e:
+                logger.exception(f"Failed to forward support group question to questions group {QUESTIONS_GROUP_ID}: {e}")
+                await update.message.reply_text(
+                    f"⚠️ Your question has been recorded, @{username}!\n"
+                    f"However, there was an issue forwarding it to the support team.\n"
+                    f"An admin will check the system for new questions.",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_to_message_id=update.message.message_id
+                )
+                return
 
             # Confirm in support group
             await update.message.reply_text(
