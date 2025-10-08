@@ -63,6 +63,10 @@ ASK_QUESTION = range(6, 7)
 ASSIGNMENT_GROUP_ID = int(os.getenv("ASSIGNMENT_GROUP_ID", "0"))
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID", "0"))
 QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0"))
+
+# Debug: Log group IDs at startup
+logger = logging.getLogger(__name__)
+logger.info(f"Group IDs configured - ASSIGNMENT: {ASSIGNMENT_GROUP_ID}, SUPPORT: {SUPPORT_GROUP_ID}, QUESTIONS: {QUESTIONS_GROUP_ID}")
 LANDING_PAGE_LINK = os.getenv("LANDING_PAGE_LINK", "https://t.me/avapsupportbot")
 
 
@@ -894,7 +898,10 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await run_blocking(append_question, question_data)
 
         # Forward to questions group (where admins monitor questions)
+        logger.info(f"QUESTIONS_GROUP_ID: {QUESTIONS_GROUP_ID} (type: {type(QUESTIONS_GROUP_ID)})")
+        logger.info(f"Checking if forwarding is needed - QUESTIONS_GROUP_ID is truthy: {bool(QUESTIONS_GROUP_ID)}")
         if QUESTIONS_GROUP_ID and QUESTIONS_GROUP_ID != 0:
+            logger.info(f"Forwarding question to questions group {QUESTIONS_GROUP_ID}")
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("💬 Answer", callback_data=f"answer_{user_id}_{username}")
             ]])
@@ -983,6 +990,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 )
         else:
             # QUESTIONS_GROUP_ID not configured - question saved but not forwarded
+            logger.warning(f"QUESTIONS_GROUP_ID not configured or is 0: {QUESTIONS_GROUP_ID} - question saved but not forwarded")
             await update.message.reply_text(
                 f"⚠️ **Question Saved!**\n\n"
                 f"Your question has been recorded in our system.\n"

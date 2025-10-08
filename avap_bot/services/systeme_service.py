@@ -16,6 +16,8 @@ SYSTEME_BASE_URL = os.getenv("SYSTEME_BASE_URL", "https://api.systeme.io")
 async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
     """Create contact in Systeme.io and apply tag"""
     try:
+        logger.info(f"Systeme.io configuration - API_KEY: {'SET' if SYSTEME_API_KEY else 'NOT SET'}, BASE_URL: {SYSTEME_BASE_URL}")
+        
         if not SYSTEME_API_KEY:
             logger.warning("SYSTEME_API_KEY not set, skipping contact creation")
             logger.warning("Please set SYSTEME_API_KEY environment variable with your Systeme.io API key")
@@ -33,6 +35,8 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             "Authorization": f"Bearer {SYSTEME_API_KEY}",
             "Content-Type": "application/json"
         }
+        
+        logger.info(f"Using API key format: {SYSTEME_API_KEY[:10]}... (length: {len(SYSTEME_API_KEY)})")
 
         # Create contact - try different payload formats for Systeme.io
         name_parts = contact_data.get("name", "").split()
@@ -76,6 +80,10 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 f"{SYSTEME_BASE_URL}/api/v1/contacts",
                 f"{SYSTEME_BASE_URL}/api/v2/contacts"
             ]
+            
+            logger.info(f"Trying {len(endpoints_to_try)} endpoints with {len(contact_payloads)} payload formats")
+            for endpoint in endpoints_to_try:
+                logger.info(f"  - {endpoint}")
             
             response = None
             successful_endpoint = None
