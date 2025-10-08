@@ -74,6 +74,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
     """Handle /start command. Check for verification and start verification if needed."""
     try:
         user = update.effective_user
+        user_id = user.id
         logger.info(f"Start command received from user {user_id} ({user.username})")
 
         # Check if user is already verified
@@ -93,7 +94,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> O
         )
         return VERIFY_IDENTIFIER
     except Exception as e:
-        logger.exception(f"Error in start_handler for user {update.effective_user_id}: {e}")
+        logger.exception(f"Error in start_handler for user {user_id}: {e}")
         try:
             # Check if we have a valid message to reply to
             if update.message and update.message.message_id:
@@ -221,7 +222,7 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
             reply_markup=keyboard
         )
     except Exception as e:
-        logger.exception(f"Error in _show_main_menu for user {update.effective_user_id}: {e}")
+        logger.exception(f"Error in _show_main_menu for user {update.effective_user.id}: {e}")
         try:
             if update.message and update.message.message_id:
                 await update.message.reply_text(
@@ -313,7 +314,7 @@ async def submit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle file submission"""
     try:
-        user_id = update.effective_user_id
+        user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
         module = context.user_data['submit_module']
         submission_type = context.user_data['submit_type']
@@ -460,7 +461,7 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
             logger.error(f"Failed to send assignment error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user_id)
+        verified_user = check_verified_user(update.effective_user.id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -516,7 +517,7 @@ async def share_win_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle win file submission"""
     try:
-        user_id = update.effective_user_id
+        user_id = update.effective_user.id
         # Use display name (first_name + last_name) instead of username
         user_display_name = update.effective_user.full_name or update.effective_user.first_name or "Unknown User"
         win_type = context.user_data['win_type']
@@ -664,7 +665,7 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             logger.error(f"Failed to send share win error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user_id)
+        verified_user = check_verified_user(update.effective_user.id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -683,7 +684,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     try:
-        user_id = update.effective_user_id
+        user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
         
         # Get student data with error handling
@@ -789,7 +790,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         from avap_bot.utils.memory_monitor import log_memory_usage
         log_memory_usage("before ask question processing")
         
-        user_id = update.effective_user_id
+        user_id = update.effective_user.id
         username = update.effective_user.username or "unknown"
         
         # Get question content
@@ -1066,7 +1067,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             logger.error(f"Failed to send question error message: {reply_error}")
 
         # Show main menu after failure
-        verified_user = check_verified_user(update.effective_user_id)
+        verified_user = check_verified_user(update.effective_user.id)
         if verified_user:
             await _show_main_menu(update, context, verified_user)
 
@@ -1078,7 +1079,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text("❌ Operation cancelled.")
 
     # Show main menu after cancellation
-    verified_user = check_verified_user(update.effective_user_id)
+    verified_user = check_verified_user(update.effective_user.id)
     if verified_user:
         await _show_main_menu(update, context, verified_user)
 
@@ -1296,7 +1297,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
 async def _is_verified(update: Update) -> bool:
     """Check if user is verified by checking Supabase."""
-    return check_verified_user(update.effective_user_id) is not None
+    return check_verified_user(update.effective_user.id) is not None
 
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

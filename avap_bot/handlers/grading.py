@@ -238,10 +238,13 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     try:
         # Get student's submissions
-        logger.info(f"Looking up submissions for username: '{verified_user['username']}'")
-        submissions = await run_blocking(get_student_submissions, verified_user['username'])
+        username = verified_user.get('username')
+        telegram_id = verified_user.get('telegram_id')
 
-        logger.info(f"Retrieved {len(submissions)} submissions for user {verified_user['username']}")
+        logger.info(f"Looking up submissions for username: '{username}', telegram_id: {telegram_id}")
+        submissions = await run_blocking(get_student_submissions, username, telegram_id=telegram_id)
+
+        logger.info(f"Retrieved {len(submissions)} submissions for user {username or f'telegram_id:{telegram_id}'}")
         logger.info(f"Verified user data: {verified_user}")
         for i, sub in enumerate(submissions):
             logger.info(f"Submission {i}: username='{sub.get('username')}', status='{sub.get('status')}', grade='{sub.get('grade')}', module='{sub.get('module')}'")

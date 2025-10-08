@@ -604,7 +604,7 @@ def append_question(payload: Dict[str, Any]) -> bool:
         ], ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
 
 
-def get_student_submissions(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_student_submissions(username: str, module: Optional[str] = None, telegram_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get student submissions from Google Sheets or CSV fallback"""
     try:
         spreadsheet = _get_spreadsheet()
@@ -615,8 +615,17 @@ def get_student_submissions(username: str, module: Optional[str] = None) -> List
                 sheet = spreadsheet.worksheet("submissions")
                 # Get all data
                 records = sheet.get_all_records()
-                # Filter by username and optionally module
-                student_submissions = [record for record in records if record.get("username") == username]
+
+                # Filter by username and/or telegram_id and optionally module
+                student_submissions = []
+                for record in records:
+                    # Check if record matches either username or telegram_id
+                    username_match = username and record.get("username") == username
+                    telegram_id_match = telegram_id and record.get("telegram_id") == telegram_id
+
+                    if username_match or telegram_id_match:
+                        student_submissions.append(record)
+
                 if module:
                     student_submissions = [s for s in student_submissions if s.get("module") == module]
                 return student_submissions
@@ -625,7 +634,7 @@ def get_student_submissions(username: str, module: Optional[str] = None) -> List
 
         # CSV fallback mode
         logger.info("Using CSV fallback for submissions")
-        return _get_student_submissions_csv(username, module)
+        return _get_student_submissions_csv(username, module, telegram_id)
 
     except Exception as e:
         logger.exception("Failed to get student submissions: %s", e)
@@ -636,13 +645,21 @@ def get_student_submissions(username: str, module: Optional[str] = None) -> List
             return []
 
 
-def _get_student_submissions_csv(username: str, module: Optional[str] = None) -> List[Dict[str, Any]]:
+def _get_student_submissions_csv(username: str, module: Optional[str] = None, telegram_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Get student submissions from CSV file (fallback mode)"""
     try:
         records = _read_csv_fallback("submissions.csv")
 
-        # Filter by username and optionally module
-        student_submissions = [record for record in records if record.get("username") == username]
+        # Filter by username and/or telegram_id and optionally module
+        student_submissions = []
+        for record in records:
+            # Check if record matches either username or telegram_id
+            username_match = username and record.get("username") == username
+            telegram_id_match = telegram_id and record.get("telegram_id") == telegram_id
+
+            if username_match or telegram_id_match:
+                student_submissions.append(record)
+
         if module:
             student_submissions = [s for s in student_submissions if s.get("module") == module]
 
@@ -659,6 +676,30 @@ def _get_student_submissions_csv(username: str, module: Optional[str] = None) ->
 
     except Exception as e:
         logger.exception("Failed to get student submissions from CSV: %s", e)
+        return []
+
+
+def get_all_submissions() -> List[Dict[str, Any]]:
+    """Get all student submissions from Google Sheets or CSV fallback"""
+    try:
+        spreadsheet = _get_spreadsheet()
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                sheet = spreadsheet.worksheet("submissions")
+                # Get all data
+                records = sheet.get_all_records()
+                return records
+            except Exception as e:
+                logger.warning("Failed to get all submissions from Google Sheets, falling back to CSV: %s", e)
+
+        # CSV fallback mode
+        logger.info("Using CSV fallback for all submissions")
+        return _read_csv_fallback("submissions.csv")
+
+    except Exception as e:
+        logger.exception("Failed to get all submissions: %s", e)
         return []
 
 

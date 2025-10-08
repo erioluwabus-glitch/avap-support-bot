@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins
+from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
@@ -590,7 +590,7 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         # Get total submissions count (from Google Sheets)
         try:
-            submissions = await run_blocking(get_student_submissions, "all")  # Get all submissions
+            submissions = await run_blocking(get_all_submissions)  # Get all submissions
             total_submissions = len(submissions) if submissions else 0
         except Exception as e:
             logger.warning(f"Failed to get submissions count: {e}")
