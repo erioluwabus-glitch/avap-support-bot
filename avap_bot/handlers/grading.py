@@ -567,6 +567,11 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
     if not context.user_data.get('waiting_for_comment'):
         logger.info(f"❌ No grading context found for user {update.effective_user.id}, ignoring message")
         return
+    
+    # Additional check: make sure this is NOT a question answering context
+    if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
+        logger.info(f"❌ User {update.effective_user.id} is in question answering mode, not grading mode")
+        return
 
     submission_id = context.user_data.get('grading_submission_id')
     score = context.user_data.get('grading_score')
@@ -781,6 +786,7 @@ def register_handlers(application):
 
     # Add inline grading handlers - handle all grading-related callbacks
     application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
+    # Only handle comment submission when user is in grading context
     application.add_handler(MessageHandler(
         filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_comment_submission
