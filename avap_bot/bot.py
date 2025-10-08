@@ -239,18 +239,25 @@ def webhook_health_check():
 
         # Test webhook endpoint
         webhook_url = os.getenv("WEBHOOK_URL")
+        health_token = os.getenv("HEALTH_TOKEN")
+
         if webhook_url:
             try:
-                # Make a simple request to the webhook URL to ensure it's responsive
-                response = httpx.get(f"{webhook_url}/health", timeout=10.0)
+                # Make a request to the webhook URL with health token if available
+                headers = {}
+                params = {}
+
+                if health_token:
+                    headers["X-Health-Token"] = health_token
+
+                response = httpx.get(f"{webhook_url}/health", headers=headers, params=params, timeout=10.0)
 
                 if response.status_code == 200:
                     logger.debug("Webhook health check: OK")
                 elif response.status_code == 401:
-                    logger.warning("Webhook health check: HTTP 401 - Authentication failed (do not retry)")
-                    # Don't retry on 401 - it usually indicates credential issues
-                    return
+                    logger.warning("Webhook health check: HTTP 401 - Authentication failed")
                 elif response.status_code == 429:
+                    logger.debug("Webhook health check: HTTP 429 - Rate limited (normal)")
                     # Respect Retry-After header for rate limiting
                     retry_after = response.headers.get("Retry-After")
                     if retry_after:

@@ -1,144 +1,169 @@
-[1mdiff --git a/avap_bot/bot.py b/avap_bot/bot.py[m
-[1mindex 9e5d84b..e613d8a 100644[m
-[1m--- a/avap_bot/bot.py[m
-[1m+++ b/avap_bot/bot.py[m
-[36m@@ -54,7 +54,8 @@[m [masync def telegram_webhook(request: Request):[m
-         logger.error(f"Error in webhook: {e}", exc_info=True)[m
-         return Response(status_code=500)[m
- [m
-[31m-app.post("/webhook")(telegram_webhook)[m
-[32m+[m[32m# Handle webhook with bot token in path (Telegram standard format)[m
-[32m+[m[32mapp.post("/webhook/{bot_token}")(telegram_webhook)[m
- app.get("/health")(health_check)[m
- [m
- [m
-[36m@@ -85,10 +86,18 @@[m [masync def main_polling():[m
- async def on_startup():[m
-     """Actions to perform on application startup."""[m
-     await initialize_services()[m
-[31m-    webhook_url = os.getenv("WEBHOOK_URL")[m
-[31m-    if webhook_url:[m
-[32m+[m
-[32m+[m[32m    # Set webhook URL - construct proper Telegram webhook URL[m
-[32m+[m[32m    webhook_base = os.getenv("WEBHOOK_URL")[m
-[32m+[m[32m    bot_token = os.getenv("BOT_TOKEN")[m
-[32m+[m
-[32m+[m[32m    if webhook_base and bot_token:[m
-[32m+[m[32m        # Construct proper webhook URL: https://your-app.com/webhook/BOT_TOKEN[m
-[32m+[m[32m        webhook_url = f"{webhook_base.rstrip('/')}/webhook/{bot_token}"[m
-         logger.info(f"Setting webhook to {webhook_url}")[m
-         await bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"])[m
-[32m+[m[32m    elif webhook_base:[m
-[32m+[m[32m        logger.warning("WEBHOOK_URL set but BOT_TOKEN missing. Webhook not configured.")[m
-     else:[m
-         logger.warning("WEBHOOK_URL not set. Bot will not receive updates unless webhook is set manually.")[m
- [m
-warning: in the working copy of 'avap_bot/bot.py', LF will be replaced by CRLF the next time Git touches it
-[1mdiff --git a/avap_bot/bot.py b/avap_bot/bot.py[m
-[1mindex 73e8686..adc52a7 100644[m
-[1m--- a/avap_bot/bot.py[m
-[1m+++ b/avap_bot/bot.py[m
-[36m@@ -4,6 +4,7 @@[m [mMain entry point for the AVAP Support Bot.[m
- import os[m
- import logging[m
- import asyncio[m
-[32m+[m[32mimport time[m
- from telegram import Update[m
- from telegram.ext import Application[m
- from fastapi import FastAPI, Request, Response[m
-[36m@@ -39,9 +40,66 @@[m [mscheduler.start()[m
- logger.info("Scheduler started for daily tips")[m
- [m
- # --- Webhook and Health Check ---[m
-[32m+[m[32masync def keep_alive_check(bot):[m
-[32m+[m[32m    """Background keep-alive check to prevent Render timeouts."""[m
-[32m+[m[32m    try:[m
-[32m+[m[32m        # Perform a simple database check to keep connection alive[m
-[32m+[m[32m        from avap_bot.services.supabase_service import get_supabase[m
-[32m+[m[32m        client = get_supabase()[m
-[32m+[m[32m        await client.table("verified_users").select("id").limit(1).execute()[m
-[32m+[m
-[32m+[m[32m        # Log activity to show the bot is active[m
-[32m+[m[32m        logger.info("Keep-alive check completed - Bot is active and responsive")[m
-[32m+[m
-[32m+[m[32m    except Exception as e:[m
-[32m+[m[32m        logger.error(f"Keep-alive check failed: {e}")[m
-[32m+[m[32m        # Try to reinitialize if there are issues[m
-[32m+[m[32m        try:[m
-[32m+[m[32m            from avap_bot.services.supabase_service import init_supabase[m
-[32m+[m[32m            await init_supabase()[m
-[32m+[m[32m            logger.info("Reinitialized Supabase connection")[m
-[32m+[m[32m        except Exception as reinit_error:[m
-[32m+[m[32m            logger.error(f"Failed to reinitialize Supabase: {reinit_error}")[m
-[32m+[m
-[32m+[m
- async def health_check():[m
-[31m-    """Simple health check endpoint."""[m
-[31m-    return {"status": "ok"}[m
-[32m+[m[32m    """Comprehensive health check endpoint with keep-alive functionality."""[m
-[32m+[m[32m    try:[m
-[32m+[m[32m        # Check if Supabase is still connected[m
-[32m+[m[32m        from avap_bot.services.supabase_service import get_supabase[m
-[32m+[m[32m        client = get_supabase()[m
-[32m+[m[32m        await client.table("verified_users").select("id").limit(1).execute()[m
-[32m+[m
-[32m+[m[32m        # Check if bot application is initialized[m
-[32m+[m[32m        if not bot_app or not hasattr(bot_app, 'bot'):[m
-[32m+[m[32m            raise RuntimeError("Bot application not initialized")[m
-[32m+[m
-[32m+[m[32m        # Check if scheduler is running[m
-[32m+[m[32m        if not scheduler or scheduler.state == 0:[m
-[32m+[m[32m            logger.warning("Scheduler may not be running properly")[m
-[32m+[m
-[32m+[m[32m        # Log health check activity to prevent timeouts[m
-[32m+[m[32m        logger.info("Health check passed - Bot is alive and responsive")[m
-[32m+[m
-[32m+[m[32m        return {[m
-[32m+[m[32m            "status": "healthy",[m
-[32m+[m[32m            "service": "avap-support-bot",[m
-[32m+[m[32m            "version": "2.0.0",[m
-[32m+[m[32m            "timestamp": time.time(),[m
-[32m+[m[32m            "uptime": "active",[m
-[32m+[m[32m            "supabase_connected": True,[m
-[32m+[m[32m            "bot_initialized": True,[m
-[32m+[m[32m            "scheduler_running": scheduler.running if scheduler else False,[m
-[32m+[m[32m            "keep_alive": "active"[m
-[32m+[m[32m        }[m
-[32m+[m
-[32m+[m[32m    except Exception as e:[m
-[32m+[m[32m        logger.error(f"Health check failed: {e}")[m
-[32m+[m[32m        return {[m
-[32m+[m[32m            "status": "unhealthy",[m
-[32m+[m[32m            "error": str(e),[m
-[32m+[m[32m            "timestamp": time.time()[m
-[32m+[m[32m        }[m
- [m
- async def telegram_webhook(request: Request):[m
-     """Handle incoming Telegram updates."""[m
-[36m@@ -66,7 +124,7 @@[m [masync def initialize_services():[m
-     logger.info("Initializing services...")[m
-     try:[m
-         # Initialize Supabase[m
-[31m-        init_supabase()[m
-[32m+[m[32m        await init_supabase()[m
- [m
-         # Initialize the Telegram Application[m
-         logger.info("Initializing Telegram Application...")[m
-[36m@@ -76,6 +134,17 @@[m [masync def initialize_services():[m
-         # Schedule daily tips[m
-         await schedule_daily_tips(bot_app.bot, scheduler)[m
- [m
-[32m+[m[32m        # Schedule keep-alive health checks every 5 minutes[m
-[32m+[m[32m        scheduler.add_job([m
-[32m+[m[32m            keep_alive_check,[m
-[32m+[m[32m            'interval',[m
-[32m+[m[32m            minutes=5,[m
-[32m+[m[32m            args=[bot_app.bot],[m
-[32m+[m[32m            id='keep_alive',[m
-[32m+[m[32m            replace_existing=True[m
-[32m+[m[32m        )[m
-[32m+[m[32m        logger.info("Keep-alive health checks scheduled every 5 minutes")[m
-[32m+[m
-         logger.info("Services initialized successfully.")[m
-     except Exception as e:[m
-         logger.critical(f"Failed to initialize services: {e}", exc_info=True)[m
+[33mcommit ba64bb2cc348ee247d677c0d8a77220faa7243ef[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 11:54:46 2025 +0100
+
+    Fix View Grades feature - correct function call parameters
+    
+    - Fixed run_blocking call in grading.py to pass telegram_id as positional argument
+    - Function signature expects: get_student_submissions(username, module, telegram_id)
+    - Changed from: run_blocking(get_student_submissions, username, telegram_id=telegram_id)
+    - Changed to: run_blocking(get_student_submissions, username, None, telegram_id)
+    - This resolves the 'run_in_executor() got an unexpected keyword argument' error
+
+[33mcommit 06c2f9fecc31181b405dd8398b003b10e24d531d[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 11:51:12 2025 +0100
+
+    Fix bot hanging issue in grading comment flow - improved error handling and timeout protection
+
+[33mcommit a1c48364684f1ca985c98f1c31f06b1bb230cd3b[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 11:33:13 2025 +0100
+
+    🔧 FIX: ImportError for ultra_aggressive_cleanup function
+    
+    - Renamed sync_ultra_aggressive_cleanup to ultra_aggressive_cleanup
+    - Added backward compatibility alias for existing imports
+    - Updated bot.py import to use the correct function name
+    - Fixed function naming mismatch that was causing ImportError
+    
+    This resolves the 'cannot import name sync_ultra_aggressive_cleanup' error during bot startup.
+
+[33mcommit fd21a3abc7e29f3b350f268b997f459b23002c74[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 10:23:25 2025 +0100
+
+    🔧 FIX: Systeme.io contact tagging for verified students
+    
+    - Fixed hardcoded 'verified' tag to use SYSTEME_ACHIEVER_TAG_ID environment variable
+    - Added 'status': 'pending' field to pending_data when creating pending verifications
+    - Ensured contact creation uses proper status values for tagging
+    - Updated all payload formats to use SYSTEME_ACHIEVER_TAG_ID for verified contacts
+    
+    This ensures that when students are verified, they get properly tagged with the correct achiever tag from the environment variable.
+
+[33mcommit 9b64326e001a149671e7535d390bd6dec6b6b3c4[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 10:18:39 2025 +0100
+
+    🔧 FIX: RuntimeWarning for async coroutine in APScheduler
+    
+    - Modified scheduler configuration to use default AsyncIOScheduler settings
+    - Created synchronous wrapper function send_daily_tip_sync for scheduler
+    - Updated job scheduling to use sync wrapper instead of async function
+    - Simplified scheduler setup to prevent async function execution issues
+    
+    This should resolve the 'coroutine never awaited' RuntimeWarning in APScheduler.
+
+[33mcommit 3b75111b52f131370b9936c2b87482f89b4d0e6b[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 10:05:40 2025 +0100
+
+    🔧 FIX: Critical AttributeError fixes and submission lookup improvements
+    
+    - Fixed all 'update.effective_user_id' references to 'update.effective_user.id' (10 locations)
+    - Updated get_student_submissions to support telegram_id lookups when username is None
+    - Modified view_grades_handler to use telegram_id fallback when username is None
+    - Added get_all_submissions function for stats command
+    - Fixed stats handler call to use correct function
+    - Enhanced submission lookup to work with both username and telegram_id
+    
+    These fixes resolve:
+    1. All AttributeError issues across submit, share_win, status, ask handlers
+    2. View grades not finding submissions when username is None
+    3. Stats command failing to count submissions
+
+[33mcommit 9ed85074312369de24c048252206814ccb232e7c[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 09:26:42 2025 +0100
+
+    🔧 FIX: Systeme.io contact tagging and NameError issues
+    
+    - Fixed NameError: user.id -> user_id in ask_question function (2 locations)
+    - Added debugging for Systeme.io contact tagging conditions
+    - Enhanced logging to show why achiever tag may not be applied
+    - Check for SYSTEME_ACHIEVER_TAG_ID environment variable presence
+    - Verify contact status before applying tags
+    
+    This will help identify why contacts are created but not tagged with 'verified'.
+
+[33mcommit 7de9387ea5799f6aae0ce925eafa0c2e699c5c62[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 09:22:38 2025 +0100
+
+    🔒 FIX: Restrict bot functionality to private chats only
+    
+    - Added ChatType.PRIVATE filter to all student conversation handlers
+    - Restricted message handlers for View Grades and Check Status to private chats
+    - Fixed answer submission handler to only work in private chats
+    - Fixed grading comment submission handler to only work in private chats
+    - Added chat type restrictions to prevent inline keyboard responses in group chats
+    
+    This ensures the bot's main functionality only works in private DMs with the bot, not in group chats.
+
+[33mcommit 998eb12b6658c4f04c2c362cc82a47a7a8218471[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 09:18:50 2025 +0100
+
+    🔧 ENHANCE: Add comprehensive debugging for answer feature
+    
+    - Fixed ANSWER_TEXT constant reference that was undefined
+    - Added detailed logging to handle_answer_message function
+    - Enhanced answer_text function with content type detection logging
+    - Added debugging for Google Sheets status updates
+    - Enhanced student answer sending with success/failure logging
+    - Added context data validation and error handling
+    - Improved logging for all stages of answer processing
+    
+    This will help identify exactly why the answer feature is not working properly.
+
+[33mcommit 15ef827954b0ac0881bbc8fee9f3da4e53093dd1[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 09:10:11 2025 +0100
+
+    🎉 ENHANCE: Add user display name to share win messages
+    
+    - Modified share_win_file to use user's full name (display name) instead of username
+    - Updated all forward_text messages to include user's display name with emoji
+    - Added proper Markdown escaping for user names to prevent parsing errors
+    - Enhanced win messages with personalized format: '🎉 **Name** shared their win!'
+    - Applied changes to text, audio, video, and document win types
+    - Messages sent to support group now show the person's actual name instead of username
+
+[33mcommit cff6cf1da741fb8a0fe283ebddd257de2795d3cb[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 08:49:50 2025 +0100
+
+    🔧 FIX: Resolve IndentationError in ai_service.py
+    
+    - Fixed unexpected indent on line 17 (SentenceTransformer = None)
+    - Fixed indentation for return statements in find_faq_match and find_similar_answered_question
+    - All syntax errors resolved for successful deployment
+
+[33mcommit 203272aea20b06637c89cef8d3890750dd36ae07[m
+Author: Eri Daniel <erioluwabus@gmail.com>
+Date:   Wed Oct 8 08:34:20 2025 +0100
+
+    🔧 CRITICAL FIXES: Resolve multiple bot functionality issues
+    
+    ✅ ANSWER FEATURE FIXES:
+    - Fixed NameError in support_group_ask_handler (user_id -> user.id)
+    - Enhanced answer callback logging for better debugging
+    - Improved answer message handler with comprehensive logging
+    - Fixed answer flow from question to student notification
+    
+    ✅ BROADCAST FEATURE FIXES:
+    - Fixed handler registration conflicts causing broadcast failures
+    - Enhanced broadcast command logging for better debugging
+    - Improved broadcast type callback processing
+    - Added comprehensive broadcast content logging
+    
+    ✅ STATS COMMAND IMPLEMENTATION:
+    - Implemented missing /stats command with verified students count
+    - Added comprehensive bot statistics display
+    - Enhanced admin-only access with proper error handling
+    - Added database and Google Sheets integration for stats
+    
+    ✅ SYSTEME.IO INTEGRATION FIXES:
+    - Updated API authentication from Bearer to X-API-Key header
+    - Added current API v3 endpoints and paylo

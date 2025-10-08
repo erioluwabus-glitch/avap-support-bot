@@ -690,7 +690,7 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Get student data with error handling
         try:
-            submissions = await run_blocking(get_student_submissions, username)
+            submissions = await run_blocking(get_student_submissions, username, None, None)
             wins = await run_blocking(get_student_wins, username)
             questions = await run_blocking(get_student_questions, username)
         except Exception as e:

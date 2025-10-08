@@ -16,7 +16,10 @@ async def run_blocking(func: Callable, *args, **kwargs) -> Any:
     """Run blocking function in thread pool executor"""
     try:
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(_executor, func, *args, **kwargs)
+        # Create a wrapper function that handles both args and kwargs properly
+        def wrapper():
+            return func(*args, **kwargs)
+        result = await loop.run_in_executor(_executor, wrapper)
         return result
     except Exception as e:
         logger.exception("Blocking operation failed: %s", e)
