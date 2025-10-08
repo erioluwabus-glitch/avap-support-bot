@@ -50,7 +50,7 @@ async def answer_question(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data['question_info'] = question_info
 
     # Show answer type options (check if inline keyboards should be disabled)
-    if should_disable_inline_keyboards(update):
+    if should_disable_inline_keyboards(update, allow_admin_operations=True):
         logger.info("Disabling inline keyboard for group chat")
         keyboard = None
     else:

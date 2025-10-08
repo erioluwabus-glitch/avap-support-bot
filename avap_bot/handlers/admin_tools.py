@@ -145,7 +145,7 @@ async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE)
             message += f"   Wins: {wins}\n\n"
 
         # Add broadcast button (check if inline keyboards should be disabled)
-        if should_disable_inline_keyboards(update):
+        if should_disable_inline_keyboards(update, allow_admin_operations=True):
             logger.info("Disabling inline keyboard for group chat")
             keyboard = None
         else:
@@ -206,7 +206,7 @@ async def broadcast_history_cmd(update: Update, context: ContextTypes.DEFAULT_TY
                 message += f"💬 Content: \"{content_preview}\"\n"
 
             # Add delete button for this broadcast (check if inline keyboards should be disabled)
-            if should_disable_inline_keyboards(update):
+            if should_disable_inline_keyboards(update, allow_admin_operations=True):
                 logger.info("Disabling inline keyboard for group chat")
                 keyboard = None
             else:
@@ -347,7 +347,7 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     logger.info(f"✅ Admin check passed for user {update.effective_user.id}, showing broadcast options")
 
     # Show broadcast type options (check if inline keyboards should be disabled)
-    if should_disable_inline_keyboards(update):
+    if should_disable_inline_keyboards(update, allow_admin_operations=True):
         logger.info("Disabling inline keyboard for group chat")
         keyboard = None
     else:

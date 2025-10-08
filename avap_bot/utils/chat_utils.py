@@ -31,20 +31,33 @@ def is_group_chat(update: Update) -> bool:
         return False
 
 
-def should_disable_inline_keyboards(update: Update, target_chat_id: int = None) -> bool:
+def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, allow_admin_operations: bool = False) -> bool:
     """
     Check if inline keyboards should be disabled for this update.
     We disable inline keyboards when:
-    1. The message/callback is from a group chat (group or supergroup)
+    1. The message/callback is from a group chat (group or supergroup) - UNLESS it's an admin operation
     2. The message/callback is being sent TO a group chat
 
     Args:
         update: The Telegram update object (message or callback_query)
         target_chat_id: Optional target chat ID to check if sending TO a group
+        allow_admin_operations: If True, allow inline keyboards for admin operations even in group chats
 
     Returns:
         bool: True if inline keyboards should be disabled, False otherwise
     """
+    # Check if this is an admin operation that should be allowed in group chats
+    if allow_admin_operations:
+        # For admin operations, check if the user is an admin
+        try:
+            from avap_bot.handlers.grading import _is_admin
+            if _is_admin(update):
+                logger.info("Admin operation detected - allowing inline keyboards even in group chat")
+                return False
+        except ImportError:
+            # If we can't import the admin check, fall back to normal behavior
+            pass
+
     # Check if the message/callback originated from a group chat
     if is_group_chat(update):
         logger.info("Message originated from group chat - disabling inline keyboards")
@@ -56,6 +69,16 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None) 
             # Check the chat where the original message with the inline keyboard was sent
             message_chat_type = update.callback_query.message.chat.type
             if message_chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+                # Allow admin operations in group chats
+                if allow_admin_operations:
+                    try:
+                        from avap_bot.handlers.grading import _is_admin
+                        if _is_admin(update):
+                            logger.info(f"Admin callback query in group chat: {message_chat_type} - allowing inline keyboards")
+                            return False
+                    except ImportError:
+                        pass
+                
                 logger.info(f"Callback query from group chat: {message_chat_type} - disabling inline keyboards")
                 return True
         except (AttributeError, TypeError) as e:

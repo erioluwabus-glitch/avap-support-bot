@@ -46,7 +46,7 @@ async def grade_assignment(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     context.user_data['submission_info'] = submission_info
 
     # Show grading buttons (check if inline keyboards should be disabled)
-    if should_disable_inline_keyboards(update):
+    if should_disable_inline_keyboards(update, allow_admin_operations=True):
         logger.info("Disabling inline keyboard for group chat")
         keyboard = None
     else:
@@ -87,7 +87,7 @@ async def grade_score(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
         
         # Replace buttons with comment options (check if inline keyboards should be disabled)
-        if should_disable_inline_keyboards(update):
+        if should_disable_inline_keyboards(update, allow_admin_operations=True):
             logger.info("Disabling inline keyboard for group chat")
             keyboard = None
         else:
@@ -468,7 +468,7 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
 
         # Update message with grade selection buttons (check if inline keyboards should be disabled)
         keyboard = create_score_keyboard(submission_id)
-        if should_disable_inline_keyboards(update):
+        if should_disable_inline_keyboards(update, allow_admin_operations=True):
             logger.info("Disabling inline keyboard for group chat in callback query")
             await query.edit_message_text("❌ Inline keyboards are disabled in group chats.")
         else:
@@ -490,7 +490,7 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
         # Get submission info for display
         submission_info = await get_submission_info(submission_id)
         if submission_info:
-            if should_disable_inline_keyboards(update):
+            if should_disable_inline_keyboards(update, allow_admin_operations=True):
                 logger.info("Disabling inline keyboard for group chat in callback query")
                 await query.edit_message_text(
                     f"✅ **Grade Selected!**\n\n"

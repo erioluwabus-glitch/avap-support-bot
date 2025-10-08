@@ -165,7 +165,7 @@ async def add_student_email(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         asyncio.create_task(_background_add_student_tasks(pending_data))
         
         # Send confirmation with verify button (check if inline keyboards should be disabled)
-        if should_disable_inline_keyboards(update):
+        if should_disable_inline_keyboards(update, allow_admin_operations=True):
             logger.info("Disabling inline keyboard for group chat")
             keyboard = None
         else:
@@ -303,7 +303,7 @@ async def remove_student_identifier(update: Update, context: ContextTypes.DEFAUL
         context.user_data['student_to_remove'] = student
 
         # Check if inline keyboards should be disabled (when message comes from group)
-        if should_disable_inline_keyboards(update):
+        if should_disable_inline_keyboards(update, allow_admin_operations=True):
             logger.info("Disabling inline keyboard for group chat")
             keyboard = None
         else:
