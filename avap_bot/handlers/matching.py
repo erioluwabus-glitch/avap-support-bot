@@ -25,8 +25,12 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"User @{user.username} ({user.id}) initiated /match.")
 
     # 1. Check if user is verified
+    logger.info(f"Checking verification for user {user.id}")
     verified_user = check_verified_user(user.id)
+    logger.info(f"Verification result for user {user.id}: {verified_user is not None}")
+    
     if not verified_user:
+        logger.warning(f"User {user.id} is not verified, rejecting /match command")
         await update.message.reply_text(
             "❌ You must be a verified student to use the matching feature.\n"
             "Please complete verification by sending /start.",
@@ -36,11 +40,14 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # 2. Add the current user to the matching queue
-        add_match_request(user.id, user.username or "unknown")
-        logger.info(f"User {user.id} added to match queue.")
+        logger.info(f"Adding user {user.id} to match queue...")
+        match_id = add_match_request(user.id, user.username or "unknown")
+        logger.info(f"User {user.id} added to match queue with ID: {match_id}")
 
         # 3. Try to find another student in the queue
+        logger.info(f"Searching for matches for user {user.id}...")
         matched_user_record = pop_match_request(exclude_id=user.id)
+        logger.info(f"Match search result for user {user.id}: {matched_user_record is not None}")
 
         if matched_user_record:
             matched_user_id = matched_user_record['telegram_id']
@@ -86,6 +93,7 @@ async def match_student(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "I'll notify you as soon as another student is available to be matched.",
                 parse_mode=ParseMode.MARKDOWN
             )
+            logger.info(f"Successfully informed user {user.id} they are in the queue")
 
     except Exception as e:
         logger.exception("Error during /match process for user %s: %s", user.id, e)

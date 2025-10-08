@@ -403,6 +403,7 @@ def get_all_verified_users() -> List[Dict[str, Any]]:
 
 def add_match_request(telegram_id: int, username: str) -> str:
     """Add match request and return match_id"""
+    logger.info(f"Adding match request for telegram_id: {telegram_id}, username: {username}")
     client = get_supabase()
     match_id = str(uuid.uuid4())
     payload = {
@@ -414,7 +415,9 @@ def add_match_request(telegram_id: int, username: str) -> str:
     }
 
     try:
+        logger.info(f"Inserting match request with payload: {payload}")
         res = client.table("match_requests").insert(payload).execute()
+        logger.info(f"Successfully added match request with ID: {match_id}")
         return match_id
     except Exception as e:
         # If username column doesn't exist, try without it
@@ -435,16 +438,22 @@ def add_match_request(telegram_id: int, username: str) -> str:
 
 def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
     """Pop a match request excluding the given telegram_id"""
+    logger.info(f"Searching for match requests excluding telegram_id: {exclude_id}")
     client = get_supabase()
     try:
         # Get a random pending request that's not from the same user
         res = client.table("match_requests").select("*").neq("telegram_id", exclude_id).eq("status", "pending").limit(1).execute()
+        logger.info(f"Match request query returned {len(res.data) if res.data else 0} results")
+        
         if not res.data:
+            logger.info(f"No pending match requests found excluding user {exclude_id}")
             return None
 
         match_request = res.data[0]
+        logger.info(f"Found match request: {match_request}")
         # Mark as matched
         client.table("match_requests").update({"status": "matched"}).eq("match_id", match_request["match_id"]).execute()
+        logger.info(f"Marked match request {match_request['match_id']} as matched")
         return match_request
     except Exception as e:
         logger.exception("Supabase pop_match_request error: %s", e)

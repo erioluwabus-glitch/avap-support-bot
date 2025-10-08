@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users
+from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
@@ -53,12 +53,17 @@ def log_missing_telegram_ids(users: List[Dict[str, Any]]):
 
 async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /get_submission command"""
+    logger.info(f"Get submission command received from user {update.effective_user.id}")
+    
     if not _is_admin(update):
+        logger.warning(f"Non-admin user {update.effective_user.id} tried to use get_submission")
         await update.message.reply_text("❌ This command is only for admins.")
         return ConversationHandler.END
     
     # Parse command arguments
     args = context.args
+    logger.info(f"Get submission args: {args}")
+    
     if len(args) < 2:
         await update.message.reply_text(
             "📝 **Get Student Submission**\n\n"
@@ -71,9 +76,12 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     username = args[0]
     module = args[1]
     
+    logger.info(f"Getting submissions for username: {username}, module: {module}")
+    
     try:
         # Get submission from Google Sheets
         submissions = await run_blocking(get_student_submissions, username, module)
+        logger.info(f"Retrieved {len(submissions)} submissions for {username} in module {module}")
         
         if not submissions:
             await update.message.reply_text(
@@ -88,6 +96,7 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         message += f"Module: {module}\n\n"
         
         for i, submission in enumerate(submissions, 1):
+            logger.info(f"Processing submission {i}: {submission}")
             message += f"**Submission {i}:**\n"
             message += f"Type: {submission.get('type', 'Unknown')}\n"
             message += f"Status: {submission.get('status', 'Unknown')}\n"
@@ -98,6 +107,7 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 message += f"Comment: {submission['comment']}\n"
             message += "\n"
         
+        logger.info(f"Sending submission details message: {message[:200]}...")
         await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
         
     except Exception as e:
@@ -311,7 +321,10 @@ async def message_achievers(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle /broadcast command - start interactive broadcast"""
+    logger.info(f"Broadcast command received from user {update.effective_user.id}")
+    
     if not _is_admin(update):
+        logger.warning(f"Non-admin user {update.effective_user.id} tried to use broadcast command")
         await update.message.reply_text(
             f"❌ This command is only for admins.\n"
             f"Your ID: {update.effective_user.id}\n"
@@ -319,6 +332,8 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             f"Admin check: {_is_admin(update)}"
         )
         return ConversationHandler.END
+
+    logger.info(f"Admin check passed for user {update.effective_user.id}, showing broadcast options")
 
     # Show broadcast type options
     keyboard = InlineKeyboardMarkup([
@@ -335,6 +350,7 @@ async def broadcast_all(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         reply_markup=keyboard
     )
 
+    logger.info(f"Broadcast options sent to user {update.effective_user.id}, returning BROADCAST_TYPE")
     return BROADCAST_TYPE
 
 
@@ -342,53 +358,71 @@ async def broadcast_type_callback(update: Update, context: ContextTypes.DEFAULT_
     """Handle broadcast type selection"""
     query = update.callback_query
     await query.answer()
+    
+    logger.info(f"Broadcast type callback received: {query.data} from user {update.effective_user.id}")
 
     broadcast_type = query.data.replace("broadcast_", "")
+    logger.info(f"Parsed broadcast type: {broadcast_type}")
 
     if broadcast_type == "cancel":
+        logger.info("Broadcast cancelled by user")
         await query.edit_message_text("❌ Broadcast cancelled.")
         context.user_data.clear()
         return ConversationHandler.END
 
     context.user_data['broadcast_type'] = broadcast_type
+    logger.info(f"Broadcast type stored in context: {broadcast_type}")
 
     if broadcast_type == "text":
+        logger.info("Showing text broadcast prompt")
         await query.edit_message_text(
             "📝 **Text Broadcast**\n\n"
             "Please type your broadcast message:",
             parse_mode=ParseMode.MARKDOWN
         )
     elif broadcast_type == "audio":
+        logger.info("Showing audio broadcast prompt")
         await query.edit_message_text(
             "🎤 **Audio Broadcast**\n\n"
             "Please send an audio message or voice note:",
             parse_mode=ParseMode.MARKDOWN
         )
     elif broadcast_type == "video":
+        logger.info("Showing video broadcast prompt")
         await query.edit_message_text(
             "🎥 **Video Broadcast**\n\n"
             "Please send a video message:",
             parse_mode=ParseMode.MARKDOWN
         )
 
+    logger.info(f"Returning BROADCAST_CONTENT state for {broadcast_type} broadcast")
     return BROADCAST_CONTENT
 
 
 async def broadcast_content(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle broadcast content submission"""
+    logger.info(f"Broadcast content handler called from user {update.effective_user.id}")
+    
     broadcast_type = context.user_data.get('broadcast_type')
+    logger.info(f"Broadcast type from context: {broadcast_type}")
 
     if not broadcast_type:
+        logger.warning("No broadcast type found in context")
         await update.message.reply_text("❌ Missing broadcast type. Please try again.")
         return ConversationHandler.END
 
     try:
         # Get all verified users
+        logger.info("Retrieving verified users from database")
         client = get_supabase()
         result = client.table('verified_users').select('telegram_id').eq('status', 'verified').execute()
         verified_users = result.data
+        
+        logger.info(f"Database query result: {result}")
+        logger.info(f"Verified users count: {len(verified_users) if verified_users else 0}")
 
         if not verified_users:
+            logger.warning("No verified users found in database")
             await update.message.reply_text(
                 f"❌ No verified users found.\n"
                 f"Database query result: {result}\n"
@@ -518,19 +552,97 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /stats command - show bot statistics"""
+    logger.info(f"Stats command received from user {update.effective_user.id}")
+    
+    if not _is_admin(update):
+        logger.warning(f"Non-admin user {update.effective_user.id} tried to use stats command")
+        await update.message.reply_text(
+            f"❌ This command is only for admins.\n"
+            f"Your ID: {update.effective_user.id}\n"
+            f"Admin ID: {ADMIN_USER_ID}\n"
+            f"Admin check: {_is_admin(update)}"
+        )
+        return
+
+    logger.info(f"Admin check passed for user {update.effective_user.id}, retrieving stats")
+
+    try:
+        # Get statistics from database
+        client = get_supabase()
+        
+        # Get verified users count
+        verified_result = client.table("verified_users").select("id", count="exact").eq("status", "verified").execute()
+        verified_count = verified_result.count or 0
+        
+        # Get pending verifications count
+        pending_result = client.table("pending_verifications").select("id", count="exact").execute()
+        pending_count = pending_result.count or 0
+        
+        # Get removed users count
+        removed_result = client.table("verified_users").select("id", count="exact").eq("status", "removed").execute()
+        removed_count = removed_result.count or 0
+        
+        # Get total submissions count (from Google Sheets)
+        try:
+            submissions = await run_blocking(get_student_submissions, "all")  # Get all submissions
+            total_submissions = len(submissions) if submissions else 0
+        except Exception as e:
+            logger.warning(f"Failed to get submissions count: {e}")
+            total_submissions = 0
+        
+        # Get total wins count
+        try:
+            wins = await run_blocking(get_student_wins, "all")  # Get all wins
+            total_wins = len(wins) if wins else 0
+        except Exception as e:
+            logger.warning(f"Failed to get wins count: {e}")
+            total_wins = 0
+        
+        # Get broadcast history count
+        try:
+            broadcast_history = await run_blocking(get_broadcast_history, 1000)  # Get last 1000 broadcasts
+            total_broadcasts = len(broadcast_history) if broadcast_history else 0
+        except Exception as e:
+            logger.warning(f"Failed to get broadcast history: {e}")
+            total_broadcasts = 0
+        
+        # Format the stats message
+        stats_message = (
+            "📊 **AVAP Support Bot Statistics**\n\n"
+            f"👥 **Users:**\n"
+            f"• Verified Students: {verified_count}\n"
+            f"• Pending Verifications: {pending_count}\n"
+            f"• Removed Users: {removed_count}\n\n"
+            f"📝 **Activity:**\n"
+            f"• Total Submissions: {total_submissions}\n"
+            f"• Total Wins Shared: {total_wins}\n"
+            f"• Total Broadcasts Sent: {total_broadcasts}\n\n"
+            f"🤖 **Bot Status:** ✅ Active"
+        )
+        
+        await update.message.reply_text(
+            stats_message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+        
+        logger.info(f"Stats sent successfully to admin {update.effective_user.id}")
+        
+    except Exception as e:
+        logger.exception(f"Failed to get stats: {e}")
+        await update.message.reply_text(
+            "❌ Failed to retrieve statistics. Please try again later."
+        )
+
+
 def _is_admin(update: Update) -> bool:
     """Check if user is admin"""
     user_id = update.effective_user.id
     return user_id == ADMIN_USER_ID
 
 
-# Conversation handlers
-get_submission_conv = ConversationHandler(
-    entry_points=[CommandHandler("get_submission", get_submission)],
-    states={},
-    fallbacks=[],
-    per_message=False
-)
+# Get submission is a simple command, not a conversation
 
 message_achievers_conv = ConversationHandler(
     entry_points=[CallbackQueryHandler(broadcast_achievers, pattern="^broadcast_achievers$")],
@@ -558,14 +670,17 @@ broadcast_conv = ConversationHandler(
 
 def register_handlers(application):
     """Register all admin tools handlers with the application"""
+    # Add command handlers
+    application.add_handler(CommandHandler("get_submission", get_submission))
+    application.add_handler(CommandHandler("stats", stats_handler))
+    
     # Add conversation handlers
-    application.add_handler(get_submission_conv)
     application.add_handler(message_achievers_conv)
     application.add_handler(broadcast_conv)
 
     # Add global callback handlers to fix per_message=False warnings
     application.add_handler(CallbackQueryHandler(broadcast_achievers, pattern="^broadcast_achievers$"))
-    application.add_handler(CallbackQueryHandler(broadcast_type_callback, pattern="^broadcast_"))
+    # Note: broadcast_type_callback is already handled by broadcast_conv, so we don't need to register it separately
 
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))

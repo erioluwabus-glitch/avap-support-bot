@@ -162,7 +162,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         # Approve chat join request if the group ID is set
         if SUPPORT_GROUP_ID:
             try:
-                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user_id)
+                await context.bot.approve_chat_join_request(chat_id=SUPPORT_GROUP_ID, user_id=user.id)
                 logger.info(f"Approved join request for user {user.id} to support group.")
             except Exception as e:
                 error_msg = str(e)
@@ -588,8 +588,22 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     f"{comment}\n\n"
                     f"**Their Story:**\n{escaped_content}"
                 )
+            elif win_type == 'audio':
+                # For audio wins, show audio-specific message
+                forward_text = (
+                    f"{comment}\n\n"
+                    f"🎤 **Audio Win Shared**\n"
+                    f"Listen to their inspiring story!"
+                )
+            elif win_type == 'video':
+                # For video wins, show video-specific message
+                forward_text = (
+                    f"{comment}\n\n"
+                    f"🎥 **Video Win Shared**\n"
+                    f"Watch their amazing achievement!"
+                )
             else:
-                # For file wins, show file info with engaging intro
+                # For document wins, show file info with engaging intro
                 # Escape special Markdown characters in file name
                 escaped_file_name = (file_name or "").replace('*', '\\*').replace('_', '\\_').replace('`', '\\`').replace('[', '\\[').replace(']', '\\]')
                 forward_text = (
@@ -600,8 +614,16 @@ async def share_win_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
 
             if file_id:
-                # For file wins, send the file with caption
-                await context.bot.send_document(SUPPORT_GROUP_ID, file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                # For file wins, send the appropriate file type with caption
+                if win_type == 'audio' and update.message.voice:
+                    # Send voice message properly
+                    await context.bot.send_voice(SUPPORT_GROUP_ID, voice=file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                elif win_type == 'video' and update.message.video:
+                    # Send video message properly
+                    await context.bot.send_video(SUPPORT_GROUP_ID, video=file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
+                else:
+                    # Send as document for other file types
+                    await context.bot.send_document(SUPPORT_GROUP_ID, document=file_id, caption=forward_text, parse_mode=ParseMode.MARKDOWN)
             else:
                 # For text wins, send the text message with retry
                 await send_message_with_retry(context.bot, SUPPORT_GROUP_ID, forward_text, parse_mode=ParseMode.MARKDOWN)
@@ -790,7 +812,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user_id)
+            faq_match = await find_faq_match(question_text, user_id=user.id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -799,7 +821,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],
@@ -862,9 +884,17 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 }
                 await run_blocking(append_question, question_data)
                 
-                # Force memory cleanup after AI processing
-                from avap_bot.services.ai_service import clear_model_cache
-                clear_model_cache()
+                # Force memory cleanup after AI processing (only if AI is enabled)
+                try:
+                    from avap_bot.services.ai_service import _model
+                    if _model is not None:
+                        from avap_bot.services.ai_service import clear_model_cache
+                        clear_model_cache()
+                        logger.info("Cleared AI model cache after AI processing")
+                    else:
+                        logger.debug("AI model cache is already empty - skipping AI cache clear after AI processing")
+                except Exception as e:
+                    logger.warning(f"Failed to clear AI model cache: {e}")
                 log_memory_usage("after AI processing")
                 
                 return ConversationHandler.END
@@ -878,9 +908,17 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             return add_question(user_id, username, question_text, file_id, file_name, None, 'pending')
         await run_blocking(_add_question_pending)
         
-        # Force memory cleanup after processing (even if no AI answer found)
-        from avap_bot.services.ai_service import clear_model_cache
-        clear_model_cache()
+        # Force memory cleanup after processing (even if no AI answer found) - only if AI is enabled
+        try:
+            from avap_bot.services.ai_service import _model
+            if _model is not None:
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                logger.info("Cleared AI model cache after question processing")
+            else:
+                logger.debug("AI model cache is already empty - skipping AI cache clear after question processing")
+        except Exception as e:
+            logger.warning(f"Failed to clear AI model cache: {e}")
         log_memory_usage("after question processing")
 
         # Prepare question data for forwarding to admins
@@ -1097,7 +1135,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
             ai_result = None
             
             # First try FAQ matching
-            faq_match = await find_faq_match(question_text, user_id=user_id)
+            faq_match = await find_faq_match(question_text, user_id=user.id)
             if faq_match:
                 ai_result = {
                     'answer': faq_match['answer'],
@@ -1106,7 +1144,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
                 }
             else:
                 # Try similar answered questions
-                similar_answer = await find_similar_answered_question(question_text, user_id=user_id)
+                similar_answer = await find_similar_answered_question(question_text, user_id=user.id)
                 if similar_answer:
                     ai_result = {
                         'answer': similar_answer['answer'],

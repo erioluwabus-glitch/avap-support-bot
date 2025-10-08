@@ -7,31 +7,33 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, ConversationHandler, CommandHandler, MessageHandler, CallbackQueryHandler, filters
+from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import update_question_status
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
-from avap_bot.features.cancel_feature import get_cancel_fallback_handler
 
 logger = logging.getLogger(__name__)
-
-# Conversation states
-ANSWER_TEXT = range(1)
 
 QUESTIONS_GROUP_ID = int(os.getenv("QUESTIONS_GROUP_ID", "0"))
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
 
-async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer button click from questions group"""
     query = update.callback_query
     await query.answer()
     
+    logger.info(f"Answer callback received from user {update.effective_user.id}")
+    logger.info(f"Admin check for user {update.effective_user.id}: {_is_admin(update)}")
+    
     if not _is_admin(update):
+        logger.warning(f"Non-admin user {update.effective_user.id} tried to answer question")
         await query.edit_message_text("❌ Only admins can answer questions.")
-        return ConversationHandler.END
+        return
+    
+    logger.info(f"Admin check passed for user {update.effective_user.id}")
     
     # Extract telegram_id and username from callback data (format: answer_{telegram_id}_{username})
     parts = query.data.split("_")
@@ -52,6 +54,7 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         telegram_id = None
         logger.warning(f"Using fallback format for callback data: {query.data}")
     
+    # Store question info in context for the answer handler
     context.user_data['question_username'] = username
     context.user_data['question_telegram_id'] = telegram_id
     context.user_data['question_message_id'] = query.message.message_id
@@ -63,12 +66,43 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"Please send your answer (text, audio, or video):",
         parse_mode=ParseMode.MARKDOWN
     )
-    return ANSWER_TEXT
+    
+    logger.info(f"Question info stored for {username}, waiting for answer")
 
 
-async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle answer message from admin"""
+    try:
+        logger.info(f"Answer message handler called from user {update.effective_user.id}")
+        
+        # Check if this is an admin answering a question
+        if not _is_admin(update):
+            logger.info(f"User {update.effective_user.id} is not admin, ignoring message")
+            return  # Not an admin, ignore
+        
+        # Check if we have question info stored
+        username = context.user_data.get('question_username')
+        telegram_id = context.user_data.get('question_telegram_id')
+        
+        logger.info(f"Question info in context: username={username}, telegram_id={telegram_id}")
+        
+        if not username or not telegram_id:
+            logger.info("No question info found in context, ignoring message")
+            return
+        
+        logger.info(f"Processing answer from admin {update.effective_user.id} for question from {username}")
+        
+        # Process the answer using the existing logic
+        await answer_text(update, context)
+        
+    except Exception as e:
+        logger.exception(f"Failed to handle answer message: {e}")
+
+
+async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer submission"""
     try:
+        logger.info(f"Answer text handler called from user {update.effective_user.id}")
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
         
@@ -134,13 +168,16 @@ async def answer_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
                 parse_mode=ParseMode.MARKDOWN
             )
         
-        return ConversationHandler.END
+        # Clear the question info from context after successful processing
+        context.user_data.pop('question_username', None)
+        context.user_data.pop('question_telegram_id', None)
+        context.user_data.pop('question_message_id', None)
+        context.user_data.pop('question_text', None)
         
     except Exception as e:
         logger.exception("Failed to submit answer: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Answer submission failed: {str(e)}")
         await update.message.reply_text("❌ Failed to submit answer. Please try again.")
-        return ConversationHandler.END
 
 
 async def _send_answer_to_student(
@@ -198,23 +235,16 @@ def _is_admin(update: Update) -> bool:
     return user_id == ADMIN_USER_ID
 
 
-# Conversation handler
-answer_conv = ConversationHandler(
-    entry_points=[CallbackQueryHandler(answer_callback, pattern="^answer_")],
-    states={
-        ANSWER_TEXT: [MessageHandler(filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, answer_text)],
-    },
-    fallbacks=[get_cancel_fallback_handler()],
-    per_message=True,
-    conversation_timeout=600
-)
 
 
 def register_handlers(application):
     """Register all question answering handlers with the application"""
-    application.add_handler(answer_conv)
-
-    # Add global callback handler to fix per_message=False warning
-    # Note: answer_ callbacks are also handled globally in answer.py
+    # Register callback handler for answer button clicks
     application.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
+    
+    # Register message handler for answer submissions
+    application.add_handler(MessageHandler(
+        filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO, 
+        handle_answer_message
+    ))
 

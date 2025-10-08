@@ -32,7 +32,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             return None
 
         headers = {
-            "Authorization": f"Bearer {SYSTEME_API_KEY}",
+            "X-API-Key": SYSTEME_API_KEY,
             "Content-Type": "application/json"
         }
         
@@ -43,9 +43,19 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
         first_name = name_parts[0] if name_parts else ""
         last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
         
-        # Try multiple payload formats
+        # Try multiple payload formats based on current Systeme.io API
         contact_payloads = [
-            # Format 1: Standard format
+            # Format 1: Current Systeme.io API format with fields array
+            {
+                "email": contact_data.get("email"),
+                "fields": [
+                    {"slug": "first_name", "value": first_name},
+                    {"slug": "last_name", "value": last_name},
+                    {"slug": "phone_number", "value": contact_data.get("phone", "")}
+                ],
+                "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+            },
+            # Format 2: Standard format
             {
                 "email": contact_data.get("email"),
                 "firstName": first_name,
@@ -53,7 +63,7 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "phoneNumber": contact_data.get("phone", ""),
                 "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
             },
-            # Format 2: Alternative format
+            # Format 3: Alternative format
             {
                 "email": contact_data.get("email"),
                 "first_name": first_name,
@@ -61,12 +71,19 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 "phone": contact_data.get("phone", ""),
                 "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
             },
-            # Format 3: Minimal format
+            # Format 4: Minimal format
             {
                 "email": contact_data.get("email"),
                 "name": contact_data.get("name", ""),
                 "phone": contact_data.get("phone", ""),
                 "tags": ["verified"] if contact_data.get("status") == "verified" else ["pending"]
+            },
+            # Format 5: Basic format
+            {
+                "email": contact_data.get("email"),
+                "firstName": first_name,
+                "lastName": last_name,
+                "phoneNumber": contact_data.get("phone", "")
             }
         ]
 
@@ -74,11 +91,15 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
             logger.info("Attempting to create Systeme.io contact for: %s", contact_data.get("email"))
             
             # Try different endpoint formats and payload formats
+            # Updated endpoints based on current Systeme.io API documentation
             endpoints_to_try = [
-                f"{SYSTEME_BASE_URL}/api/contacts",
                 f"{SYSTEME_BASE_URL}/contacts",
+                f"{SYSTEME_BASE_URL}/api/contacts",
                 f"{SYSTEME_BASE_URL}/api/v1/contacts",
-                f"{SYSTEME_BASE_URL}/api/v2/contacts"
+                f"{SYSTEME_BASE_URL}/api/v2/contacts",
+                f"{SYSTEME_BASE_URL}/api/v3/contacts",
+                f"https://api.systeme.io/contacts",  # Direct API URL
+                f"https://api.systeme.io/api/contacts"  # Direct API URL with /api
             ]
             
             logger.info(f"Trying {len(endpoints_to_try)} endpoints with {len(contact_payloads)} payload formats")
@@ -115,18 +136,26 @@ async def create_contact_and_tag(contact_data: Dict[str, Any]) -> Optional[str]:
                 logger.warning("All Systeme.io endpoints and payload formats failed - this is not critical")
                 logger.warning("Student verification will continue without Systeme.io integration")
                 logger.warning("Please check your Systeme.io API configuration if this is important")
+                logger.warning("Common issues: Invalid API key, changed API endpoints, or API rate limits")
                 return None
             
             logger.info("✅ Successful endpoint: %s with payload format %s", successful_endpoint, successful_payload)
 
-            logger.info("Systeme.io API response: %s - %s", response.status_code, response.text)
+            # Log response details for debugging
+            logger.info("Systeme.io API response: %s", response.status_code)
+            if response.status_code >= 400:
+                logger.warning("Systeme.io API error response: %s", response.text[:500])  # Limit response text for logs
+            else:
+                logger.info("Systeme.io API success response: %s", response.text[:200])  # Limit response text for logs
 
             if response.status_code == 404:
                 logger.warning("Systeme.io API endpoint not found (404) - API may have changed")
-                logger.warning("Student verification will continue without Systeme.io integration")
-                return None
+                logger.warning("Trying webhook-based integration as fallback...")
+                return await _try_webhook_integration(contact_data)
             elif response.status_code == 401:
                 logger.warning("Systeme.io API authentication failed (401) - check API key")
+                logger.warning("Please verify your API key at: https://systeme.io/account/api")
+                logger.warning("Make sure you're using the correct API key format (X-API-Key header)")
                 logger.warning("Student verification will continue without Systeme.io integration")
                 return None
             elif response.status_code == 201:
@@ -197,7 +226,7 @@ async def remove_contact_by_email(email: str) -> bool:
             return False
         
         headers = {
-            "Authorization": f"Bearer {SYSTEME_API_KEY}",
+            "X-API-Key": SYSTEME_API_KEY,
             "Content-Type": "application/json"
         }
         
@@ -257,7 +286,7 @@ async def tag_achiever(contact_id: str) -> bool:
             return False
         
         headers = {
-            "Authorization": f"Bearer {SYSTEME_API_KEY}",
+            "X-API-Key": SYSTEME_API_KEY,
             "Content-Type": "application/json"
         }
         
@@ -289,7 +318,7 @@ async def untag_or_remove_contact(email: str, action: str = "untag") -> bool:
             return False
         
         headers = {
-            "Authorization": f"Bearer {SYSTEME_API_KEY}",
+            "X-API-Key": SYSTEME_API_KEY,
             "Content-Type": "application/json"
         }
         
@@ -382,3 +411,43 @@ def untag_or_remove_contact_sync(email: str, action: str = "untag") -> bool:
     except Exception as e:
         logger.exception("Sync wrapper failed: %s", e)
         return False
+
+
+async def _try_webhook_integration(contact_data: Dict[str, Any]) -> Optional[str]:
+    """Try webhook-based integration as fallback when API fails"""
+    try:
+        logger.info("Attempting webhook-based Systeme.io integration for: %s", contact_data.get("email"))
+        
+        # Check if webhook URL is configured
+        webhook_url = os.getenv("SYSTEME_WEBHOOK_URL")
+        if not webhook_url:
+            logger.warning("SYSTEME_WEBHOOK_URL not configured - skipping webhook integration")
+            return None
+        
+        # Prepare webhook payload
+        webhook_payload = {
+            "email": contact_data.get("email"),
+            "name": contact_data.get("name", ""),
+            "phone": contact_data.get("phone", ""),
+            "status": contact_data.get("status", "pending"),
+            "source": "avap_bot",
+            "timestamp": contact_data.get("timestamp", "")
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                webhook_url,
+                json=webhook_payload,
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                logger.info("✅ Webhook integration successful for: %s", contact_data.get("email"))
+                return "webhook_success"
+            else:
+                logger.warning("Webhook integration failed: %s - %s", response.status_code, response.text)
+                return None
+                
+    except Exception as e:
+        logger.exception("Webhook integration failed: %s", e)
+        return None

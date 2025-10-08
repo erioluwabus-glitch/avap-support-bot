@@ -14,7 +14,7 @@ import requests
 
 # Import sentence transformer
 # Disable AI features to prevent memory issues
-SentenceTransformer = None
+    SentenceTransformer = None
 
 from avap_bot.services.supabase_service import get_faqs, get_tip_for_day, add_manual_tip
 from avap_bot.utils.memory_monitor import log_memory_usage
@@ -86,14 +86,14 @@ async def find_faq_match(question: str, threshold: float = 0.8, user_id: int = N
     """Find best FAQ match using semantic similarity with subprocess memory isolation"""
     # AI features disabled to prevent memory issues
     logger.info("AI features disabled - returning None for FAQ match")
-    return None
+        return None
 
 
 async def find_similar_answered_question(question: str, threshold: float = 0.8, user_id: int = None) -> Optional[Dict[str, Any]]:
     """Find similar previously answered questions using semantic similarity with subprocess memory isolation"""
     # AI features disabled to prevent memory issues
     logger.info("AI features disabled - returning None for similar question match")
-    return None
+        return None
 
 
 async def generate_daily_tip() -> str:
@@ -102,7 +102,7 @@ async def generate_daily_tip() -> str:
         # Check if there's already a manual tip for today
         today = datetime.now(timezone.utc).weekday()  # 0=Monday, 6=Sunday
         manual_tip = get_tip_for_day(today)
-        
+
         if manual_tip and manual_tip.get('is_manual'):
             return manual_tip['tip_text']
 
@@ -122,7 +122,7 @@ async def generate_daily_tip() -> str:
         log_memory_usage("end AI tip generation subprocess")
 
         return result if result else _get_default_tip(today)
-        
+
     except Exception as e:
         logger.exception(f"AI tip generation failed: {e}")
         return _get_default_tip(datetime.now(timezone.utc).weekday())

@@ -239,6 +239,10 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         # Get student's submissions
         submissions = await run_blocking(get_student_submissions, verified_user['username'])
+        
+        logger.info(f"Retrieved {len(submissions)} submissions for user {verified_user['username']}")
+        for i, sub in enumerate(submissions):
+            logger.info(f"Submission {i}: status='{sub.get('status')}', grade='{sub.get('grade')}', module='{sub.get('module')}'")
 
         if not submissions:
             await update.message.reply_text(
@@ -249,8 +253,10 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             return
 
-        # Filter graded submissions
-        graded_submissions = [s for s in submissions if s.get('status') == 'Graded']
+        # Filter graded submissions - check for both 'Graded' and 'graded' to handle case variations
+        graded_submissions = [s for s in submissions if s.get('status') in ['Graded', 'graded']]
+        
+        logger.info(f"Found {len(graded_submissions)} graded submissions out of {len(submissions)} total submissions")
 
         if not graded_submissions:
             await update.message.reply_text(
@@ -266,8 +272,24 @@ async def view_grades_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         for submission in graded_submissions:
             module = submission.get('module', 'Unknown')
-            grade = submission.get('grade', 'N/A')
-            comments = submission.get('comments', 'No comments')
+            grade_value = submission.get('grade', 'N/A')
+            
+            # Parse grade and comments from the combined format
+            if isinstance(grade_value, str) and ' - ' in grade_value:
+                # Format: "3 - Good one" or "Grade - Good one"
+                parts = grade_value.split(' - ', 1)
+                if parts[0] == 'Grade':
+                    grade = 'N/A'
+                    comments = parts[1] if len(parts) > 1 else 'No comments'
+                else:
+                    grade = parts[0]
+                    comments = parts[1] if len(parts) > 1 else 'No comments'
+            else:
+                # Just a grade number
+                grade = grade_value
+                comments = 'No comments'
+            
+            logger.info(f"Displaying graded submission: module={module}, grade={grade}, comments={comments}")
 
             message += (
                 f"**Module:** {module}\n"

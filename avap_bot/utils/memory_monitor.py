@@ -203,9 +203,14 @@ async def monitor_memory(context) -> None:
                 gc.collect()
 
             try:
-                from avap_bot.services.ai_service import clear_model_cache
-                clear_model_cache()
-                logger.info("Cleared AI model cache")
+                # Check if AI features are enabled before clearing cache
+                from avap_bot.services.ai_service import _model
+                if _model is not None:
+                    from avap_bot.services.ai_service import clear_model_cache
+                    clear_model_cache()
+                    logger.info("Cleared AI model cache")
+                else:
+                    logger.debug("AI model cache is already empty - skipping AI cache clear")
             except Exception as e:
                 logger.warning(f"Failed to clear AI model cache: {e}")
 
@@ -258,11 +263,15 @@ async def ultra_aggressive_cleanup() -> None:
         for _ in range(10):
             gc.collect()
 
-        # Step 2: Clear AI model cache
+        # Step 2: Clear AI model cache (only if AI is enabled)
         try:
-            from avap_bot.services.ai_service import clear_model_cache
-            clear_model_cache()
-            logger.info("Cleared AI model cache during FAST cleanup")
+            from avap_bot.services.ai_service import _model
+            if _model is not None:
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                logger.info("Cleared AI model cache during FAST cleanup")
+            else:
+                logger.debug("AI model cache is already empty - skipping AI cache clear during FAST cleanup")
         except Exception as e:
             logger.warning(f"Failed to clear AI model cache: {e}")
 
@@ -341,11 +350,15 @@ async def cleanup_resources() -> None:
         for _ in range(5):
             gc.collect()
 
-        # Clear AI model cache
+        # Clear AI model cache (only if AI is enabled)
         try:
-            from avap_bot.services.ai_service import clear_model_cache
-            clear_model_cache()
-            logger.info("Cleared AI model cache during cleanup")
+            from avap_bot.services.ai_service import _model
+            if _model is not None:
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                logger.info("Cleared AI model cache during cleanup")
+            else:
+                logger.debug("AI model cache is already empty - skipping AI cache clear during cleanup")
         except Exception as e:
             logger.warning(f"Failed to clear AI model cache: {e}")
 

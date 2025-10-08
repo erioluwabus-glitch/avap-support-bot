@@ -56,6 +56,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     - /cancel - Cancel current user's operations
     - /cancel <user_id> - Admin can cancel another user's operations
     """
+    logger.info(f"Cancel command received from user {update.effective_user.id}")
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     
@@ -85,6 +86,8 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Get cancel registry from bot data
     cancel_registry: Optional[CancelRegistry] = context.bot_data.get('cancel_registry')
+    logger.info(f"Cancel registry check: registry={cancel_registry is not None}, CancelRegistry class={CancelRegistry is not None}")
+    
     if not cancel_registry or CancelRegistry is None:
         logger.error("CancelRegistry not available or not initialized")
         await update.message.reply_text(
@@ -95,6 +98,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     try:
         # Check if user has any operations to cancel
         stats = await cancel_registry.get_user_stats(target_user_id)
+        logger.info(f"User {target_user_id} stats: {stats}")
         
         if stats['active_tasks'] == 0 and stats['total_jobs'] == 0:
             if target_user_id == user_id:
@@ -243,6 +247,8 @@ def register_cancel_handlers(application) -> None:
     Args:
         application: Telegram Application instance
     """
+    logger.info("Attempting to register cancel handlers")
+    
     # Only register handlers if CancelRegistry is available
     if CancelRegistry is None:
         logger.warning("CancelRegistry not available, skipping cancel handler registration")
@@ -250,7 +256,7 @@ def register_cancel_handlers(application) -> None:
 
     # Register global cancel handler
     application.add_handler(CommandHandler("cancel", cancel_handler))
-    logger.info("Registered cancel command handlers")
+    logger.info("Successfully registered cancel command handlers")
 
 
 def get_cancel_fallback_handler() -> CommandHandler:
