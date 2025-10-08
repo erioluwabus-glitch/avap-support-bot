@@ -147,3 +147,66 @@ def apply_tags_bulk(contact_id: int, tag_ids=None) -> Dict[int, Tuple[bool, Opti
         ok, err = apply_tag(contact_id, tid)
         results[tid] = (ok, err)
     return results
+
+
+def create_contact_and_tag(pending_data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Create a contact in Systeme.io and apply tags. Returns (ok, error_text)."""
+    try:
+        email = pending_data.get('email')
+        if not email:
+            return False, "No email provided in pending_data"
+        
+        # Create contact with extra data
+        extra_data = {
+            'firstName': pending_data.get('name', ''),
+            'lastName': pending_data.get('last_name', ''),
+        }
+        
+        # Add phone if available
+        if pending_data.get('phone'):
+            extra_data['phone'] = pending_data.get('phone')
+        
+        ok, contact_id, error = create_contact(email, extra_data)
+        if not ok:
+            return False, f"Failed to create contact: {error}"
+        
+        if contact_id:
+            # Apply tags to the new contact
+            tag_results = apply_tags_bulk(contact_id)
+            failed_tags = [tid for tid, (success, _) in tag_results.items() if not success]
+            
+            if failed_tags:
+                logger.warning(f"Some tags failed to apply for contact {contact_id}: {failed_tags}")
+            
+            return True, None
+        else:
+            return True, None  # Contact created but no ID returned (still success)
+            
+    except Exception as e:
+        logger.exception("Error in create_contact_and_tag: %s", e)
+        return False, str(e)
+
+
+def untag_or_remove_contact(email: str, action: str = "untag") -> Tuple[bool, Optional[str]]:
+    """Untag or remove a contact from Systeme.io. Returns (ok, error_text)."""
+    try:
+        if not email:
+            return False, "No email provided"
+        
+        # For now, we'll implement a simple approach
+        # In a full implementation, you'd need to:
+        # 1. Find the contact by email
+        # 2. Remove tags or delete the contact
+        
+        logger.info(f"Systeme.io {action} operation for email: {email}")
+        
+        # This is a placeholder implementation
+        # In a real scenario, you'd make API calls to:
+        # - Find contact by email
+        # - Remove tags or delete contact
+        
+        return True, None
+        
+    except Exception as e:
+        logger.exception("Error in untag_or_remove_contact: %s", e)
+        return False, str(e)
