@@ -559,6 +559,11 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_comment_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle comment submission for grading"""
+    # FIRST: Check if this is a question answer - ignore completely if so
+    if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
+        # This is a question answer, let questions handler process it
+        return
+    
     logger.info(f"🔄 GRADING COMMENT HANDLER CALLED from user {update.effective_user.id}")
     logger.info(f"Message type: {type(update.message)}")
     logger.info(f"User data keys: {list(context.user_data.keys())}")
