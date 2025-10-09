@@ -10,9 +10,12 @@ logger = logging.getLogger("avap_bot.systeme")
 # Config / env parsing & normalization
 BASE = os.environ.get("SYSTEME_BASE_URL", "https://api.systeme.io")
 
+# Get API key and strip any whitespace/newlines
 API_KEY = (os.environ.get("SYSTEME_API_KEY") or "").strip()
+
+# Use X-API-Key header as required by Systeme.io API
 HEADERS = {
-    "Authorization": f"Bearer {API_KEY}" if API_KEY else "",
+    "X-API-Key": API_KEY if API_KEY else "",
     "Content-Type": "application/json",
 }
 
@@ -48,10 +51,21 @@ def safe_post(endpoint: str, payload: Dict[str, Any], max_attempts: int = 4, tim
     url = f"{BASE}{endpoint}"
     backoff = 0.5
     last_resp = None
+    
+    # Log request details (but mask the API key)
+    logger.info("Systeme.io request to: %s", url)
+    logger.info("Request headers: %s", {k: v for k, v in HEADERS.items() if k != "X-API-Key"})
+    logger.info("Request payload: %s", payload)
+    
     for attempt in range(1, max_attempts + 1):
         try:
             resp = requests.post(url, json=payload, headers=HEADERS, timeout=timeout)
             last_resp = resp
+            
+            # Log response details
+            logger.info("Systeme.io response status: %s", resp.status_code)
+            logger.info("Systeme.io response body: %s", resp.text[:500])  # Limit body length
+            
         except requests.RequestException as e:
             logger.warning("Network error posting to %s (attempt %d): %s", url, attempt, e)
             if attempt < max_attempts:
@@ -62,7 +76,9 @@ def safe_post(endpoint: str, payload: Dict[str, Any], max_attempts: int = 4, tim
 
         # Authentication failure => stop and report
         if resp.status_code == 401:
-            logger.error("Systeme API authentication failed (401). Check SYSTEME_API_KEY.")
+            logger.error("Systeme API authentication failed (401) - Invalid or expired API key")
+            logger.error("Please check SYSTEME_API_KEY environment variable")
+            logger.error("API key format: %s... (length: %s)", API_KEY[:10] if API_KEY else "None", len(API_KEY) if API_KEY else 0)
             return resp, resp.text
 
         # Client error (not rate limit) => don't retry
@@ -72,6 +88,7 @@ def safe_post(endpoint: str, payload: Dict[str, Any], max_attempts: int = 4, tim
 
         # Success
         if 200 <= resp.status_code < 300:
+            logger.info("Systeme.io request successful")
             return resp, resp.text
 
         # 429 or 5xx => retry
@@ -90,23 +107,27 @@ def validate_api_key() -> bool:
         return False
     
     # Log API key format for debugging (first 10 chars only for security)
-    logger.info(f"SYSTEME_API_KEY format: {API_KEY[:10]}... (length: {len(API_KEY)})")
+    logger.info("SYSTEME_API_KEY format: %s... (length: %s)", API_KEY[:10], len(API_KEY))
     
     try:
         # Try a simple GET request to validate the API key
         # Use a more basic endpoint that should work with any valid API key
+        logger.info("Validating Systeme.io API key...")
         r = requests.get(f"{BASE}/api/contacts?limit=1", headers=HEADERS, timeout=10)
-        logger.info(f"Systeme API validation response: {r.status_code}")
+        logger.info("Systeme API validation response: %s", r.status_code)
+        logger.info("Systeme API validation body: %s", r.text[:200])
         
         if r.status_code == 401:
-            logger.warning("Systeme API authentication failed (401) - Invalid API key")
-            logger.warning("Please check your SYSTEME_API_KEY in environment variables")
+            logger.error("Systeme API authentication failed (401) - Invalid or expired API key")
+            logger.error("Please check your SYSTEME_API_KEY in environment variables")
+            logger.error("Make sure the key is correct and not expired")
             return False
         elif r.status_code == 200:
             logger.info("Systeme API key validation successful")
             return True
         else:
-            logger.warning(f"Systeme API returned unexpected status: {r.status_code}")
+            logger.warning("Systeme API returned unexpected status: %s", r.status_code)
+            logger.warning("Response body: %s", r.text[:200])
             logger.warning("Assuming API key is valid despite unexpected response")
             return True  # Assume it's working if not 401
     except Exception as e:
@@ -120,30 +141,34 @@ def create_contact(email: str, extra: Optional[Dict[str,Any]] = None) -> Tuple[b
     if extra:
         payload.update(extra)
     
-    logger.info(f"Creating contact in Systeme.io for email: {email}")
+    logger.info("Creating contact in Systeme.io for email: %s", email)
+    logger.info("Contact payload: %s", payload)
+    
     resp, body = safe_post("/api/contacts", payload)
     
     if resp is None:
-        logger.error(f"Failed to create contact - no response: {body}")
+        logger.error("Failed to create contact - no response: %s", body)
         return False, None, body
     
-    logger.info(f"Systeme.io contact creation response: {resp.status_code}")
+    logger.info("Systeme.io contact creation response: %s", resp.status_code)
     
     if resp.status_code in (200, 201):
         try:
             data = resp.json()
             contact_id = data.get("id")
-            logger.info(f"Successfully created contact with ID: {contact_id}")
+            logger.info("Successfully created contact with ID: %s", contact_id)
             return True, int(contact_id) if contact_id else None, None
         except Exception as e:
-            logger.warning(f"Contact created but failed to parse response: {e}")
+            logger.warning("Contact created but failed to parse response: %s", e)
+            logger.warning("Response body: %s", body)
             return True, None, None
     elif resp.status_code == 401:
-        logger.error(f"Systeme.io API authentication failed (401) - Invalid or expired API key")
-        logger.error(f"Please check SYSTEME_API_KEY environment variable")
+        logger.error("Systeme.io API authentication failed (401) - Invalid or expired API key")
+        logger.error("Please check SYSTEME_API_KEY environment variable")
+        logger.error("API key format: %s... (length: %s)", API_KEY[:10] if API_KEY else "None", len(API_KEY) if API_KEY else 0)
         return False, None, "Authentication failed - Invalid API key"
     else:
-        logger.error(f"Failed to create contact - Status: {resp.status_code}, Body: {body}")
+        logger.error("Failed to create contact - Status: %s, Body: %s", resp.status_code, body)
         return False, None, body
 
 def apply_tag(contact_id: int, tag_id: int) -> Tuple[bool, Optional[str]]:
@@ -274,25 +299,43 @@ def test_systeme_connection() -> Dict[str, Any]:
             }
         
         logger.info("Testing Systeme.io connection...")
-        r = requests.get(f"{BASE}/api/contacts", headers=HEADERS, timeout=10)
+        logger.info("Using headers: %s", {k: v for k, v in HEADERS.items() if k != "X-API-Key"})
+        logger.info("API key format: %s... (length: %s)", API_KEY[:10], len(API_KEY))
+        
+        r = requests.get(f"{BASE}/api/contacts?limit=1", headers=HEADERS, timeout=10)
+        
+        logger.info("Systeme.io test response status: %s", r.status_code)
+        logger.info("Systeme.io test response body: %s", r.text[:200])
         
         if r.status_code == 401:
             return {
                 "status": "error",
-                "message": "Authentication failed (401)",
-                "suggestion": "Check if SYSTEME_API_KEY is correct and not expired"
+                "message": "Authentication failed (401) - Invalid or expired API key",
+                "suggestion": "Check if SYSTEME_API_KEY is correct and not expired",
+                "api_key_format": f"{API_KEY[:10]}... (length: {len(API_KEY)})"
             }
         elif r.status_code == 200:
-            return {
-                "status": "success",
-                "message": "Systeme.io connection successful",
-                "contacts_count": len(r.json().get('data', []))
-            }
+            try:
+                data = r.json()
+                contacts_count = len(data.get('data', []))
+                return {
+                    "status": "success",
+                    "message": "Systeme.io connection successful",
+                    "contacts_count": contacts_count,
+                    "api_key_format": f"{API_KEY[:10]}... (length: {len(API_KEY)})"
+                }
+            except Exception as e:
+                return {
+                    "status": "warning",
+                    "message": f"Connection successful but failed to parse response: {e}",
+                    "suggestion": "API is working but response format unexpected"
+                }
         else:
             return {
                 "status": "warning",
                 "message": f"Unexpected status code: {r.status_code}",
-                "suggestion": "API might be working but with different response"
+                "suggestion": "API might be working but with different response",
+                "response_body": r.text[:200]
             }
     except Exception as e:
         return {
