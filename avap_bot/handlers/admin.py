@@ -436,35 +436,42 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
 
 def _find_student_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
     """Find student by email, phone, or name in verified_users and pending_verifications tables."""
-    # Try as email first
+    from avap_bot.services.supabase_service import find_pending_by_email_or_phone
+    
+    # Try as email first - check pending_verifications first (where admin-added students go)
     if validate_email(identifier):
+        # Check pending_verifications first (including those with status 'verified')
+        pending_results = find_pending_by_email_or_phone(email=identifier)
+        if pending_results:
+            return pending_results[0]
+        
+        # Then check verified_users
         results = find_verified_by_email_or_phone(email=identifier)
         if results:
             return results[0]
 
-    # Try as phone
+    # Try as phone - check pending_verifications first
     if validate_phone(identifier):
+        # Check pending_verifications first (including those with status 'verified')
+        pending_results = find_pending_by_email_or_phone(phone=identifier)
+        if pending_results:
+            return pending_results[0]
+        
+        # Then check verified_users
         results = find_verified_by_email_or_phone(phone=identifier)
         if results:
             return results[0]
 
-    # Try as name in verified users
+    # Try as name in pending_verifications first
+    from avap_bot.services.supabase_service import find_pending_by_name
+    pending_results = find_pending_by_name(identifier)
+    if pending_results:
+        return pending_results[0]
+
+    # Then try as name in verified users
     results = find_verified_by_name(identifier)
     if results:
         return results[0]
-
-    # If not found in verified_users, try pending_verifications
-    from avap_bot.services.supabase_service import find_pending_by_email_or_phone
-
-    if validate_email(identifier):
-        pending_results = find_pending_by_email_or_phone(email=identifier)
-        if pending_results:
-            return pending_results[0]
-
-    if validate_phone(identifier):
-        pending_results = find_pending_by_email_or_phone(phone=identifier)
-        if pending_results:
-            return pending_results[0]
 
     return None
 

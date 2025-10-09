@@ -232,6 +232,18 @@ def find_pending_by_email_or_phone(email: Optional[str] = None, phone: Optional[
         return []
 
 
+def find_pending_by_name(name: str) -> List[Dict[str, Any]]:
+    """Search pending_verifications by name"""
+    try:
+        client = get_supabase()
+        res = client.table("pending_verifications").select("*").eq("name", name).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase find_pending_by_name error: %s", e)
+        return []
+
+
 def find_verified_by_email_or_phone(email: Optional[str] = None, phone: Optional[str] = None) -> List[Dict[str, Any]]:
     """Search verified_users by email or phone"""
     try:
@@ -311,9 +323,10 @@ def remove_verified_user(identifier: str) -> bool:
     """Identifier may be email, phone, or full name. Return True if deleted."""
     client = get_supabase()
     try:
-        # First, check if user exists
+        # First, check if user exists in verified_users
         user_exists = False
         user_info = None
+        table_name = "verified_users"
         
         # Check by email
         res = client.table("verified_users").select("*").eq("email", identifier).execute()
@@ -321,7 +334,8 @@ def remove_verified_user(identifier: str) -> bool:
         if data:
             user_exists = True
             user_info = data[0]
-            logger.info(f"Found user by email: {identifier}")
+            table_name = "verified_users"
+            logger.info(f"Found user by email in verified_users: {identifier}")
         else:
             # Check by phone
             res = client.table("verified_users").select("*").eq("phone", identifier).execute()
@@ -329,7 +343,8 @@ def remove_verified_user(identifier: str) -> bool:
             if data:
                 user_exists = True
                 user_info = data[0]
-                logger.info(f"Found user by phone: {identifier}")
+                table_name = "verified_users"
+                logger.info(f"Found user by phone in verified_users: {identifier}")
             else:
                 # Check by name
                 res = client.table("verified_users").select("*").eq("name", identifier).execute()
@@ -337,30 +352,60 @@ def remove_verified_user(identifier: str) -> bool:
                 if data:
                     user_exists = True
                     user_info = data[0]
-                    logger.info(f"Found user by name: {identifier}")
+                    table_name = "verified_users"
+                    logger.info(f"Found user by name in verified_users: {identifier}")
+        
+        # If not found in verified_users, check pending_verifications
+        if not user_exists:
+            # Check by email in pending_verifications
+            res = client.table("pending_verifications").select("*").eq("email", identifier).execute()
+            data = _get_response_data(res)
+            if data:
+                user_exists = True
+                user_info = data[0]
+                table_name = "pending_verifications"
+                logger.info(f"Found user by email in pending_verifications: {identifier}")
+            else:
+                # Check by phone in pending_verifications
+                res = client.table("pending_verifications").select("*").eq("phone", identifier).execute()
+                data = _get_response_data(res)
+                if data:
+                    user_exists = True
+                    user_info = data[0]
+                    table_name = "pending_verifications"
+                    logger.info(f"Found user by phone in pending_verifications: {identifier}")
+                else:
+                    # Check by name in pending_verifications
+                    res = client.table("pending_verifications").select("*").eq("name", identifier).execute()
+                    data = _get_response_data(res)
+                    if data:
+                        user_exists = True
+                        user_info = data[0]
+                        table_name = "pending_verifications"
+                        logger.info(f"Found user by name in pending_verifications: {identifier}")
         
         if not user_exists:
             logger.warning(f"User not found for identifier: {identifier}")
-            logger.warning(f"Searched by email, phone, and name - no matches found")
-            logger.info(f"This is normal if the user was never verified or already removed")
+            logger.warning(f"Searched by email, phone, and name in both verified_users and pending_verifications - no matches found")
+            logger.info(f"This is normal if the user was never added or already removed")
             return False
         
-        # Now delete the user
+        # Now delete the user from the appropriate table
         if user_info:
             # Delete by the primary key or unique identifier
             if user_info.get('email'):
-                res = client.table("verified_users").delete().eq("email", user_info['email']).execute()
+                res = client.table(table_name).delete().eq("email", user_info['email']).execute()
             elif user_info.get('phone'):
-                res = client.table("verified_users").delete().eq("phone", user_info['phone']).execute()
+                res = client.table(table_name).delete().eq("phone", user_info['phone']).execute()
             else:
-                res = client.table("verified_users").delete().eq("name", user_info['name']).execute()
+                res = client.table(table_name).delete().eq("name", user_info['name']).execute()
             
             data = _get_response_data(res)
             if data:
-                logger.info(f"Successfully removed user: {identifier}")
+                logger.info(f"Successfully removed user from {table_name}: {identifier}")
                 return True
             else:
-                logger.error(f"Failed to delete user record: {identifier}")
+                logger.error(f"Failed to delete user record from {table_name}: {identifier}")
                 return False
         else:
             logger.error(f"No user info found for deletion: {identifier}")

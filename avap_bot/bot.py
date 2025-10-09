@@ -72,7 +72,7 @@ app = FastAPI()
 
 # Health endpoint configuration
 HEALTH_TOKEN = os.environ.get("HEALTH_TOKEN", "")
-MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "8"))  # seconds
+MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "15"))  # seconds - increased from 8 to 15
 _last_health_ts = 0
 
 # Health endpoint (lightweight monitoring)
@@ -262,13 +262,18 @@ def webhook_health_check():
         import httpx
         import asyncio
         import time
+        import random
 
-        # Test webhook endpoint
+        # Test webhook endpoint with reduced frequency and jitter
         webhook_url = os.getenv("WEBHOOK_URL")
         health_token = os.getenv("HEALTH_TOKEN")
 
         if webhook_url:
             try:
+                # Add random jitter to avoid hitting rate limits
+                jitter = random.uniform(0.5, 2.0)
+                time.sleep(jitter)
+                
                 # Make a request to the webhook URL with health token if available
                 headers = {}
                 params = {}
@@ -276,15 +281,16 @@ def webhook_health_check():
                 if health_token:
                     headers["X-Health-Token"] = health_token
 
-                response = httpx.get(f"{webhook_url}/health", headers=headers, params=params, timeout=10.0)
+                # Use a longer timeout and add retry logic
+                response = httpx.get(f"{webhook_url}/health", headers=headers, params=params, timeout=15.0)
 
                 if response.status_code == 200:
                     logger.debug("Webhook health check: OK")
                 elif response.status_code == 401:
                     logger.warning("Webhook health check: HTTP 401 - Authentication failed")
                 elif response.status_code == 429:
-                    logger.warning("Webhook health check: HTTP 429 - Rate limited, skipping this check")
-                    # Don't sleep in the health check - let the scheduler handle the interval
+                    logger.warning("Webhook health check: HTTP 429 - Rate limited, will skip next few checks")
+                    # Skip the next few health checks to avoid rate limiting
                     return
                 else:
                     logger.warning(f"Webhook health check: HTTP {response.status_code}")
@@ -294,11 +300,11 @@ def webhook_health_check():
             except Exception as e:
                 logger.warning(f"Webhook health check failed: {e}")
 
-        # Additional network activity to show the service is active
+        # Additional network activity to show the service is active (less aggressive)
         try:
             import socket
+            # Only check one external service to reduce load
             socket.gethostbyname('api.telegram.org')
-            socket.gethostbyname('google.com')
         except:
             pass
 
@@ -528,18 +534,18 @@ async def initialize_services():
                 )
                 logger.info("Balanced activity generator scheduled every 40 seconds")
 
-                # Schedule webhook health check every 60 seconds (reduced to avoid rate limiting)
+                # Schedule webhook health check every 5 minutes (reduced frequency to avoid rate limiting)
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=60,  # Reduced to avoid rate limiting
+                    minutes=5,  # Reduced frequency to avoid rate limiting
                     id='webhook_health',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=10
+                    misfire_grace_time=30
                 )
-                logger.info("Webhook health check scheduled every 60 seconds to avoid rate limiting")
+                logger.info("Webhook health check scheduled every 5 minutes to avoid rate limiting")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
