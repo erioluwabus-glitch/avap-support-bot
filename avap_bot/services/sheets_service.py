@@ -1269,8 +1269,13 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
         if spreadsheet:
             try:
                 sheet = spreadsheet.worksheet("Questions")
-                # Get all data
-                records = sheet.get_all_records()
+                # Get all data with expected headers to handle duplicate headers
+                expected_headers = ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"]
+                try:
+                    records = sheet.get_all_records(expected_headers=expected_headers)
+                except Exception as e:
+                    logger.warning(f"Failed to get records with expected headers, trying without: {e}")
+                    records = sheet.get_all_records()
                 # Filter by username
                 student_questions = [record for record in records if record.get("username") == username]
                 return student_questions
@@ -1357,7 +1362,19 @@ def update_question_status(username: str, answer: str) -> bool:
                 raise e
 
         # Find row by username (get the most recent question)
-        all_records = sheet.get_all_records()
+        # Handle duplicate headers by specifying expected headers
+        expected_headers = ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"]
+        try:
+            all_records = sheet.get_all_records(expected_headers=expected_headers)
+        except Exception as e:
+            logger.warning(f"Failed to get records with expected headers, trying without: {e}")
+            # Fallback: try to get records without expected headers
+            try:
+                all_records = sheet.get_all_records()
+            except Exception as e2:
+                logger.error(f"Failed to get records even without expected headers: {e2}")
+                return False
+        
         for i, record in enumerate(reversed(all_records), start=1):
             if record.get("username") == username and record.get("status") == "Pending":
                 # Update the row (i is from bottom, so actual row is len - i + 2 for header)
