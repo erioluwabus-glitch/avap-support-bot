@@ -74,6 +74,14 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer message from admin"""
     try:
+        # Quick check: only process if we have question context
+        username = context.user_data.get('question_username')
+        telegram_id = context.user_data.get('question_telegram_id')
+        
+        if not username or not telegram_id:
+            # No question context, ignore silently to avoid conflicts
+            return
+        
         logger.info(f"🔄 ANSWER MESSAGE HANDLER CALLED from user {update.effective_user.id}")
         logger.info(f"Message type: {type(update.message)}")
         logger.info(f"User data keys: {list(context.user_data.keys())}")
@@ -87,14 +95,6 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
         if context.user_data.get('waiting_for_comment'):
             logger.info(f"❌ User {update.effective_user.id} is in grading mode, not question answering mode")
             return  # This is a grading comment, not a question answer
-        
-        # Check if we have question context stored (this is our specific trigger)
-        username = context.user_data.get('question_username')
-        telegram_id = context.user_data.get('question_telegram_id')
-
-        if not username or not telegram_id:
-            logger.info(f"❌ No question context found for user {update.effective_user.id}, ignoring message")
-            return  # No question context, ignore
 
         # Get the stored question info
         question_text = context.user_data.get('question_text')
@@ -286,8 +286,10 @@ def register_handlers(application):
     application.add_handler(CallbackQueryHandler(answer_callback, pattern="^answer_"))
     
     # Register message handler for answer submissions (works in any chat for admins)
+    # Only process messages when there's question context to avoid conflicts
     application.add_handler(MessageHandler(
         filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
-        handle_answer_message
+        handle_answer_message,
+        block=False  # Don't block other handlers
     ))
 
