@@ -1355,8 +1355,8 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                         return []
                     except Exception as create_error:
                         logger.error(f"Failed to create questions worksheet: {create_error}")
-                        logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
-                else:
+                        return []
+            except Exception as e:
                 logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
