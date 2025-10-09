@@ -152,6 +152,11 @@ def apply_tags_bulk(contact_id: int, tag_ids=None) -> Dict[int, Tuple[bool, Opti
 def create_contact_and_tag(pending_data: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
     """Create a contact in Systeme.io and apply tags. Returns (ok, error_text)."""
     try:
+        # Check if API key is valid first
+        if not API_KEY:
+            logger.warning("SYSTEME_API_KEY not set - skipping Systeme.io integration")
+            return True, None  # Return success to not block student creation
+        
         email = pending_data.get('email')
         if not email:
             return False, "No email provided in pending_data"
@@ -168,6 +173,10 @@ def create_contact_and_tag(pending_data: Dict[str, Any]) -> Tuple[bool, Optional
         
         ok, contact_id, error = create_contact(email, extra_data)
         if not ok:
+            # If it's an authentication error, log warning but don't fail
+            if "401" in str(error) or "authentication" in str(error).lower():
+                logger.warning(f"Systeme.io API authentication failed - skipping contact creation: {error}")
+                return True, None  # Return success to not block student creation
             return False, f"Failed to create contact: {error}"
         
         if contact_id:
@@ -184,12 +193,21 @@ def create_contact_and_tag(pending_data: Dict[str, Any]) -> Tuple[bool, Optional
             
     except Exception as e:
         logger.exception("Error in create_contact_and_tag: %s", e)
+        # If it's an authentication error, don't fail the student creation
+        if "401" in str(e) or "authentication" in str(e).lower():
+            logger.warning("Systeme.io API authentication failed - skipping contact creation")
+            return True, None
         return False, str(e)
 
 
 def untag_or_remove_contact(email: str, action: str = "untag") -> Tuple[bool, Optional[str]]:
     """Untag or remove a contact from Systeme.io. Returns (ok, error_text)."""
     try:
+        # Check if API key is valid first
+        if not API_KEY:
+            logger.warning("SYSTEME_API_KEY not set - skipping Systeme.io integration")
+            return True, None  # Return success to not block student removal
+        
         if not email:
             return False, "No email provided"
         
@@ -209,4 +227,8 @@ def untag_or_remove_contact(email: str, action: str = "untag") -> Tuple[bool, Op
         
     except Exception as e:
         logger.exception("Error in untag_or_remove_contact: %s", e)
+        # If it's an authentication error, don't fail the student removal
+        if "401" in str(e) or "authentication" in str(e).lower():
+            logger.warning("Systeme.io API authentication failed - skipping contact removal")
+            return True, None
         return False, str(e)
