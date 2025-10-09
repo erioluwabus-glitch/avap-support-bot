@@ -50,7 +50,7 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
     if allow_admin_operations:
         # For admin operations, check if the user is an admin
         try:
-            from avap_bot.handlers.grading import _is_admin
+            from avap_bot.handlers.admin_tools import _is_admin
             if _is_admin(update):
                 logger.info("Admin operation detected - allowing inline keyboards even in group chat")
                 return False
@@ -72,7 +72,7 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
                 # Allow admin operations in group chats
                 if allow_admin_operations:
                     try:
-                        from avap_bot.handlers.grading import _is_admin
+                        from avap_bot.handlers.admin_tools import _is_admin
                         if _is_admin(update):
                             logger.info(f"Admin callback query in group chat: {message_chat_type} - allowing inline keyboards")
                             return False
