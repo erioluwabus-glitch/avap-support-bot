@@ -13,7 +13,7 @@ from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQ
 from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions
-from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages
+from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages, clear_all_match_requests
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.chat_utils import should_disable_inline_keyboards
@@ -567,6 +567,39 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+async def clear_matches_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear all match requests - admin only"""
+    # Check if user is admin
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+
+    try:
+        logger.info(f"Admin {update.effective_user.id} clearing all match requests")
+        
+        # Clear all match requests
+        success = await run_blocking(clear_all_match_requests)
+        
+        if success:
+            await update.message.reply_text(
+                "✅ **All match requests have been cleared!**\n\n"
+                "All students can now match again with fresh pairings.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Successfully cleared all match requests by admin {update.effective_user.id}")
+        else:
+            await update.message.reply_text(
+                "❌ **Failed to clear match requests.**\n\n"
+                "Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.error(f"Failed to clear match requests by admin {update.effective_user.id}")
+            
+    except Exception as e:
+        logger.exception(f"Error in clear_matches_handler: {e}")
+        await update.message.reply_text("❌ An error occurred while clearing match requests.")
+
+
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show bot statistics"""
     logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
@@ -691,7 +724,8 @@ def register_handlers(application):
     # Add command handlers
     application.add_handler(CommandHandler("get_submission", get_submission))
     application.add_handler(CommandHandler("stats", stats_handler))
-    logger.info("✅ Registered stats and get_submission command handlers")
+    application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
+    logger.info("✅ Registered stats, get_submission, and clear_matches command handlers")
     
     # Add conversation handlers
     application.add_handler(message_achievers_conv)

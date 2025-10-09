@@ -446,6 +446,20 @@ def pop_match_request(exclude_id: int) -> Optional[Dict[str, Any]]:
         return None
 
 
+def clear_all_match_requests() -> bool:
+    """Clear all match requests from the database"""
+    logger.info("Clearing all match requests from database")
+    client = get_supabase()
+    try:
+        # Delete all match requests
+        res = client.table("match_requests").delete().neq("match_id", "").execute()
+        logger.info(f"Successfully cleared all match requests")
+        return True
+    except Exception as e:
+        logger.exception("Supabase clear_all_match_requests error: %s", e)
+        return False
+
+
 def check_verified_user(telegram_id: int) -> Optional[Dict[str, Any]]:
     """Check if user is verified by telegram_id"""
     try:
