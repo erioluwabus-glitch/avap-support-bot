@@ -291,6 +291,6 @@ def register_handlers(application):
     application.add_handler(MessageHandler(
         filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_answer_message,
-        block=False  # Don't block other handlers
+        block=True  # Block other handlers to process question answers first
     ))
 

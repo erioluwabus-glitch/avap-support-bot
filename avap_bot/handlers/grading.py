@@ -798,7 +798,7 @@ def register_handlers(application):
     application.add_handler(MessageHandler(
         filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_comment_submission,
-        block=True  # Block other handlers from processing grading comments
+        block=False  # Don't block other handlers - let questions handler process question answers
     ))
 
     # Add command for students to view their grades (only in private chats)
