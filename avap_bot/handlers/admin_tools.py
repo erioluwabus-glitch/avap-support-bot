@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions
+from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages, clear_all_match_requests
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
@@ -644,7 +644,7 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         
         # Get total wins count
         try:
-            wins = await run_blocking(get_student_wins, "all")  # Get all wins
+            wins = await run_blocking(get_all_wins)  # Get all wins
             total_wins = len(wins) if wins else 0
         except Exception as e:
             logger.warning(f"Failed to get wins count: {e}")
@@ -658,6 +658,14 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.warning(f"Failed to get broadcast history: {e}")
             total_broadcasts = 0
         
+        # Get top students (achievers) for more detailed stats
+        try:
+            achievers = await run_blocking(list_achievers)
+            top_students = achievers[:5] if achievers else []  # Top 5 students
+        except Exception as e:
+            logger.warning(f"Failed to get achievers: {e}")
+            top_students = []
+        
         # Format the stats message
         stats_message = (
             "📊 **AVAP Support Bot Statistics**\n\n"
@@ -669,8 +677,19 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             f"• Total Submissions: {total_submissions}\n"
             f"• Total Wins Shared: {total_wins}\n"
             f"• Total Broadcasts Sent: {total_broadcasts}\n\n"
-            f"🤖 **Bot Status:** ✅ Active"
         )
+        
+        # Add top students if available
+        if top_students:
+            stats_message += "🏆 **Top Students:**\n"
+            for i, student in enumerate(top_students, 1):
+                username = student.get('username', 'Unknown')
+                submissions = student.get('submissions', 0)
+                wins = student.get('wins', 0)
+                stats_message += f"{i}. @{username} - {submissions} submissions, {wins} wins\n"
+            stats_message += "\n"
+        
+        stats_message += "🤖 **Bot Status:** ✅ Active"
         
         await update.message.reply_text(
             stats_message,

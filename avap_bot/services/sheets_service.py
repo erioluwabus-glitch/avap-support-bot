@@ -1149,6 +1149,52 @@ def update_verification_status(email: str, status: str) -> bool:
         return False
 
 
+def get_all_wins() -> List[Dict[str, Any]]:
+    """Get all wins from Google Sheets or CSV fallback"""
+    try:
+        spreadsheet = _get_spreadsheet()
+
+        # If Google Sheets is available, use it
+        if spreadsheet:
+            try:
+                # Try wins_new worksheet first (new format)
+                try:
+                    sheet = spreadsheet.worksheet("wins_new")
+                    logger.info("Using wins_new worksheet")
+                    records = sheet.get_all_records()
+                    return records
+                except Exception:
+                    # Fallback to wins worksheet
+                    sheet = spreadsheet.worksheet("wins")
+                    logger.info("Using wins worksheet")
+                    records = sheet.get_all_records()
+                    return records
+            except Exception as e:
+                logger.warning("Failed to get wins from Google Sheets, falling back to CSV: %s", e)
+                return _get_all_wins_csv()
+        else:
+            # CSV fallback
+            return _get_all_wins_csv()
+    except Exception as e:
+        logger.exception("Error in get_all_wins: %s", e)
+        return []
+
+
+def _get_all_wins_csv() -> List[Dict[str, Any]]:
+    """Get all wins from CSV file (fallback mode)"""
+    try:
+        csv_file = "data/csv_backup/wins.csv"
+        wins = []
+        if os.path.exists(csv_file):
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                wins = list(reader)
+        return wins
+    except Exception as e:
+        logger.exception("Error reading wins CSV: %s", e)
+        return []
+
+
 def get_student_wins(username: str) -> List[Dict[str, Any]]:
     """Get student wins from Google Sheets or CSV fallback"""
     try:
