@@ -62,6 +62,24 @@ if not BOT_TOKEN:
 # Create the FastAPI app
 app = FastAPI()
 
+# Configure Uvicorn access logging for debugging inbound requests
+import uvicorn
+import logging
+
+# Set up access logging to track inbound requests
+access_logger = logging.getLogger("uvicorn.access")
+access_logger.setLevel(logging.INFO)
+
+# Add custom access log format to track self-ping requests
+class CustomAccessFormatter(logging.Formatter):
+    def format(self, record):
+        # Log all inbound requests to help debug self-ping effectiveness
+        return f"INBOUND: {record.getMessage()}"
+
+access_handler = logging.StreamHandler()
+access_handler.setFormatter(CustomAccessFormatter())
+access_logger.addHandler(access_handler)
+
 # Health endpoint configuration
 HEALTH_TOKEN = os.environ.get("HEALTH_TOKEN", "")
 MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "15"))  # seconds - increased from 8 to 15
@@ -752,25 +770,26 @@ def _aggressive_memory_cleanup():
 
 
 async def background_keepalive():
-    """Background task that pings the public Render URL to prevent sleep."""
+    """Enhanced background task that pings the public Render URL to prevent sleep."""
     import asyncio
     import httpx
     import socket
     import time
+    import random
 
     # Get Render URL from environment variable
     render_url = os.getenv("RENDER_URL", "https://avap-support-bot-93z2.onrender.com")
     
-    # Create a persistent HTTP client
+    # Create a persistent HTTP client with external-like behavior
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             while True:
                 try:
-                    # Ping public Render URL to prevent sleep
+                    # Ping public Render URL to prevent sleep with external-like headers
                     successful_pings = 0
                     total_pings = 0
                     
-                    # 1. HTTP ping to our public endpoints with proper error handling
+                    # 1. HTTP ping to our public endpoints with external-like behavior
                     endpoints = ["/health", "/ping"]
                     for endpoint in endpoints:
                         total_pings += 1
@@ -778,18 +797,25 @@ async def background_keepalive():
                             url = f"{render_url}{endpoint}"
                             logger.debug(f"Pinging {url}")
                             
-                            response = await client.get(
-                                url, 
-                                timeout=30.0,
-                                headers={
-                                    "User-Agent": "Mozilla/5.0 (compatible; AVAP-Bot/1.0)",
-                                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-                                }
-                            )
+                            # Use external-like headers to mimic inbound traffic
+                            external_headers = {
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.5",
+                                "Accept-Encoding": "gzip, deflate, br",
+                                "Connection": "keep-alive",
+                                "Upgrade-Insecure-Requests": "1",
+                                "X-Forwarded-For": f"8.8.8.{random.randint(1, 254)}",  # Fake external IP
+                                "X-Real-IP": f"8.8.8.{random.randint(1, 254)}",
+                                "Cache-Control": "no-cache",
+                                "Pragma": "no-cache"
+                            }
+                            
+                            response = await client.get(url, headers=external_headers)
                             
                             if response.status_code == 200:
                                 successful_pings += 1
-                                logger.debug(f"Ping to {endpoint} successful (status: {response.status_code})")
+                                logger.info(f"Ping to {endpoint} successful (status: {response.status_code})")
                             else:
                                 logger.warning(f"Ping to {endpoint} failed with status {response.status_code}: {response.text[:100]}")
                                 
@@ -810,16 +836,18 @@ async def background_keepalive():
                     except Exception as e:
                         logger.debug(f"DNS resolution failed: {e}")
 
-                    # Log results
+                    # Log results with enhanced debugging
                     if successful_pings > 0:
                         logger.info(f"Self-ping successful - service kept awake ({successful_pings}/{total_pings} pings)")
+                        logger.info("✅ Inbound traffic generated - Render inactivity timer reset")
                     else:
                         logger.warning(f"Self-ping failed - service may sleep (0/{total_pings} pings successful)")
-                        logger.warning("This may be due to:")
-                        logger.warning("1. Network routing issues (ping not going external)")
-                        logger.warning("2. Render service not responding")
-                        logger.warning("3. Incorrect RENDER_URL environment variable")
-                        logger.warning("4. Rate limiting or blocking")
+                        logger.warning("🔍 Debugging information:")
+                        logger.warning("1. Check if RENDER_URL is correct: %s", render_url)
+                        logger.warning("2. Verify service is responding to manual requests")
+                        logger.warning("3. Check Render dashboard for service status")
+                        logger.warning("4. Consider external pinger as backup")
+                        logger.warning("5. Internal routing may not count as inbound traffic")
 
                 except asyncio.CancelledError:
                     logger.info("Background keepalive task cancelled - shutting down gracefully")
@@ -828,7 +856,8 @@ async def background_keepalive():
                     logger.error(f"Background keepalive error: {type(e).__name__}: {e}")
                 finally:
                     try:
-                        await asyncio.sleep(720)  # Ping every 12 minutes (720 seconds)
+                        # Use 9-minute interval to stay safely under 15-minute timeout
+                        await asyncio.sleep(540)  # 9 minutes (540 seconds)
                     except asyncio.CancelledError:
                         logger.info("Background keepalive sleep cancelled - shutting down")
                         break
