@@ -283,16 +283,9 @@ def webhook_health_check():
                 elif response.status_code == 401:
                     logger.warning("Webhook health check: HTTP 401 - Authentication failed")
                 elif response.status_code == 429:
-                    logger.debug("Webhook health check: HTTP 429 - Rate limited (normal)")
-                    # Respect Retry-After header for rate limiting
-                    retry_after = response.headers.get("Retry-After")
-                    if retry_after:
-                        wait_time = min(int(retry_after), 300)  # Max 5 minutes
-                        logger.warning(f"Webhook health check: HTTP 429 - Rate limited, waiting {wait_time}s")
-                        time.sleep(wait_time)
-                    else:
-                        logger.warning("Webhook health check: HTTP 429 - Rate limited, waiting 60s")
-                        time.sleep(60)
+                    logger.warning("Webhook health check: HTTP 429 - Rate limited, skipping this check")
+                    # Don't sleep in the health check - let the scheduler handle the interval
+                    return
                 else:
                     logger.warning(f"Webhook health check: HTTP {response.status_code}")
 
@@ -492,60 +485,60 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-                # Schedule ULTRA-AGGRESSIVE keep-alive health checks every 30 seconds to prevent SIGTERM
-        if SCHEDULER_AVAILABLE and scheduler:
+                # Schedule balanced keep-alive health checks to prevent SIGTERM without overwhelming scheduler
+                if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
                     'interval',
-                    seconds=30,  # ULTRA-AGGRESSIVE: Every 30 seconds
+                    seconds=45,  # Balanced: Every 45 seconds
                     args=[bot_app.bot],
                     id='keep_alive',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=10
+                    misfire_grace_time=15
                 )
-                logger.info("ULTRA-AGGRESSIVE keep-alive health checks scheduled every 30 seconds")
+                logger.info("Balanced keep-alive health checks scheduled every 45 seconds")
 
-                # Schedule simple ping every 15 seconds (ULTRA-AGGRESSIVE)
+                # Schedule simple ping every 30 seconds (balanced)
                 scheduler.add_job(
                     ping_self,
                     'interval',
-                    seconds=15,  # ULTRA-AGGRESSIVE: Every 15 seconds
+                    seconds=30,  # Balanced: Every 30 seconds
                     id='ping_self',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=5
+                    misfire_grace_time=10
                 )
-                logger.info("ULTRA-AGGRESSIVE simple ping scheduled every 15 seconds")
+                logger.info("Balanced simple ping scheduled every 30 seconds")
 
-                # Schedule additional activity every 20 seconds (ULTRA-AGGRESSIVE)
+                # Schedule additional activity every 40 seconds (balanced)
                 scheduler.add_job(
                     generate_activity,
                     'interval',
-                    seconds=20,  # ULTRA-AGGRESSIVE: Every 20 seconds
+                    seconds=40,  # Balanced: Every 40 seconds
                     id='activity_generator',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=5
+                    misfire_grace_time=10
                 )
-                logger.info("ULTRA-AGGRESSIVE activity generator scheduled every 20 seconds")
+                logger.info("Balanced activity generator scheduled every 40 seconds")
 
-                # Schedule webhook health check every 25 seconds (ULTRA-AGGRESSIVE)
+                # Schedule webhook health check every 60 seconds (reduced to avoid rate limiting)
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=25,  # ULTRA-AGGRESSIVE: Every 25 seconds
+                    seconds=60,  # Reduced to avoid rate limiting
                     id='webhook_health',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=5
+                    misfire_grace_time=10
                 )
-                logger.info("ULTRA-AGGRESSIVE webhook health check scheduled every 25 seconds")
+                logger.info("Webhook health check scheduled every 60 seconds to avoid rate limiting")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
@@ -788,24 +781,24 @@ async def emergency_keepalive_task():
                 # Emergency keep-alive with multiple concurrent requests
                 tasks = []
                 
-                # Multiple HTTP requests
-                for i in range(5):
+                # Balanced HTTP requests (reduced to prevent memory issues)
+                for i in range(2):  # Reduced from 5 to 2
                     try:
-                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/ping", timeout=0.5))
-                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/health", timeout=0.5))
+                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0))
+                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/health", timeout=1.0))
                     except:
                         pass
                 
-                # DNS lookups
-                domains = ['google.com', 'api.telegram.org', 'github.com', 'stackoverflow.com', 'python.org']
+                # Reduced DNS lookups to prevent memory issues
+                domains = ['google.com', 'api.telegram.org']  # Reduced from 5 to 2 domains
                 for domain in domains:
                     try:
                         socket.gethostbyname(domain)
                     except:
                         pass
                 
-                # CPU activity
-                _ = sum(i * i for i in range(1000))
+                # Reduced CPU activity to prevent memory issues
+                _ = sum(i * i for i in range(100))  # Reduced from 1000 to 100
                 
                 # Execute all tasks concurrently
                 if tasks:
@@ -818,7 +811,7 @@ async def emergency_keepalive_task():
                 logger.debug(f"Emergency keepalive error: {e}")
             finally:
                 try:
-                    await asyncio.sleep(0.5)  # Ultra-aggressive: every 0.5 seconds
+                    await asyncio.sleep(5.0)  # Balanced: every 5 seconds to reduce memory usage
                 except asyncio.CancelledError:
                     logger.info("Emergency keepalive sleep cancelled - shutting down")
                     break
