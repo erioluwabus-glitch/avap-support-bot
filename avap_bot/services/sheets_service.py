@@ -1312,13 +1312,33 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
         if spreadsheet:
             try:
                 sheet = spreadsheet.worksheet("Questions")
-                # Get all data with expected headers to handle duplicate headers
-                expected_headers = ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"]
+                # Get all data with robust header handling to avoid duplicate header issues
                 try:
-                    records = sheet.get_all_records(expected_headers=expected_headers)
+                    # Get raw data to avoid header issues
+                    all_data = sheet.get_all_values()
+                    if len(all_data) < 2:  # Need at least header + 1 data row
+                        logger.warning("No data found in questions worksheet")
+                        return []
+                    
+                    # Get headers from first row
+                    headers = all_data[0]
+                    logger.info(f"Raw headers from questions worksheet: {headers}")
+                    
+                    # Create records manually to avoid duplicate header issues
+                    records = []
+                    for row_data in all_data[1:]:  # Skip header row
+                        if len(row_data) >= len(headers):
+                            record = {}
+                            for i, header in enumerate(headers):
+                                if i < len(row_data):
+                                    record[header] = row_data[i]
+                            records.append(record)
+                    
+                    logger.info(f"Successfully parsed {len(records)} records from questions worksheet")
+                    
                 except Exception as e:
-                    logger.warning(f"Failed to get records with expected headers, trying without: {e}")
-                records = sheet.get_all_records()
+                    logger.error(f"Failed to get records from questions worksheet: {e}")
+                    return []
                 # Filter by username
                 student_questions = [record for record in records if record.get("username") == username]
                 return student_questions
@@ -1405,18 +1425,33 @@ def update_question_status(username: str, answer: str) -> bool:
                 raise e
 
         # Find row by username (get the most recent question)
-        # Handle duplicate headers by specifying expected headers
-        expected_headers = ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"]
+        # Handle duplicate headers by using a more robust approach
         try:
-            all_records = sheet.get_all_records(expected_headers=expected_headers)
-        except Exception as e:
-            logger.warning(f"Failed to get records with expected headers, trying without: {e}")
-            # Fallback: try to get records without expected headers
-            try:
-        all_records = sheet.get_all_records()
-            except Exception as e2:
-                logger.error(f"Failed to get records even without expected headers: {e2}")
+            # First, try to get all data as raw values to avoid header issues
+            all_data = sheet.get_all_values()
+            if len(all_data) < 2:  # Need at least header + 1 data row
+                logger.warning("No data found in questions worksheet")
                 return False
+            
+            # Get headers from first row
+            headers = all_data[0]
+            logger.info(f"Raw headers from worksheet: {headers}")
+            
+            # Create records manually to avoid duplicate header issues
+            all_records = []
+            for row_data in all_data[1:]:  # Skip header row
+                if len(row_data) >= len(headers):
+                    record = {}
+                    for i, header in enumerate(headers):
+                        if i < len(row_data):
+                            record[header] = row_data[i]
+                    all_records.append(record)
+            
+            logger.info(f"Successfully parsed {len(all_records)} records from questions worksheet")
+            
+        except Exception as e:
+            logger.error(f"Failed to get records from questions worksheet: {e}")
+            return False
         
         # Get headers to find correct column positions
         try:
@@ -1545,4 +1580,55 @@ def test_sheets_connection() -> bool:
 
     except Exception as e:
         logger.exception("Google Sheets connection test failed: %s", e)
+        return False
+
+
+def fix_questions_worksheet_headers() -> bool:
+    """Fix duplicate headers in Questions worksheet by recreating it with proper headers."""
+    try:
+        spreadsheet = _get_spreadsheet()
+        if not spreadsheet:
+            logger.warning("Cannot fix headers - no spreadsheet connection")
+            return False
+        
+        try:
+            # Get the existing worksheet
+            sheet = spreadsheet.worksheet("Questions")
+            
+            # Get all data except headers
+            all_data = sheet.get_all_values()
+            if len(all_data) < 2:
+                logger.info("No data to preserve in Questions worksheet")
+                return True
+            
+            # Save existing data (skip header row)
+            existing_data = all_data[1:]
+            logger.info(f"Preserving {len(existing_data)} rows of existing data")
+            
+            # Delete the old worksheet
+            spreadsheet.del_worksheet(sheet)
+            logger.info("Deleted old Questions worksheet with duplicate headers")
+            
+            # Create new worksheet with proper headers
+            new_sheet = spreadsheet.add_worksheet(title="Questions", rows=1000, cols=20)
+            proper_headers = ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"]
+            new_sheet.append_row(proper_headers)
+            logger.info("Created new Questions worksheet with proper headers")
+            
+            # Restore existing data
+            for row_data in existing_data:
+                # Pad row to match header count
+                while len(row_data) < len(proper_headers):
+                    row_data.append("")
+                new_sheet.append_row(row_data[:len(proper_headers)])
+            
+            logger.info(f"Restored {len(existing_data)} rows of data to new worksheet")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to fix Questions worksheet headers: {e}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error in fix_questions_worksheet_headers: {e}")
         return False

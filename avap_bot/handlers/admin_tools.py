@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins
+from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins, fix_questions_worksheet_headers
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages, clear_all_match_requests
 from avap_bot.services.systeme_service import test_systeme_connection
 from avap_bot.utils.run_blocking import run_blocking
@@ -660,6 +660,38 @@ async def test_systeme_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("❌ An error occurred while testing Systeme.io connection.")
 
 
+async def fix_headers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fix duplicate headers in Questions worksheet - admin only"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+    
+    try:
+        logger.info(f"Admin {update.effective_user.id} fixing Questions worksheet headers")
+        success = await run_blocking(fix_questions_worksheet_headers)
+        
+        if success:
+            await update.message.reply_text(
+                "✅ **Questions Worksheet Headers Fixed!**\n\n"
+                "The Questions worksheet has been recreated with proper headers.\n"
+                "All existing data has been preserved.\n\n"
+                "Question status updates should now work correctly.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"Successfully fixed Questions worksheet headers by admin {update.effective_user.id}")
+        else:
+            await update.message.reply_text(
+                "❌ **Failed to fix Questions worksheet headers.**\n\n"
+                "Please check the logs for more details.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.error(f"Failed to fix Questions worksheet headers by admin {update.effective_user.id}")
+            
+    except Exception as e:
+        logger.exception(f"Error in fix_headers_handler: {e}")
+        await update.message.reply_text("❌ An error occurred while fixing worksheet headers.")
+
+
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show bot statistics"""
     logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
@@ -807,7 +839,8 @@ def register_handlers(application):
     application.add_handler(CommandHandler("stats", stats_handler))
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
     application.add_handler(CommandHandler("test_systeme", test_systeme_handler))
-    logger.info("✅ Registered stats, get_submission, clear_matches, and test_systeme command handlers")
+    application.add_handler(CommandHandler("fix_headers", fix_headers_handler))
+    logger.info("✅ Registered stats, get_submission, clear_matches, test_systeme, and fix_headers command handlers")
     
     # Add conversation handlers
     application.add_handler(message_achievers_conv)
