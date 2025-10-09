@@ -742,6 +742,7 @@ def register_handlers(application):
     
     # Add command handlers
     application.add_handler(CommandHandler("get_submission", get_submission))
+    application.add_handler(CommandHandler("getsubmission", get_submission))  # Alternative command name
     application.add_handler(CommandHandler("stats", stats_handler))
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
     logger.info("✅ Registered stats, get_submission, and clear_matches command handlers")
