@@ -94,18 +94,20 @@ def validate_api_key() -> bool:
     
     try:
         # Try a simple GET request to validate the API key
-        r = requests.get(f"{BASE}/api/contacts", headers=HEADERS, timeout=10)
+        # Use a more basic endpoint that should work with any valid API key
+        r = requests.get(f"{BASE}/api/contacts?limit=1", headers=HEADERS, timeout=10)
         logger.info(f"Systeme API validation response: {r.status_code}")
         
         if r.status_code == 401:
-            logger.error("Systeme API authentication failed (401) - Invalid API key")
-            logger.error("Please check your SYSTEME_API_KEY in environment variables")
+            logger.warning("Systeme API authentication failed (401) - Invalid API key")
+            logger.warning("Please check your SYSTEME_API_KEY in environment variables")
             return False
         elif r.status_code == 200:
             logger.info("Systeme API key validation successful")
             return True
         else:
             logger.warning(f"Systeme API returned unexpected status: {r.status_code}")
+            logger.warning("Assuming API key is valid despite unexpected response")
             return True  # Assume it's working if not 401
     except Exception as e:
         logger.exception("Systeme API validation request failed: %s", e)
@@ -272,7 +274,7 @@ def test_systeme_connection() -> Dict[str, Any]:
             }
         
         logger.info("Testing Systeme.io connection...")
-        r = requests.get(f"{BASE_URL}/api/contacts", headers=HEADERS, timeout=10)
+        r = requests.get(f"{BASE}/api/contacts", headers=HEADERS, timeout=10)
         
         if r.status_code == 401:
             return {
