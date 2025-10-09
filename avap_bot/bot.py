@@ -22,7 +22,7 @@ from avap_bot.handlers import register_all
 from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
-from avap_bot.services.ai_service import clear_model_cache
+# AI features disabled
 from avap_bot.utils.memory_monitor import monitor_memory, cleanup_resources, enable_detailed_memory_monitoring, get_memory_usage, log_memory_usage, ultra_aggressive_cleanup, start_memory_watchdog, graceful_restart
 
 # Initialize logging
@@ -680,7 +680,7 @@ def _aggressive_memory_cleanup():
     try:
         import gc
         from avap_bot.utils.memory_monitor import get_memory_usage, log_memory_usage
-        from avap_bot.services.ai_service import clear_model_cache
+        # AI features disabled
         
         memory_before = get_memory_usage()
         log_memory_usage("before aggressive cleanup")

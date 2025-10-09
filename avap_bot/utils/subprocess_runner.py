@@ -32,7 +32,7 @@ def model_worker(conn, func_name: str, *args, **kwargs):
 
         # Import heavy libraries inside worker to avoid loading in parent
         if func_name == "find_faq_match":
-            from sentence_transformers import SentenceTransformer
+            # AI features disabled
             import numpy as np
 
             question = args[0]
@@ -40,7 +40,7 @@ def model_worker(conn, func_name: str, *args, **kwargs):
             threshold = kwargs.get('threshold', 0.8)
 
             # Load model
-            transformer = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+            # AI features disabled
 
             # Encode question
             question_embedding = transformer.encode([question])
@@ -69,7 +69,7 @@ def model_worker(conn, func_name: str, *args, **kwargs):
                 result = None
 
         elif func_name == "find_similar_question":
-            from sentence_transformers import SentenceTransformer
+            # AI features disabled
             import numpy as np
 
             question = args[0]
@@ -77,7 +77,7 @@ def model_worker(conn, func_name: str, *args, **kwargs):
             threshold = kwargs.get('threshold', 0.8)
 
             # Load model
-            transformer = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+            # AI features disabled
 
             # Encode question
             question_embedding = transformer.encode([question])
@@ -166,7 +166,7 @@ def model_worker(conn, func_name: str, *args, **kwargs):
             gc.collect()
 
         # Clear module cache for heavy libraries
-        modules_to_clear = ['sentence_transformers', 'transformers', 'torch', 'numpy']
+        modules_to_clear = ['numpy', 'requests', 'urllib3']
         for module_name in modules_to_clear:
             if module_name in sys.modules:
                 try:

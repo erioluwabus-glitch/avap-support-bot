@@ -188,7 +188,7 @@ async def monitor_memory(context) -> None:
                 # Quick cleanup only - don't block other jobs
                 for _ in range(3):
                     gc.collect()
-                from avap_bot.services.ai_service import clear_model_cache
+                # AI features disabled
                 clear_model_cache()
                 logger.info("FAST critical cleanup completed")
             except Exception as e:
@@ -204,9 +204,9 @@ async def monitor_memory(context) -> None:
 
             try:
                 # Check if AI features are enabled before clearing cache
-                from avap_bot.services.ai_service import _model
+                # AI features disabled
                 if _model is not None:
-                    from avap_bot.services.ai_service import clear_model_cache
+                    # AI features disabled
                     clear_model_cache()
                     logger.info("Cleared AI model cache")
                 else:
@@ -291,9 +291,9 @@ def _ultra_aggressive_cleanup() -> None:
 
         # Step 2: Clear AI model cache (only if AI is enabled)
         try:
-            from avap_bot.services.ai_service import _model
+            # AI features disabled
             if _model is not None:
-                from avap_bot.services.ai_service import clear_model_cache
+                # AI features disabled
                 clear_model_cache()
                 logger.info("Cleared AI model cache during FAST cleanup")
             else:
@@ -346,9 +346,9 @@ async def _async_ultra_aggressive_cleanup() -> None:
 
         # Step 2: Clear AI model cache (only if AI is enabled)
         try:
-            from avap_bot.services.ai_service import _model
+            # AI features disabled
             if _model is not None:
-                from avap_bot.services.ai_service import clear_model_cache
+                # AI features disabled
                 clear_model_cache()
                 logger.info("Cleared AI model cache during FAST cleanup")
             else:
@@ -361,7 +361,7 @@ async def _async_ultra_aggressive_cleanup() -> None:
             import sys
             # Clear all potentially heavy modules
             heavy_modules = [
-                'sentence_transformers', 'transformers', 'torch', 'torchvision',
+                # AI packages removed
                 'numpy', 'pandas', 'scipy', 'sklearn', 'matplotlib',
                 'PIL', 'cv2', 'openai', 'requests', 'urllib3'
             ]
@@ -433,9 +433,9 @@ async def cleanup_resources() -> None:
 
         # Clear AI model cache (only if AI is enabled)
         try:
-            from avap_bot.services.ai_service import _model
+            # AI features disabled
             if _model is not None:
-                from avap_bot.services.ai_service import clear_model_cache
+                # AI features disabled
                 clear_model_cache()
                 logger.info("Cleared AI model cache during cleanup")
             else:
@@ -446,7 +446,7 @@ async def cleanup_resources() -> None:
         # Clear heavy modules
         try:
             import sys
-            heavy_modules = ['sentence_transformers', 'transformers', 'torch', 'numpy', 'openai']
+            heavy_modules = ['numpy', 'openai', 'requests', 'urllib3']
             cleared_modules = []
             for module_name in heavy_modules:
                 if module_name in sys.modules:
