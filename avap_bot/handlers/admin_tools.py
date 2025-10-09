@@ -55,6 +55,8 @@ def log_missing_telegram_ids(users: List[Dict[str, Any]]):
 async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /get_submission command"""
     logger.info(f"📝 GET_SUBMISSION COMMAND RECEIVED from user {update.effective_user.id}")
+    logger.info(f"Command text: {update.message.text if update.message else 'No message'}")
+    logger.info(f"Admin check: {_is_admin(update)}")
     
     if not _is_admin(update):
         logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use get_submission")

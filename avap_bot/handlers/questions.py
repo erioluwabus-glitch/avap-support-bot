@@ -74,26 +74,26 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer message from admin"""
     try:
-        logger.info(f"🔄 QUESTIONS HANDLER CALLED from user {update.effective_user.id}")
-        logger.info(f"User data keys: {list(context.user_data.keys())}")
-        
-        # FIRST CHECK: If in grading mode, ignore completely
-        if context.user_data.get('waiting_for_comment'):
-            # This is a grading comment, ignore silently
-            logger.info(f"Ignoring - user in grading mode")
+        # FIRST CHECK: If this is a command, ignore completely
+        if update.message and update.message.text and update.message.text.startswith('/'):
+            # This is a command, ignore completely
             return
         
-        # SECOND CHECK: only process if we have question context
+        # SECOND CHECK: If in grading mode, ignore completely
+        if context.user_data.get('waiting_for_comment'):
+            # This is a grading comment, ignore silently
+            return
+        
+        # THIRD CHECK: only process if we have question context
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
         
         if not username or not telegram_id:
             # No question context, ignore silently to avoid conflicts
-            logger.info(f"Ignoring - no question context")
             return
         
         # Only log if we're actually processing a question
-        logger.info(f"🔄 ANSWER MESSAGE HANDLER CALLED from user {update.effective_user.id}")
+        logger.info(f"🔄 QUESTIONS HANDLER PROCESSING ANSWER from user {update.effective_user.id}")
         logger.info(f"Message type: {type(update.message)}")
         logger.info(f"User data keys: {list(context.user_data.keys())}")
 
