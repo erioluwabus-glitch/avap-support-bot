@@ -19,6 +19,9 @@ HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Default limit for API calls (Systeme.io requires 10-100 range)
+DEFAULT_LIMIT = 10
+
 def _parse_int_env(name: str, default: int = 0) -> int:
     raw = os.environ.get(name)
     if raw is None:
@@ -101,7 +104,7 @@ def safe_post(endpoint: str, payload: Dict[str, Any], max_attempts: int = 4, tim
 
 # --- Public API functions ---
 def validate_api_key() -> bool:
-    """Lightweight startup validation for the API key."""
+    """Lightweight startup validation for the API key with proper error handling."""
     if not API_KEY:
         logger.error("SYSTEME_API_KEY not set or empty.")
         return False
@@ -110,26 +113,58 @@ def validate_api_key() -> bool:
     logger.info("SYSTEME_API_KEY format: %s... (length: %s)", API_KEY[:10], len(API_KEY))
     
     try:
-        # Try a simple GET request to validate the API key
-        # Use a more basic endpoint that should work with any valid API key
+        # Use safe limit parameter (10-100 range required by API)
         logger.info("Validating Systeme.io API key...")
-        r = requests.get(f"{BASE}/api/contacts?limit=1", headers=HEADERS, timeout=10)
+        r = requests.get(f"{BASE}/api/contacts?limit={DEFAULT_LIMIT}", headers=HEADERS, timeout=10)
         logger.info("Systeme API validation response: %s", r.status_code)
         logger.info("Systeme API validation body: %s", r.text[:200])
         
-        if r.status_code == 401:
-            logger.error("Systeme API authentication failed (401) - Invalid or expired API key")
+        # Handle authentication errors
+        if r.status_code in (401, 403):
+            logger.error("Systeme API authentication failed (%s) - Invalid or expired API key", r.status_code)
             logger.error("Please check your SYSTEME_API_KEY in environment variables")
             logger.error("Make sure the key is correct and not expired")
             return False
-        elif r.status_code == 200:
-            logger.info("Systeme API key validation successful")
+        
+        # Handle validation errors (422) - check if it's a limit issue
+        if r.status_code == 422:
+            try:
+                response_json = r.json()
+                violations = response_json.get("violations", [])
+                logger.warning("Systeme API returned validation error (422). Violations: %s", violations)
+                
+                # Check if violation is only about limit parameter
+                limit_violations = [v for v in violations if v.get("propertyPath") == "limit"]
+                if limit_violations:
+                    logger.info("Retrying validation with safe limit=%s due to limit violation", DEFAULT_LIMIT)
+                    # Retry with explicit safe limit
+                    r2 = requests.get(f"{BASE}/api/contacts?limit={DEFAULT_LIMIT}", headers=HEADERS, timeout=10)
+                    if r2.status_code in (401, 403):
+                        logger.error("Systeme auth error on retry (status=%s)", r2.status_code)
+                        return False
+                    elif r2.ok:
+                        logger.info("Systeme API key validated on corrected request (status=%s)", r2.status_code)
+                        return True
+                    else:
+                        logger.warning("Systeme retry returned status=%s body=%s", r2.status_code, r2.text[:200])
+                        return False
+                else:
+                    # Other validation errors (not limit) -> fail validation
+                    logger.error("Systeme API validation failed due to request errors: %s", violations)
+                    return False
+            except Exception as e:
+                logger.warning("Systeme API returned 422 and response body isn't JSON: %s", e)
+                return False
+        
+        # Handle successful responses
+        if r.ok:
+            logger.info("Systeme API key validation successful (status=%s)", r.status_code)
             return True
-        else:
-            logger.warning("Systeme API returned unexpected status: %s", r.status_code)
-            logger.warning("Response body: %s", r.text[:200])
-            logger.warning("Assuming API key is valid despite unexpected response")
-            return True  # Assume it's working if not 401
+        
+        # Handle other errors
+        logger.warning("Unexpected Systeme validation status=%s body=%s", r.status_code, r.text[:200])
+        return False
+        
     except Exception as e:
         logger.exception("Systeme API validation request failed: %s", e)
         logger.error("This might be due to network issues or invalid API key")
@@ -302,7 +337,7 @@ def test_systeme_connection() -> Dict[str, Any]:
         logger.info("Using headers: %s", {k: v for k, v in HEADERS.items() if k != "X-API-Key"})
         logger.info("API key format: %s... (length: %s)", API_KEY[:10], len(API_KEY))
         
-        r = requests.get(f"{BASE}/api/contacts?limit=1", headers=HEADERS, timeout=10)
+        r = requests.get(f"{BASE}/api/contacts?limit={DEFAULT_LIMIT}", headers=HEADERS, timeout=10)
         
         logger.info("Systeme.io test response status: %s", r.status_code)
         logger.info("Systeme.io test response body: %s", r.text[:200])
