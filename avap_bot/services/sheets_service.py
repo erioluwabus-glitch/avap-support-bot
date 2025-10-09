@@ -609,6 +609,49 @@ def append_question(payload: Dict[str, Any]) -> bool:
             else:
                 raise e
 
+        # Get the current headers to ensure correct column mapping
+        try:
+            headers = sheet.row_values(1)
+            logger.info(f"Current worksheet headers: {headers}")
+            
+            # Create a dictionary to map data to correct columns
+            data_row = {}
+            
+            # Map data to headers based on expected column positions
+            if len(headers) >= 9:
+                # Standard headers: question_id, username, telegram_id, question_text, file_id, file_name, asked_at, status, answer
+                data_row = {
+                    headers[0]: payload.get("question_id", ""),  # question_id
+                    headers[1]: payload.get("username", ""),     # username
+                    headers[2]: payload.get("telegram_id", ""),   # telegram_id
+                    headers[3]: payload.get("question_text", ""), # question_text
+                    headers[4]: payload.get("file_id", ""),      # file_id
+                    headers[5]: payload.get("file_name", ""),     # file_name
+                    headers[6]: payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"), # asked_at
+                    headers[7]: payload.get("status", "Pending"), # status
+                    headers[8]: payload.get("answer", "")         # answer
+                }
+            else:
+                # Fallback to direct mapping if headers are unexpected
+                logger.warning(f"Unexpected header count: {len(headers)}, using fallback mapping")
+                data_row = {
+                    "question_id": payload.get("question_id", ""),
+                    "username": payload.get("username", ""),
+                    "telegram_id": payload.get("telegram_id", ""),
+                    "question_text": payload.get("question_text", ""),
+                    "file_id": payload.get("file_id", ""),
+                    "file_name": payload.get("file_name", ""),
+                    "asked_at": payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": payload.get("status", "Pending"),
+                    "answer": payload.get("answer", "")
+                }
+            
+            # Convert to list in the correct order
+            row = [data_row.get(header, "") for header in headers]
+            
+        except Exception as e:
+            logger.error(f"Error mapping data to headers: {e}")
+            # Fallback to direct row creation
         row = [
             payload.get("question_id", ""),
             payload.get("username", ""),
@@ -618,11 +661,11 @@ def append_question(payload: Dict[str, Any]) -> bool:
             payload.get("file_name", ""),
             payload.get("asked_at", datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S"),
             payload.get("status", "Pending"),
-            payload.get("answer", "")  # Answer column
+                payload.get("answer", "")
         ]
 
         sheet.append_row(row)
-        logger.info("Added question to sheets: %s", payload.get('username'))
+        logger.info(f"Added question to sheets: {payload.get('question_id', 'N/A')} for user {payload.get('username', 'N/A')}")
         return True
 
     except Exception as e:
@@ -1275,7 +1318,7 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                     records = sheet.get_all_records(expected_headers=expected_headers)
                 except Exception as e:
                     logger.warning(f"Failed to get records with expected headers, trying without: {e}")
-                    records = sheet.get_all_records()
+                records = sheet.get_all_records()
                 # Filter by username
                 student_questions = [record for record in records if record.get("username") == username]
                 return student_questions
@@ -1294,7 +1337,7 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                         logger.error(f"Failed to create questions worksheet: {create_error}")
                         logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
                 else:
-                    logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
+                logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
         logger.info("Using CSV fallback for questions")
@@ -1370,18 +1413,43 @@ def update_question_status(username: str, answer: str) -> bool:
             logger.warning(f"Failed to get records with expected headers, trying without: {e}")
             # Fallback: try to get records without expected headers
             try:
-                all_records = sheet.get_all_records()
+        all_records = sheet.get_all_records()
             except Exception as e2:
                 logger.error(f"Failed to get records even without expected headers: {e2}")
                 return False
+        
+        # Get headers to find correct column positions
+        try:
+            headers = sheet.row_values(1)
+            logger.info(f"Headers for update: {headers}")
+            
+            # Find column positions dynamically
+            status_col = None
+            answer_col = None
+            
+            for i, header in enumerate(headers, 1):
+                if header.lower() in ["status"]:
+                    status_col = i
+                elif header.lower() in ["answer"]:
+                    answer_col = i
+            
+            if not status_col or not answer_col:
+                logger.error(f"Could not find status or answer columns. Headers: {headers}")
+                return False
+                
+            logger.info(f"Status column: {status_col}, Answer column: {answer_col}")
+            
+        except Exception as e:
+            logger.error(f"Error getting headers: {e}")
+            return False
         
         for i, record in enumerate(reversed(all_records), start=1):
             if record.get("username") == username and record.get("status") == "Pending":
                 # Update the row (i is from bottom, so actual row is len - i + 2 for header)
                 actual_row = len(all_records) - i + 2
-                sheet.update_cell(actual_row, 8, "Answered")  # Status column
-                sheet.update_cell(actual_row, 9, answer)  # Answer column
-                logger.info(f"Updated question status for {username} to Answered")
+                sheet.update_cell(actual_row, status_col, "Answered")  # Status column
+                sheet.update_cell(actual_row, answer_col, answer)  # Answer column
+                logger.info(f"Updated question status for {username} to Answered in row {actual_row}")
                 return True
 
         logger.warning(f"No pending question found for {username}")

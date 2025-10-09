@@ -88,16 +88,28 @@ def validate_api_key() -> bool:
     if not API_KEY:
         logger.error("SYSTEME_API_KEY not set or empty.")
         return False
+    
+    # Log API key format for debugging (first 10 chars only for security)
+    logger.info(f"SYSTEME_API_KEY format: {API_KEY[:10]}... (length: {len(API_KEY)})")
+    
     try:
-        # Options is a lightweight call; some APIs respond to OPTIONS; if not, we can use GET on small resource
-        r = requests.options(f"{BASE}/api/contacts", headers=HEADERS, timeout=6)
+        # Try a simple GET request to validate the API key
+        r = requests.get(f"{BASE}/api/contacts", headers=HEADERS, timeout=10)
+        logger.info(f"Systeme API validation response: {r.status_code}")
+        
         if r.status_code == 401:
-            logger.error("Systeme API authentication failed (401) on startup check.")
+            logger.error("Systeme API authentication failed (401) - Invalid API key")
+            logger.error("Please check your SYSTEME_API_KEY in environment variables")
             return False
-        logger.info("Systeme API startup check returned %s", r.status_code)
-        return True
+        elif r.status_code == 200:
+            logger.info("Systeme API key validation successful")
+            return True
+        else:
+            logger.warning(f"Systeme API returned unexpected status: {r.status_code}")
+            return True  # Assume it's working if not 401
     except Exception as e:
         logger.exception("Systeme API validation request failed: %s", e)
+        logger.error("This might be due to network issues or invalid API key")
         return False
 
 def create_contact(email: str, extra: Optional[Dict[str,Any]] = None) -> Tuple[bool, Optional[int], Optional[str]]:
@@ -105,18 +117,32 @@ def create_contact(email: str, extra: Optional[Dict[str,Any]] = None) -> Tuple[b
     payload = {"email": email}
     if extra:
         payload.update(extra)
+    
+    logger.info(f"Creating contact in Systeme.io for email: {email}")
     resp, body = safe_post("/api/contacts", payload)
+    
     if resp is None:
+        logger.error(f"Failed to create contact - no response: {body}")
         return False, None, body
+    
+    logger.info(f"Systeme.io contact creation response: {resp.status_code}")
+    
     if resp.status_code in (200, 201):
         try:
             data = resp.json()
-            return True, int(data.get("id")), None
-        except Exception:
-            logger.exception("Failed to parse create_contact response; returning ok with no id")
+            contact_id = data.get("id")
+            logger.info(f"Successfully created contact with ID: {contact_id}")
+            return True, int(contact_id) if contact_id else None, None
+        except Exception as e:
+            logger.warning(f"Contact created but failed to parse response: {e}")
             return True, None, None
-    # 401 handled in safe_post, other codes return body
-    return False, None, body
+    elif resp.status_code == 401:
+        logger.error(f"Systeme.io API authentication failed (401) - Invalid or expired API key")
+        logger.error(f"Please check SYSTEME_API_KEY environment variable")
+        return False, None, "Authentication failed - Invalid API key"
+    else:
+        logger.error(f"Failed to create contact - Status: {resp.status_code}, Body: {body}")
+        return False, None, body
 
 def apply_tag(contact_id: int, tag_id: int) -> Tuple[bool, Optional[str]]:
     """Apply a single tag. tag_id MUST be int. Returns (ok, error_text)."""
@@ -174,8 +200,9 @@ def create_contact_and_tag(pending_data: Dict[str, Any]) -> Tuple[bool, Optional
         ok, contact_id, error = create_contact(email, extra_data)
         if not ok:
             # If it's an authentication error, log warning but don't fail
-            if "401" in str(error) or "authentication" in str(error).lower():
+            if "401" in str(error) or "authentication" in str(error).lower() or "Invalid API key" in str(error):
                 logger.warning(f"Systeme.io API authentication failed - skipping contact creation: {error}")
+                logger.warning(f"Student will be added to database but not to Systeme.io")
                 return True, None  # Return success to not block student creation
             return False, f"Failed to create contact: {error}"
         
@@ -232,3 +259,42 @@ def untag_or_remove_contact(email: str, action: str = "untag") -> Tuple[bool, Op
             logger.warning("Systeme.io API authentication failed - skipping contact removal")
             return True, None
         return False, str(e)
+
+
+def test_systeme_connection() -> Dict[str, Any]:
+    """Test Systeme.io connection and return detailed status."""
+    try:
+        if not API_KEY:
+            return {
+                "status": "error",
+                "message": "SYSTEME_API_KEY not set",
+                "suggestion": "Please set SYSTEME_API_KEY in Render environment variables"
+            }
+        
+        logger.info("Testing Systeme.io connection...")
+        r = requests.get(f"{BASE_URL}/api/contacts", headers=HEADERS, timeout=10)
+        
+        if r.status_code == 401:
+            return {
+                "status": "error",
+                "message": "Authentication failed (401)",
+                "suggestion": "Check if SYSTEME_API_KEY is correct and not expired"
+            }
+        elif r.status_code == 200:
+            return {
+                "status": "success",
+                "message": "Systeme.io connection successful",
+                "contacts_count": len(r.json().get('data', []))
+            }
+        else:
+            return {
+                "status": "warning",
+                "message": f"Unexpected status code: {r.status_code}",
+                "suggestion": "API might be working but with different response"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Connection failed: {str(e)}",
+            "suggestion": "Check network connection and API key"
+        }

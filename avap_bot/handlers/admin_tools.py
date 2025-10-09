@@ -14,6 +14,7 @@ from telegram.constants import ParseMode
 
 from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins
 from avap_bot.services.supabase_service import get_supabase, add_broadcast_record, update_broadcast_stats, get_broadcast_history, delete_broadcast_messages, clear_all_match_requests
+from avap_bot.services.systeme_service import test_systeme_connection
 from avap_bot.utils.run_blocking import run_blocking
 from avap_bot.services.notifier import notify_admin_telegram
 from avap_bot.utils.chat_utils import should_disable_inline_keyboards
@@ -620,6 +621,45 @@ async def clear_matches_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text("❌ An error occurred while clearing match requests.")
 
 
+async def test_systeme_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Test Systeme.io connection - admin only"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+    
+    try:
+        logger.info(f"Admin {update.effective_user.id} testing Systeme.io connection")
+        result = await run_blocking(test_systeme_connection)
+        
+        if result["status"] == "success":
+            await update.message.reply_text(
+                f"✅ **Systeme.io Connection Test**\n\n"
+                f"**Status:** {result['message']}\n"
+                f"**Contacts Count:** {result.get('contacts_count', 'N/A')}\n\n"
+                f"Systeme.io integration is working correctly!",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        elif result["status"] == "error":
+            await update.message.reply_text(
+                f"❌ **Systeme.io Connection Test Failed**\n\n"
+                f"**Error:** {result['message']}\n"
+                f"**Suggestion:** {result['suggestion']}\n\n"
+                f"Please check your SYSTEME_API_KEY in Render environment variables.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ **Systeme.io Connection Test Warning**\n\n"
+                f"**Status:** {result['message']}\n"
+                f"**Suggestion:** {result['suggestion']}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+    except Exception as e:
+        logger.exception(f"Error in test_systeme_handler: {e}")
+        await update.message.reply_text("❌ An error occurred while testing Systeme.io connection.")
+
+
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show bot statistics"""
     logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
@@ -766,7 +806,8 @@ def register_handlers(application):
     application.add_handler(CommandHandler("getsubmissions", get_submission))  # Plural alias
     application.add_handler(CommandHandler("stats", stats_handler))
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
-    logger.info("✅ Registered stats, get_submission, and clear_matches command handlers")
+    application.add_handler(CommandHandler("test_systeme", test_systeme_handler))
+    logger.info("✅ Registered stats, get_submission, clear_matches, and test_systeme command handlers")
     
     # Add conversation handlers
     application.add_handler(message_achievers_conv)
