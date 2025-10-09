@@ -434,19 +434,20 @@ async def initialize_services():
             logger.error(f"❌ Supabase initialization failed: {e}")
             logger.warning("Continuing without Supabase - some features may not work")
 
-        # Validate Systeme API key
+        # Validate Systeme API key (optional - non-blocking)
         try:
-            if not validate_api_key():
-                logger.error("SYSTEME_API_KEY validation failed during startup. Please verify the env var in Render.")
-                try:
-                    send_admin_notification("ALERT: Systeme API key validation failed on startup (401). Check SYSTEME_API_KEY.")
-                except Exception:
-                    logger.exception("Failed to send admin notification for Systeme API key failure.")
+            systeme_api_key = os.getenv('SYSTEME_API_KEY')
+            if not systeme_api_key:
+                logger.info("SYSTEME_API_KEY not set - Systeme.io integration disabled")
             else:
-                logger.info("Systeme API key validation successful")
+                if not validate_api_key():
+                    logger.warning("SYSTEME_API_KEY validation failed - Systeme.io integration will be disabled")
+                    logger.warning("This is not critical - bot will continue to work without Systeme.io integration")
+                else:
+                    logger.info("Systeme API key validation successful")
         except Exception as e:
-            logger.error(f"❌ Systeme API validation failed: {e}")
-            logger.warning("Continuing without Systeme API validation")
+            logger.warning(f"Systeme API validation failed: {e}")
+            logger.info("Continuing without Systeme.io integration - this is not critical")
 
         # Initialize the Telegram Application with timeout protection
         logger.debug("Initializing Telegram Application...")
