@@ -692,6 +692,57 @@ async def fix_headers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ An error occurred while fixing worksheet headers.")
 
 
+async def list_students_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List all students - admin only"""
+    if not _is_admin(update):
+        await update.message.reply_text("❌ This command is only available to admins.")
+        return
+    
+    try:
+        logger.info(f"Admin {update.effective_user.id} listing all students")
+        students = await run_blocking(get_all_verified_users)
+        
+        if not students:
+            await update.message.reply_text(
+                "📋 **No students found in the database.**\n\n"
+                "This could mean:\n"
+                "• No students have been verified yet\n"
+                "• All students have been removed\n"
+                "• Database connection issue",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        # Format the student list
+        message = f"📋 **All Students ({len(students)} total):**\n\n"
+        
+        for i, student in enumerate(students[:20], 1):  # Limit to first 20 to avoid message length issues
+            name = student.get('name', 'Unknown')
+            email = student.get('email', 'No email')
+            phone = student.get('phone', 'No phone')
+            telegram_id = student.get('telegram_id', 'No Telegram ID')
+            status = student.get('status', 'Unknown')
+            
+            message += f"**{i}. {name}**\n"
+            message += f"   • Email: `{email}`\n"
+            message += f"   • Phone: `{phone}`\n"
+            message += f"   • Telegram ID: `{telegram_id}`\n"
+            message += f"   • Status: {status}\n\n"
+        
+        if len(students) > 20:
+            message += f"... and {len(students) - 20} more students\n\n"
+        
+        message += "💡 **To remove a student, use:**\n"
+        message += "`/remove_student <email_or_phone_or_name>`"
+        
+        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"Successfully listed {len(students)} students for admin {update.effective_user.id}")
+        
+    except Exception as e:
+        logger.exception(f"Error in list_students_handler: {e}")
+        await update.message.reply_text("❌ An error occurred while listing students.")
+
+
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /stats command - show bot statistics"""
     logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
@@ -840,7 +891,8 @@ def register_handlers(application):
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
     application.add_handler(CommandHandler("test_systeme", test_systeme_handler))
     application.add_handler(CommandHandler("fix_headers", fix_headers_handler))
-    logger.info("✅ Registered stats, get_submission, clear_matches, test_systeme, and fix_headers command handlers")
+    application.add_handler(CommandHandler("list_students", list_students_handler))
+    logger.info("✅ Registered stats, get_submission, clear_matches, test_systeme, fix_headers, and list_students command handlers")
     
     # Add conversation handlers
     application.add_handler(message_achievers_conv)

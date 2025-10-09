@@ -357,16 +357,19 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         try:
             success = remove_verified_by_identifier(identifier)
             if not success:
-                logger.error(f"Failed to remove student from Supabase: {identifier}")
+                # Check if this is a "user not found" case vs actual error
+                logger.warning(f"Student removal failed for identifier: {identifier}")
                 await query.edit_message_text(
-                    f"❌ **Failed to remove student from database.**\n\n"
-                    f"**Student:** {student.get('name', 'Unknown')}\n"
+                    f"❌ **Student not found in database.**\n\n"
                     f"**Identifier:** {identifier}\n\n"
-                    f"**Possible causes:**\n"
-                    f"• Student not found in database\n"
-                    f"• Database connection issue\n"
-                    f"• Student already removed\n\n"
-                    f"Please check the logs for more details or try again.",
+                    f"**Possible reasons:**\n"
+                    f"• Student was never verified\n"
+                    f"• Student was already removed\n"
+                    f"• Identifier is incorrect\n\n"
+                    f"**Suggestions:**\n"
+                    f"• Check the spelling of the identifier\n"
+                    f"• Use the exact email/phone/name from the verification\n"
+                    f"• Try using `/stats` to see current students",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return ConversationHandler.END

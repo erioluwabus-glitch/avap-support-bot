@@ -342,6 +342,7 @@ def remove_verified_user(identifier: str) -> bool:
         if not user_exists:
             logger.warning(f"User not found for identifier: {identifier}")
             logger.warning(f"Searched by email, phone, and name - no matches found")
+            logger.info(f"This is normal if the user was never verified or already removed")
             return False
         
         # Now delete the user
