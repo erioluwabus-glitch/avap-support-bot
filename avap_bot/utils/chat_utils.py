@@ -46,17 +46,9 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
     Returns:
         bool: True if inline keyboards should be disabled, False otherwise
     """
-    # Check if this is an admin operation that should be allowed in group chats
-    if allow_admin_operations:
-        # For admin operations, check if the user is an admin
-        try:
-            from avap_bot.handlers.admin_tools import _is_admin
-            if _is_admin(update):
-                logger.info("Admin operation detected - allowing inline keyboards even in group chat")
-                return False
-        except ImportError:
-            # If we can't import the admin check, fall back to normal behavior
-            pass
+    # CRITICAL FIX: Always disable inline keyboards in group chats
+    # This prevents old 4-button keyboards from showing in assignment, verification, and question groups
+    # Admin operations should also not show inline keyboards in groups
 
     # Check if the message/callback originated from a group chat
     if is_group_chat(update):
@@ -69,16 +61,8 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
             # Check the chat where the original message with the inline keyboard was sent
             message_chat_type = update.callback_query.message.chat.type
             if message_chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                # Allow admin operations in group chats
-                if allow_admin_operations:
-                    try:
-                        from avap_bot.handlers.admin_tools import _is_admin
-                        if _is_admin(update):
-                            logger.info(f"Admin callback query in group chat: {message_chat_type} - allowing inline keyboards")
-                            return False
-                    except ImportError:
-                        pass
-                
+                # CRITICAL FIX: Always disable inline keyboards in group chats
+                # This prevents old 4-button keyboards from showing in assignment, verification, and question groups
                 logger.info(f"Callback query from group chat: {message_chat_type} - disabling inline keyboards")
                 return True
         except (AttributeError, TypeError) as e:
@@ -87,10 +71,8 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
 
     # Check if we're sending TO a group chat by checking known group IDs
     if target_chat_id:
-        # For admin operations, allow keyboards even in group chats
-        if allow_admin_operations:
-            logger.info(f"Admin operation detected - allowing inline keyboards even when sending to group chat (ID: {target_chat_id})")
-            return False
+        # CRITICAL FIX: Always disable inline keyboards when sending TO group chats
+        # This prevents old 4-button keyboards from showing in assignment, verification, and question groups
             
         # Check against known group IDs from environment variables
         try:
