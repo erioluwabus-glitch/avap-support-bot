@@ -257,59 +257,79 @@ def generate_activity():
 
 
 def webhook_health_check():
-    """Check webhook health and ensure it's working properly."""
+    """Check webhook health with robust 429 handling and distributed locking."""
     try:
-        import httpx
-        import asyncio
+        from avap_bot.utils.distributed_lock import acquire_lock, release_lock
+        from avap_bot.utils.cooldown_manager import is_cooldown_active, set_cooldown_state
+        from avap_bot.utils.http_client import request_with_429_handling
         import time
         import random
 
-        # Test webhook endpoint with reduced frequency and jitter
-        webhook_url = os.getenv("WEBHOOK_URL")
-        health_token = os.getenv("HEALTH_TOKEN")
+        # Check if we're in cooldown
+        if is_cooldown_active("webhook_health_check"):
+            logger.info("Webhook health check in cooldown - skipping")
+            return
 
-        if webhook_url:
-            try:
-                # Add random jitter to avoid hitting rate limits
-                jitter = random.uniform(0.5, 2.0)
-                time.sleep(jitter)
-                
-                # Make a request to the webhook URL with health token if available
-                headers = {}
-                params = {}
+        # Try to acquire distributed lock to prevent multiple instances
+        lock_token = acquire_lock("webhook_health_check", ttl_seconds=300)  # 5 minute lock
+        if not lock_token:
+            logger.info("Another instance is handling webhook health check - skipping")
+            return
 
-                if health_token:
-                    headers["X-Health-Token"] = health_token
-
-                # Use a longer timeout and add retry logic
-                response = httpx.get(f"{webhook_url}/health", headers=headers, params=params, timeout=15.0)
-
-                if response.status_code == 200:
-                    logger.debug("Webhook health check: OK")
-                elif response.status_code == 401:
-                    logger.warning("Webhook health check: HTTP 401 - Authentication failed")
-                elif response.status_code == 429:
-                    logger.warning("Webhook health check: HTTP 429 - Rate limited, will skip next few checks")
-                    # Skip the next few health checks to avoid rate limiting
-                    return
-                else:
-                    logger.warning(f"Webhook health check: HTTP {response.status_code}")
-
-            except httpx.TimeoutException as e:
-                logger.warning(f"Webhook health check timed out: {e}")
-            except Exception as e:
-                logger.warning(f"Webhook health check failed: {e}")
-
-        # Additional network activity to show the service is active (less aggressive)
         try:
-            import socket
-            # Only check one external service to reduce load
-            socket.gethostbyname('api.telegram.org')
-        except:
-            pass
+            webhook_url = os.getenv("WEBHOOK_URL")
+            health_token = os.getenv("HEALTH_TOKEN")
+
+            if not webhook_url:
+                logger.info("No WEBHOOK_URL set - skipping webhook health check")
+                return
+
+            # Add random jitter to avoid synchronized requests
+            jitter = random.uniform(1.0, 3.0)
+            time.sleep(jitter)
+
+            # Prepare headers
+            headers = {}
+            if health_token:
+                headers["X-Health-Token"] = health_token
+
+            # Make request with 429 handling
+            logger.info("Performing webhook health check...")
+            response = request_with_429_handling(
+                "GET", 
+                f"{webhook_url}/health", 
+                headers=headers, 
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                logger.debug("Webhook health check: OK")
+                # Clear any existing cooldown on success
+                from avap_bot.utils.cooldown_manager import clear_cooldown
+                clear_cooldown("webhook_health_check")
+            elif response.status_code == 401:
+                logger.warning("Webhook health check: HTTP 401 - Authentication failed")
+            elif response.status_code == 429:
+                logger.warning("Webhook health check: HTTP 429 - Rate limited")
+                # Set cooldown for 10 minutes to avoid further rate limiting
+                cooldown_until = time.time() + 600  # 10 minutes
+                set_cooldown_state("webhook_health_check", cooldown_until)
+                logger.warning("Set 10-minute cooldown for webhook health check")
+            else:
+                logger.warning("Webhook health check: HTTP %s", response.status_code)
+
+        except Exception as e:
+            logger.warning("Webhook health check failed: %s", e)
+            # Set shorter cooldown on error
+            cooldown_until = time.time() + 300  # 5 minutes
+            set_cooldown_state("webhook_health_check", cooldown_until)
+
+        finally:
+            # Always release the lock
+            release_lock("webhook_health_check", lock_token)
 
     except Exception as e:
-        logger.error(f"Webhook health check error: {e}")
+        logger.error("Webhook health check error: %s", e)
 
 
 async def health_check():
@@ -534,18 +554,40 @@ async def initialize_services():
                 )
                 logger.info("Balanced activity generator scheduled every 40 seconds")
 
-                # Schedule webhook health check every 5 minutes (reduced frequency to avoid rate limiting)
+                # Schedule webhook health check every 15 minutes (further reduced to avoid rate limiting)
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    minutes=5,  # Reduced frequency to avoid rate limiting
+                    minutes=15,  # Further reduced frequency to avoid rate limiting
                     id='webhook_health',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=30
+                    misfire_grace_time=60
                 )
-                logger.info("Webhook health check scheduled every 5 minutes to avoid rate limiting")
+                logger.info("Webhook health check scheduled every 15 minutes to avoid rate limiting")
+                
+                # Schedule cleanup of expired locks and cooldowns every hour
+                def cleanup_locks_and_cooldowns():
+                    try:
+                        from avap_bot.utils.distributed_lock import cleanup_expired_locks
+                        cleanup_expired_locks()
+                        logger.debug("Cleaned up expired locks")
+                    except Exception as e:
+                        logger.warning("Failed to cleanup expired locks: %s", e)
+                
+                scheduler.add_job(
+                    cleanup_locks_and_cooldowns,
+                    'interval',
+                    hours=1,
+                    id='cleanup_locks',
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                    misfire_grace_time=300
+                )
+                logger.info("Lock cleanup scheduled every hour")
+                
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
@@ -844,29 +886,29 @@ async def on_startup():
     asyncio.create_task(emergency_keepalive_task())
     logger.info("🚨 Emergency keepalive task started")
 
-    # Set webhook URL - construct proper Telegram webhook URL
+    # Set webhook URL only if needed (check current webhook first)
     webhook_base = os.getenv("WEBHOOK_URL")
     bot_token = os.getenv("BOT_TOKEN")
 
     if webhook_base and bot_token:
         # Construct proper webhook URL: https://your-app.com/webhook/BOT_TOKEN
         webhook_url = f"{webhook_base.rstrip('/')}/webhook/{bot_token}"
-        logger.info(f"Setting webhook with WEBHOOK_URL: {webhook_base}")
-        logger.info(f"Setting webhook with BOT_TOKEN: {bot_token[:10]}...")  # Only log first 10 chars for security
-        logger.info(f"Setting webhook to: {webhook_url[:50]}...")  # Truncate webhook URL for security
+        logger.info(f"Checking webhook with WEBHOOK_URL: {webhook_base}")
+        logger.info(f"Checking webhook with BOT_TOKEN: {bot_token[:10]}...")  # Only log first 10 chars for security
+        logger.info(f"Target webhook URL: {webhook_url[:50]}...")  # Truncate webhook URL for security
 
         try:
-            # Set webhook with timeout to prevent hanging
-            await asyncio.wait_for(
-                bot_app.bot.set_webhook(url=webhook_url, allowed_updates=["message", "callback_query"]),
-                timeout=30.0  # 30 second timeout
-            )
-            logger.info("Webhook set successfully")
-        except asyncio.TimeoutError:
-            logger.error("❌ Webhook setting timed out - continuing without webhook")
-            logger.warning("Bot will run in polling mode if WEBHOOK_URL is not accessible")
+            # Use the robust webhook setting function
+            from avap_bot.utils.http_client import set_webhook_if_needed
+            success = set_webhook_if_needed(bot_token, webhook_url)
+            
+            if success:
+                logger.info("✅ Webhook configured successfully")
+            else:
+                logger.warning("⚠️ Webhook configuration failed - bot will run in polling mode")
+                
         except Exception as e:
-            logger.error(f"❌ Failed to set webhook: {e}")
+            logger.error(f"❌ Failed to configure webhook: {e}")
             logger.warning("Bot will run in polling mode if webhook setup fails")
     elif webhook_base:
         logger.warning("WEBHOOK_URL set but BOT_TOKEN missing. Webhook not configured.")
