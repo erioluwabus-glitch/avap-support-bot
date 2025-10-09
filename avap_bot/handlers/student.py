@@ -852,6 +852,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
         # Prepare question data for forwarding to admins
         question_data = {
+            'question_id': f"q_{user_id}_{int(datetime.now().timestamp())}",
             'username': username,
             'telegram_id': user_id,
             'question_text': question_text,
@@ -1145,6 +1146,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
                 # Save the question for tracking
                 question_data = {
+                    'question_id': f"q_{user_id}_{int(datetime.now().timestamp())}",
                     'username': username,
                     'telegram_id': user_id,
                     'question_text': question_text,
@@ -1163,6 +1165,7 @@ async def support_group_ask_handler(update: Update, context: ContextTypes.DEFAUL
 
         # Prepare question data for forwarding to admins
         question_data = {
+            'question_id': f"q_{user_id}_{int(datetime.now().timestamp())}",
             'username': username,
             'telegram_id': user_id,
             'question_text': question_text,
