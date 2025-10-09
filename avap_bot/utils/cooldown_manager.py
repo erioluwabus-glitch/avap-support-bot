@@ -8,6 +8,9 @@ from avap_bot.services.supabase_service import get_supabase
 
 logger = logging.getLogger(__name__)
 
+# Fallback in-memory cooldown states if database fails
+_in_memory_cooldowns = {}
+
 def get_cooldown_state(key: str) -> Optional[float]:
     """
     Get the next allowed time for a given key.
@@ -28,7 +31,9 @@ def get_cooldown_state(key: str) -> Optional[float]:
         
     except Exception as e:
         logger.error("Error getting cooldown state for %s: %s", key, e)
-        return None
+        logger.info("Falling back to in-memory cooldown state")
+        # Fallback to in-memory state
+        return _in_memory_cooldowns.get(key)
 
 def set_cooldown_state(key: str, next_allowed_time: float) -> bool:
     """
@@ -58,7 +63,10 @@ def set_cooldown_state(key: str, next_allowed_time: float) -> bool:
         
     except Exception as e:
         logger.error("Error setting cooldown state for %s: %s", key, e)
-        return False
+        logger.info("Falling back to in-memory cooldown state")
+        # Fallback to in-memory state
+        _in_memory_cooldowns[key] = next_allowed_time
+        return True
 
 def is_cooldown_active(key: str) -> bool:
     """

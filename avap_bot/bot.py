@@ -31,33 +31,25 @@ logger = logging.getLogger(__name__)
 
 def handle_sigterm(signum, frame):
     """Handle SIGTERM signal for graceful shutdown."""
-    logger.warning("🚨 SIGTERM received — attempting to prevent shutdown with emergency keep-alive")
+    logger.info("SIGTERM received — shutting down gracefully")
     
-    # Emergency keep-alive attempt
+    # Clean shutdown - close connections, save state
     try:
-        import requests
-        import threading
+        # Stop scheduler if running
+        if scheduler and scheduler.running:
+            logger.info("Stopping scheduler...")
+            scheduler.shutdown(wait=False)
+        
+        # Give a moment for cleanup
         import time
-        
-        def emergency_keepalive():
-            """Emergency keep-alive to prevent shutdown"""
-            for i in range(10):  # Try for 10 seconds
-                try:
-                    requests.get("http://localhost:8080/ping", timeout=1.0)
-                    requests.get("http://localhost:8080/health", timeout=1.0)
-                    time.sleep(1)
-                except:
-                    pass
-        
-        # Start emergency keep-alive in background
-        threading.Thread(target=emergency_keepalive, daemon=True).start()
-        logger.warning("🚨 Emergency keep-alive started to prevent shutdown")
+        time.sleep(1)
         
     except Exception as e:
-        logger.error(f"🚨 Emergency keep-alive failed: {e}")
+        logger.error("Error during shutdown cleanup: %s", e)
     
-    # Still log the shutdown attempt
-    logger.info("SIGTERM received — shutting down gracefully")
+    logger.info("Graceful shutdown completed")
+    import sys
+    sys.exit(0)
 
 # Register SIGTERM handler
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -882,9 +874,8 @@ async def on_startup():
     asyncio.create_task(background_keepalive())
     logger.info("🚀 ULTRA-AGGRESSIVE background keepalive task started")
     
-    # Start additional emergency keepalive task
-    asyncio.create_task(emergency_keepalive_task())
-    logger.info("🚨 Emergency keepalive task started")
+    # Emergency keepalive task removed to prevent SIGTERM conflicts
+    logger.info("✅ Startup completed without emergency keepalive")
 
     # Set webhook URL only if needed (check current webhook first)
     webhook_base = os.getenv("WEBHOOK_URL")

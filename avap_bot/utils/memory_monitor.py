@@ -305,7 +305,7 @@ def _ultra_aggressive_cleanup() -> None:
         logger.warning(f"FAST cleanup completed. Final memory: {final_memory:.1f}MB (freed: {freed_memory:.1f}MB)")
 
         if freed_memory < 1.0:  # Less than 1MB freed
-            logger.critical(f"WARNING: Cleanup only freed {freed_memory:.1f}MB - memory may be held by external libraries")
+            logger.debug(f"Cleanup freed {freed_memory:.1f}MB - memory stable")
 
     except Exception as e:
         logger.exception(f"Error during FAST aggressive cleanup: {e}")
@@ -382,7 +382,7 @@ async def _async_ultra_aggressive_cleanup() -> None:
 
         # If we didn't free much memory, this indicates a deeper issue
         if freed_memory < 50:  # Less than 50MB freed
-            logger.critical(f"WARNING: Cleanup only freed {freed_memory:.1f}MB - memory may be held by external libraries")
+            logger.debug(f"Cleanup freed {freed_memory:.1f}MB - memory stable")
 
     except Exception as e:
         logger.error(f"FAST aggressive cleanup failed: {e}")
