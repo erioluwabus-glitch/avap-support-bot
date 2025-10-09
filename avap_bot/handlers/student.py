@@ -154,6 +154,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         pending_id = pending_record['id']
 
         # Promote the pending user to verified
+        user_id = user.id
         logger.info(f"Promoting user {user_id} with pending_id {pending_id}")
         verified_user = await promote_pending_to_verified(pending_id, user_id)
         if not verified_user:
@@ -185,6 +186,7 @@ async def verify_identifier_handler(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     except Exception as e:
+        user_id = user.id
         logger.exception(f"Verification failed for identifier '{identifier}': {e}")
         await notify_admin_telegram(context.bot, f"Verification failed for user {user.full_name} ({user_id}) with identifier '{identifier}'. Error: {e}")
         try:

@@ -202,6 +202,20 @@ def create_contact(email: str, extra: Optional[Dict[str,Any]] = None) -> Tuple[b
         logger.error("Please check SYSTEME_API_KEY environment variable")
         logger.error("API key format: %s... (length: %s)", API_KEY[:10] if API_KEY else "None", len(API_KEY) if API_KEY else 0)
         return False, None, "Authentication failed - Invalid API key"
+    elif resp.status_code == 422:
+        # Handle duplicate email error
+        try:
+            error_data = resp.json()
+            violations = error_data.get("violations", [])
+            email_violations = [v for v in violations if v.get("propertyPath") == "email"]
+            if email_violations and "already used" in email_violations[0].get("message", ""):
+                logger.info("Contact already exists in Systeme.io for email: %s", email)
+                return True, None, "Contact already exists"  # Return success since contact exists
+        except Exception as e:
+            logger.warning("Failed to parse 422 error response: %s", e)
+        
+        logger.warning("Systeme.io validation error (422) for email: %s", email)
+        return False, None, "Validation error - Contact may already exist"
     else:
         logger.error("Failed to create contact - Status: %s, Body: %s", resp.status_code, body)
         return False, None, body
