@@ -189,7 +189,7 @@ async def monitor_memory(context) -> None:
                 for _ in range(3):
                     gc.collect()
                 # AI features disabled
-                clear_model_cache()
+                # AI features disabled
                 logger.info("FAST critical cleanup completed")
             except Exception as e:
                 logger.error(f"Failed to trigger FAST critical cleanup: {e}")
@@ -202,17 +202,7 @@ async def monitor_memory(context) -> None:
             for _ in range(2):
                 gc.collect()
 
-            try:
-                # Check if AI features are enabled before clearing cache
-                # AI features disabled
-                if _model is not None:
-                    # AI features disabled
-                    clear_model_cache()
-                    logger.info("Cleared AI model cache")
-                else:
-                    logger.debug("AI model cache is already empty - skipping AI cache clear")
-            except Exception as e:
-                logger.warning(f"Failed to clear AI model cache: {e}")
+            # AI features disabled
 
         # Check memory after cleanup
         final_rss_mb = get_memory_usage()
@@ -289,17 +279,7 @@ def _ultra_aggressive_cleanup() -> None:
         for _ in range(10):
             gc.collect()
 
-        # Step 2: Clear AI model cache (only if AI is enabled)
-        try:
-            # AI features disabled
-            if _model is not None:
-                # AI features disabled
-                clear_model_cache()
-                logger.info("Cleared AI model cache during FAST cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during FAST cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache during FAST cleanup: {e}")
+        # AI features disabled
 
         # Step 3: Clear heavy modules
         heavy_modules = ['requests', 'urllib3', 'httpx', 'aiohttp']
@@ -344,17 +324,7 @@ async def _async_ultra_aggressive_cleanup() -> None:
         for _ in range(10):
             gc.collect()
 
-        # Step 2: Clear AI model cache (only if AI is enabled)
-        try:
-            # AI features disabled
-            if _model is not None:
-                # AI features disabled
-                clear_model_cache()
-                logger.info("Cleared AI model cache during FAST cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during FAST cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
 
         # Step 3: Aggressive module cleanup (all heavy modules)
         try:
@@ -431,17 +401,7 @@ async def cleanup_resources() -> None:
         for _ in range(5):
             gc.collect()
 
-        # Clear AI model cache (only if AI is enabled)
-        try:
-            # AI features disabled
-            if _model is not None:
-                # AI features disabled
-                clear_model_cache()
-                logger.info("Cleared AI model cache during cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
 
         # Clear heavy modules
         try:

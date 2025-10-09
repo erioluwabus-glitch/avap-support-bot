@@ -361,16 +361,7 @@ async def cleanup_memory():
         memory_before = get_memory_usage()
         log_memory_usage("before manual cleanup")
 
-        # Clear model cache (only if AI is enabled)
-        try:
-            from avap_bot.services.ai_service import _model
-            if _model is not None:
-                clear_model_cache()
-                logger.info("Cleared AI model cache during manual cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during manual cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
 
         # Force garbage collection
         import gc
@@ -642,16 +633,7 @@ def _periodic_memory_cleanup():
         memory_before = get_memory_usage()
         log_memory_usage("before periodic cleanup")
 
-        # Clear model cache (only if AI is enabled)
-        try:
-            from avap_bot.services.ai_service import _model
-            if _model is not None:
-                clear_model_cache()
-                logger.info("Cleared AI model cache during periodic cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during periodic cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
 
         # Force garbage collection
         import gc
@@ -685,16 +667,7 @@ def _aggressive_memory_cleanup():
         memory_before = get_memory_usage()
         log_memory_usage("before aggressive cleanup")
         
-        # Force clear AI model cache (only if AI is enabled)
-        try:
-            from avap_bot.services.ai_service import _model
-            if _model is not None:
-                clear_model_cache()
-                logger.info("Cleared AI model cache during aggressive cleanup")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear during aggressive cleanup")
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
         
         # Force aggressive garbage collection
         for _ in range(5):

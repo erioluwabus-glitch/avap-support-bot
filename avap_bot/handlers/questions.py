@@ -74,7 +74,12 @@ async def answer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle answer message from admin"""
     try:
-        # Quick check: only process if we have question context
+        # FIRST CHECK: If in grading mode, ignore completely
+        if context.user_data.get('waiting_for_comment'):
+            # This is a grading comment, ignore silently
+            return
+        
+        # SECOND CHECK: only process if we have question context
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
         
@@ -90,11 +95,6 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
         if not _is_admin(update):
             logger.info(f"❌ User {update.effective_user.id} is not admin, ignoring message")
             return  # Not an admin, ignore
-
-        # First check: make sure this is NOT a grading comment
-        if context.user_data.get('waiting_for_comment'):
-            logger.info(f"❌ User {update.effective_user.id} is in grading mode, not question answering mode")
-            return  # This is a grading comment, not a question answer
 
         # Get the stored question info
         question_text = context.user_data.get('question_text')

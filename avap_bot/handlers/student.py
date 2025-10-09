@@ -849,13 +849,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         
         # Force memory cleanup after processing (even if no AI answer found) - only if AI is enabled
         try:
-            from avap_bot.services.ai_service import _model
-            if _model is not None:
-                from avap_bot.services.ai_service import clear_model_cache
-                clear_model_cache()
-                logger.info("Cleared AI model cache after question processing")
-            else:
-                logger.debug("AI model cache is already empty - skipping AI cache clear after question processing")
+            # AI features disabled
         except Exception as e:
             logger.warning(f"Failed to clear AI model cache: {e}")
         log_memory_usage("after question processing")
