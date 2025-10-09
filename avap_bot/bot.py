@@ -756,59 +756,87 @@ async def background_keepalive():
     import asyncio
     import httpx
     import socket
+    import time
 
     # Get Render URL from environment variable
     render_url = os.getenv("RENDER_URL", "https://avap-support-bot-93z2.onrender.com")
     
-    try:
-        while True:
-            try:
-                # Ping public Render URL to prevent sleep
-                tasks = []
-                
-                # 1. HTTP ping to our public endpoints
+    # Create a persistent HTTP client
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            while True:
                 try:
-                    tasks.append(
-                        httpx.AsyncClient().get(f"{render_url}/health", timeout=10.0)
-                    )
-                    tasks.append(
-                        httpx.AsyncClient().get(f"{render_url}/ping", timeout=10.0)
-                    )
-                except Exception as e:
-                    logger.debug(f"HTTP ping setup failed: {e}")
+                    # Ping public Render URL to prevent sleep
+                    successful_pings = 0
+                    total_pings = 0
+                    
+                    # 1. HTTP ping to our public endpoints with proper error handling
+                    endpoints = ["/health", "/ping"]
+                    for endpoint in endpoints:
+                        total_pings += 1
+                        try:
+                            url = f"{render_url}{endpoint}"
+                            logger.debug(f"Pinging {url}")
+                            
+                            response = await client.get(
+                                url, 
+                                timeout=30.0,
+                                headers={
+                                    "User-Agent": "Mozilla/5.0 (compatible; AVAP-Bot/1.0)",
+                                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                                }
+                            )
+                            
+                            if response.status_code == 200:
+                                successful_pings += 1
+                                logger.debug(f"Ping to {endpoint} successful (status: {response.status_code})")
+                            else:
+                                logger.warning(f"Ping to {endpoint} failed with status {response.status_code}: {response.text[:100]}")
+                                
+                        except httpx.TimeoutException:
+                            logger.warning(f"Ping to {endpoint} timed out after 30s")
+                        except httpx.ConnectError as e:
+                            logger.warning(f"Ping to {endpoint} connection error: {e}")
+                        except httpx.HTTPStatusError as e:
+                            logger.warning(f"Ping to {endpoint} HTTP error: {e}")
+                        except Exception as e:
+                            logger.warning(f"Ping to {endpoint} failed: {type(e).__name__}: {e}")
 
-                # 2. DNS resolution to generate network activity
-                try:
-                    socket.gethostbyname('google.com')
-                    socket.gethostbyname('api.telegram.org')
-                except:
-                    pass
+                    # 2. DNS resolution to generate network activity
+                    try:
+                        socket.gethostbyname('google.com')
+                        socket.gethostbyname('api.telegram.org')
+                        logger.debug("DNS resolution successful")
+                    except Exception as e:
+                        logger.debug(f"DNS resolution failed: {e}")
 
-                # Execute HTTP pings
-                if tasks:
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-                    successful_pings = sum(1 for r in results if hasattr(r, 'status_code') and r.status_code == 200)
+                    # Log results
                     if successful_pings > 0:
-                        logger.info(f"Self-ping successful - service kept awake ({successful_pings}/{len(tasks)} pings)")
+                        logger.info(f"Self-ping successful - service kept awake ({successful_pings}/{total_pings} pings)")
                     else:
-                        logger.warning("Self-ping failed - service may sleep")
+                        logger.warning(f"Self-ping failed - service may sleep (0/{total_pings} pings successful)")
+                        logger.warning("This may be due to:")
+                        logger.warning("1. Network routing issues (ping not going external)")
+                        logger.warning("2. Render service not responding")
+                        logger.warning("3. Incorrect RENDER_URL environment variable")
+                        logger.warning("4. Rate limiting or blocking")
 
-            except asyncio.CancelledError:
-                logger.info("Background keepalive task cancelled - shutting down gracefully")
-                break
-            except Exception as e:
-                logger.debug(f"Background keepalive error: {e}")
-            finally:
-                try:
-                    await asyncio.sleep(720)  # Ping every 12 minutes (720 seconds)
                 except asyncio.CancelledError:
-                    logger.info("Background keepalive sleep cancelled - shutting down")
+                    logger.info("Background keepalive task cancelled - shutting down gracefully")
                     break
+                except Exception as e:
+                    logger.error(f"Background keepalive error: {type(e).__name__}: {e}")
+                finally:
+                    try:
+                        await asyncio.sleep(720)  # Ping every 12 minutes (720 seconds)
+                    except asyncio.CancelledError:
+                        logger.info("Background keepalive sleep cancelled - shutting down")
+                        break
 
-    except asyncio.CancelledError:
-        logger.info("Background keepalive task cancelled during startup - shutting down")
-    except Exception as e:
-        logger.error(f"Unexpected error in background keepalive: {e}")
+        except asyncio.CancelledError:
+            logger.info("Background keepalive task cancelled during startup - shutting down")
+        except Exception as e:
+            logger.error(f"Unexpected error in background keepalive: {e}")
 
 
 async def emergency_keepalive_task():
