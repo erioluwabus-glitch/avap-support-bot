@@ -485,8 +485,8 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-                # Schedule balanced keep-alive health checks to prevent SIGTERM without overwhelming scheduler
-                if SCHEDULER_AVAILABLE and scheduler:
+        # Schedule balanced keep-alive health checks to prevent SIGTERM without overwhelming scheduler
+        if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
