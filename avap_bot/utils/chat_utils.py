@@ -52,8 +52,13 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
 
     # Check if the message/callback originated from a group chat
     if is_group_chat(update):
-        logger.info("Message originated from group chat - disabling inline keyboards")
-        return True
+        # Allow admin operations to show inline keyboards in group chats
+        if allow_admin_operations:
+            logger.info("Message originated from group chat but admin operations allowed - keeping inline keyboards")
+            return False
+        else:
+            logger.info("Message originated from group chat - disabling inline keyboards")
+            return True
 
     # For callback queries, also check the message's chat type
     if update.callback_query:
@@ -61,10 +66,13 @@ def should_disable_inline_keyboards(update: Update, target_chat_id: int = None, 
             # Check the chat where the original message with the inline keyboard was sent
             message_chat_type = update.callback_query.message.chat.type
             if message_chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-                # CRITICAL FIX: Always disable inline keyboards in group chats
-                # This prevents old 4-button keyboards from showing in assignment, verification, and question groups
-                logger.info(f"Callback query from group chat: {message_chat_type} - disabling inline keyboards")
-                return True
+                # Allow admin operations to show inline keyboards in group chats
+                if allow_admin_operations:
+                    logger.info(f"Callback query from group chat: {message_chat_type} but admin operations allowed - keeping inline keyboards")
+                    return False
+                else:
+                    logger.info(f"Callback query from group chat: {message_chat_type} - disabling inline keyboards")
+                    return True
         except (AttributeError, TypeError) as e:
             logger.warning(f"Error checking callback query chat type: {e}")
             return False

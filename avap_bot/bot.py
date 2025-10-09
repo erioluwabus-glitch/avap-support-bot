@@ -36,7 +36,7 @@ def handle_sigterm(signum, frame):
     # Clean shutdown - close connections, save state
     try:
         # Stop scheduler if running
-        if scheduler and scheduler.running:
+        if 'scheduler' in globals() and scheduler and scheduler.running:
             logger.info("Stopping scheduler...")
             scheduler.shutdown(wait=False)
         
@@ -48,8 +48,9 @@ def handle_sigterm(signum, frame):
         logger.error("Error during shutdown cleanup: %s", e)
     
     logger.info("Graceful shutdown completed")
-    import sys
-    sys.exit(0)
+    # Use os._exit instead of sys.exit to avoid SystemExit exception
+    import os
+    os._exit(0)
 
 # Register SIGTERM handler
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -82,7 +83,7 @@ access_logger.addHandler(access_handler)
 
 # Health endpoint configuration
 HEALTH_TOKEN = os.environ.get("HEALTH_TOKEN", "")
-MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "15"))  # seconds - increased from 8 to 15
+MIN_HEALTH_INTERVAL = int(os.environ.get("MIN_HEALTH_INTERVAL", "30"))  # seconds - increased to 30 to prevent 429 errors
 _last_health_ts = 0
 
 # Health endpoint (lightweight monitoring)
@@ -790,7 +791,8 @@ async def background_keepalive():
                     total_pings = 0
                     
                     # 1. HTTP ping to our public endpoints with external-like behavior
-                    endpoints = ["/health", "/ping"]
+                    # Only ping /ping endpoint to avoid 429 errors on /health
+                    endpoints = ["/ping"]  # Removed /health to prevent 429 errors
                     for endpoint in endpoints:
                         total_pings += 1
                         try:
@@ -854,13 +856,13 @@ async def background_keepalive():
                     break
                 except Exception as e:
                     logger.error(f"Background keepalive error: {type(e).__name__}: {e}")
-                finally:
-                    try:
-                        # Use 9-minute interval to stay safely under 15-minute timeout
-                        await asyncio.sleep(540)  # 9 minutes (540 seconds)
-                    except asyncio.CancelledError:
-                        logger.info("Background keepalive sleep cancelled - shutting down")
-                        break
+                        finally:
+                            try:
+                                # Use 12-minute interval to reduce frequency and prevent 429 errors
+                                await asyncio.sleep(720)  # 12 minutes (720 seconds)
+                            except asyncio.CancelledError:
+                                logger.info("Background keepalive sleep cancelled - shutting down")
+                                break
 
         except asyncio.CancelledError:
             logger.info("Background keepalive task cancelled during startup - shutting down")
