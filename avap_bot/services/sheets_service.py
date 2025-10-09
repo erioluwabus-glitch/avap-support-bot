@@ -203,6 +203,9 @@ def _get_spreadsheet():
 
             # Ensure all required worksheets exist
             _ensure_worksheets()
+            
+            # Force ensure questions worksheet exists
+            ensure_questions_worksheet()
         except Exception as e:
             logger.error("Failed to connect to Google Sheets: %s", e)
             logger.info("Falling back to CSV mode")

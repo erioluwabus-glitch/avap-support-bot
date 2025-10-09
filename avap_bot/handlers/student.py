@@ -1361,6 +1361,7 @@ async def _is_verified(update: Update) -> bool:
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command"""
     user = update.effective_user
+    user_id = user.id
 
     # Check if user is verified
     verified_user = check_verified_user(user_id)

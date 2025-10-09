@@ -258,13 +258,8 @@ def ultra_aggressive_cleanup() -> None:
     try:
         # Try to get the current event loop
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If loop is running, create a task
-                asyncio.create_task(_async_ultra_aggressive_cleanup())
-            else:
-                # If no loop running, run directly
-                loop.run_until_complete(_async_ultra_aggressive_cleanup())
+            # Use synchronous cleanup to avoid coroutine issues
+            _ultra_aggressive_cleanup()
         except RuntimeError:
             # No event loop in current thread, create a new one
             new_loop = asyncio.new_event_loop()
@@ -279,6 +274,61 @@ def ultra_aggressive_cleanup() -> None:
 
 # Backward compatibility alias
 sync_ultra_aggressive_cleanup = ultra_aggressive_cleanup
+
+
+def _ultra_aggressive_cleanup() -> None:
+    """
+    FAST aggressive memory cleanup for critical situations.
+    Synchronous version to avoid coroutine issues.
+    """
+    try:
+        logger.warning("Starting FAST aggressive memory cleanup...")
+        initial_memory = get_memory_usage()
+
+        # Step 1: Aggressive garbage collection
+        for _ in range(10):
+            gc.collect()
+
+        # Step 2: Clear AI model cache (only if AI is enabled)
+        try:
+            from avap_bot.services.ai_service import _model
+            if _model is not None:
+                from avap_bot.services.ai_service import clear_model_cache
+                clear_model_cache()
+                logger.info("Cleared AI model cache during FAST cleanup")
+            else:
+                logger.debug("AI model cache is already empty - skipping AI cache clear during FAST cleanup")
+        except Exception as e:
+            logger.warning(f"Failed to clear AI model cache during FAST cleanup: {e}")
+
+        # Step 3: Clear heavy modules
+        heavy_modules = ['requests', 'urllib3', 'httpx', 'aiohttp']
+        cleared_modules = []
+        for module_name in heavy_modules:
+            try:
+                if module_name in sys.modules:
+                    del sys.modules[module_name]
+                    cleared_modules.append(module_name)
+            except Exception as e:
+                logger.debug(f"Could not clear module {module_name}: {e}")
+
+        if cleared_modules:
+            logger.info(f"Cleared heavy modules: {', '.join(cleared_modules)}")
+
+        # Step 4: Final garbage collection
+        for _ in range(5):
+            gc.collect()
+
+        final_memory = get_memory_usage()
+        freed_memory = initial_memory - final_memory
+
+        logger.warning(f"FAST cleanup completed. Final memory: {final_memory:.1f}MB (freed: {freed_memory:.1f}MB)")
+
+        if freed_memory < 1.0:  # Less than 1MB freed
+            logger.critical(f"WARNING: Cleanup only freed {freed_memory:.1f}MB - memory may be held by external libraries")
+
+    except Exception as e:
+        logger.exception(f"Error during FAST aggressive cleanup: {e}")
 
 
 async def _async_ultra_aggressive_cleanup() -> None:
