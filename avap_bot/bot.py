@@ -31,9 +31,33 @@ logger = logging.getLogger(__name__)
 
 def handle_sigterm(signum, frame):
     """Handle SIGTERM signal for graceful shutdown."""
+    logger.warning("🚨 SIGTERM received — attempting to prevent shutdown with emergency keep-alive")
+    
+    # Emergency keep-alive attempt
+    try:
+        import requests
+        import threading
+        import time
+        
+        def emergency_keepalive():
+            """Emergency keep-alive to prevent shutdown"""
+            for i in range(10):  # Try for 10 seconds
+                try:
+                    requests.get("http://localhost:8080/ping", timeout=1.0)
+                    requests.get("http://localhost:8080/health", timeout=1.0)
+                    time.sleep(1)
+                except:
+                    pass
+        
+        # Start emergency keep-alive in background
+        threading.Thread(target=emergency_keepalive, daemon=True).start()
+        logger.warning("🚨 Emergency keep-alive started to prevent shutdown")
+        
+    except Exception as e:
+        logger.error(f"🚨 Emergency keep-alive failed: {e}")
+    
+    # Still log the shutdown attempt
     logger.info("SIGTERM received — shutting down gracefully")
-    # Don't call sys.exit() here - let FastAPI shutdown handle cleanup
-    # The signal will be handled by the event loop
 
 # Register SIGTERM handler
 signal.signal(signal.SIGTERM, handle_sigterm)
@@ -468,60 +492,60 @@ async def initialize_services():
         else:
             logger.warning("Scheduler not available - daily tips will not be scheduled")
 
-                # Schedule keep-alive health checks every 300 seconds (more conservative for memory)
+                # Schedule ULTRA-AGGRESSIVE keep-alive health checks every 30 seconds to prevent SIGTERM
         if SCHEDULER_AVAILABLE and scheduler:
             try:
                 scheduler.add_job(
                     keep_alive_check,
                     'interval',
-                    seconds=300,  # Reduced frequency to 5 minutes
+                    seconds=30,  # ULTRA-AGGRESSIVE: Every 30 seconds
                     args=[bot_app.bot],
                     id='keep_alive',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=60
+                    misfire_grace_time=10
                 )
-                logger.debug("Keep-alive health checks scheduled every 300 seconds")
+                logger.info("ULTRA-AGGRESSIVE keep-alive health checks scheduled every 30 seconds")
 
-                # Schedule simple ping every 300 seconds (reduced frequency)
+                # Schedule simple ping every 15 seconds (ULTRA-AGGRESSIVE)
                 scheduler.add_job(
                     ping_self,
                     'interval',
-                    seconds=300,
+                    seconds=15,  # ULTRA-AGGRESSIVE: Every 15 seconds
                     id='ping_self',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=30
+                    misfire_grace_time=5
                 )
-                logger.debug("Simple ping scheduled every 300 seconds")
+                logger.info("ULTRA-AGGRESSIVE simple ping scheduled every 15 seconds")
 
-                # Schedule additional activity every 300 seconds (reduced frequency)
+                # Schedule additional activity every 20 seconds (ULTRA-AGGRESSIVE)
                 scheduler.add_job(
                     generate_activity,
                     'interval',
-                    seconds=300,
+                    seconds=20,  # ULTRA-AGGRESSIVE: Every 20 seconds
                     id='activity_generator',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=60
+                    misfire_grace_time=5
                 )
-                logger.debug("Activity generator scheduled every 300 seconds")
+                logger.info("ULTRA-AGGRESSIVE activity generator scheduled every 20 seconds")
 
-                # Schedule webhook health check every 300 seconds (reduced frequency)
+                # Schedule webhook health check every 25 seconds (ULTRA-AGGRESSIVE)
                 scheduler.add_job(
                     webhook_health_check,
                     'interval',
-                    seconds=300,
+                    seconds=25,  # ULTRA-AGGRESSIVE: Every 25 seconds
                     id='webhook_health',
                     replace_existing=True,
                     max_instances=1,
                     coalesce=True,
-                    misfire_grace_time=30
+                    misfire_grace_time=5
                 )
-                logger.debug("Webhook health check scheduled every 300 seconds")
+                logger.info("ULTRA-AGGRESSIVE webhook health check scheduled every 25 seconds")
             except Exception as e:
                 logger.warning(f"Failed to schedule some keep-alive jobs: {e}")
         else:
@@ -751,6 +775,60 @@ async def background_keepalive():
         logger.error(f"Unexpected error in background keepalive: {e}")
 
 
+async def emergency_keepalive_task():
+    """Emergency keepalive task that runs even more aggressively."""
+    import asyncio
+    import httpx
+    import socket
+    import random
+
+    try:
+        while True:
+            try:
+                # Emergency keep-alive with multiple concurrent requests
+                tasks = []
+                
+                # Multiple HTTP requests
+                for i in range(5):
+                    try:
+                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/ping", timeout=0.5))
+                        tasks.append(httpx.AsyncClient().get("http://localhost:8080/health", timeout=0.5))
+                    except:
+                        pass
+                
+                # DNS lookups
+                domains = ['google.com', 'api.telegram.org', 'github.com', 'stackoverflow.com', 'python.org']
+                for domain in domains:
+                    try:
+                        socket.gethostbyname(domain)
+                    except:
+                        pass
+                
+                # CPU activity
+                _ = sum(i * i for i in range(1000))
+                
+                # Execute all tasks concurrently
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                
+            except asyncio.CancelledError:
+                logger.info("Emergency keepalive task cancelled - shutting down")
+                break
+            except Exception as e:
+                logger.debug(f"Emergency keepalive error: {e}")
+            finally:
+                try:
+                    await asyncio.sleep(0.5)  # Ultra-aggressive: every 0.5 seconds
+                except asyncio.CancelledError:
+                    logger.info("Emergency keepalive sleep cancelled - shutting down")
+                    break
+                    
+    except asyncio.CancelledError:
+        logger.info("Emergency keepalive task cancelled during startup - shutting down")
+    except Exception as e:
+        logger.error(f"Unexpected error in emergency keepalive: {e}")
+
+
 # --- FastAPI event handlers ---
 @app.on_event("startup")
 async def on_startup():
@@ -758,9 +836,13 @@ async def on_startup():
     # Initialize services first (including Telegram Application)
     await initialize_services()
 
-    # Start background keepalive task
+    # Start ULTRA-AGGRESSIVE background keepalive task
     asyncio.create_task(background_keepalive())
-    logger.info("Background keepalive task started")
+    logger.info("🚀 ULTRA-AGGRESSIVE background keepalive task started")
+    
+    # Start additional emergency keepalive task
+    asyncio.create_task(emergency_keepalive_task())
+    logger.info("🚨 Emergency keepalive task started")
 
     # Set webhook URL - construct proper Telegram webhook URL
     webhook_base = os.getenv("WEBHOOK_URL")
