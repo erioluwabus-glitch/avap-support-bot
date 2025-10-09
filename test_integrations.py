@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 from typing import Dict, Any
+from avap_bot.utils.run_blocking import run_blocking
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -124,7 +125,7 @@ async def test_systeme_connection() -> bool:
             "status": "pending"
         }
 
-        result = await create_contact_and_tag(test_contact)
+        result = await run_blocking(create_contact_and_tag, test_contact)
 
         if result:
             logger.info("✅ Systeme.io connection successful")

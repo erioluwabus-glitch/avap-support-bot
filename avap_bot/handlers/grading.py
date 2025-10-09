@@ -707,7 +707,15 @@ async def complete_grading_with_comment(update: Update, context: ContextTypes.DE
     try:
         logger.info(f"Starting grading with comment process for submission {submission_id} with score {score}")
         
-        # Add comment to Google Sheets
+        # First, update the grade in Google Sheets
+        logger.info(f"Updating grade in Google Sheets for {submission_info['username']} - {submission_info['module']} with score {score}")
+        grade_updated = await run_blocking(update_submission_grade, submission_info['username'], submission_info['module'], score)
+        
+        if not grade_updated:
+            logger.warning(f"Failed to update grade in Google Sheets for {submission_info['username']}")
+            await notify_admin_telegram(context.bot, f"⚠️ Warning: Grade may not have been recorded in Google Sheets for {submission_info['username']}")
+        
+        # Then, add comment to Google Sheets
         logger.info(f"Adding comment to Google Sheets for {submission_info['username']} - {submission_info['module']}")
         comment_added = await run_blocking(add_grade_comment, submission_info['username'], submission_info['module'], comment)
         

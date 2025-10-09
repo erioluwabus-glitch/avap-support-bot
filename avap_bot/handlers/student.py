@@ -206,6 +206,7 @@ async def _show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, ve
     try:
         # Only show menu in private chats (DMs), not in groups
         if update.effective_chat.type != ChatType.PRIVATE:
+            logger.info(f"Main menu request from group chat {update.effective_chat.id} - ignoring")
             return
 
         from telegram import ReplyKeyboardMarkup
@@ -319,6 +320,20 @@ async def submit_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
         username = update.effective_user.username or "unknown"
         module = context.user_data['submit_module']
         submission_type = context.user_data['submit_type']
+        
+        # Check for duplicate module submission
+        from avap_bot.services.sheets_service import get_student_submissions
+        existing_submissions = await run_blocking(get_student_submissions, username, module, user_id)
+        
+        if existing_submissions:
+            await update.message.reply_text(
+                f"❌ **Duplicate Submission Detected!**\n\n"
+                f"You have already submitted Module {module}.\n"
+                f"Found {len(existing_submissions)} previous submission(s) for this module.\n\n"
+                f"Please choose a different module or contact support if you need to resubmit.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return ConversationHandler.END
         
         # Get file info
         file_id = None
@@ -695,9 +710,11 @@ async def status_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Get student data with error handling
         try:
-            submissions = await run_blocking(get_student_submissions, username, None, None)
+            submissions = await run_blocking(get_student_submissions, username, None, user_id)
             wins = await run_blocking(get_student_wins, username)
-            questions = await run_blocking(get_student_questions, username)
+            # Use Supabase version for questions (requires telegram_id)
+            from avap_bot.services.supabase_service import get_student_questions as get_supabase_questions
+            questions = await run_blocking(get_supabase_questions, user_id)
         except Exception as e:
             logger.exception(f"Failed to get student data: {e}")
             # Use empty lists as fallback
@@ -1427,7 +1444,7 @@ async def faq_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Main verification and start conversation
 start_conv = ConversationHandler(
-    entry_points=[CommandHandler("start", start_handler)],
+    entry_points=[CommandHandler("start", start_handler, filters.ChatType.PRIVATE)],
     states={
         VERIFY_IDENTIFIER: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, verify_identifier_handler)],
     },
@@ -1472,9 +1489,9 @@ ask_conv = ConversationHandler(
 
 def register_handlers(application):
     """Register all student handlers with the application"""
-    # Add command handlers
-    application.add_handler(CommandHandler("help", help_handler))
-    application.add_handler(CommandHandler("faq", faq_handler))
+    # Add command handlers (restricted to private chats)
+    application.add_handler(CommandHandler("help", help_handler, filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("faq", faq_handler, filters.ChatType.PRIVATE))
     application.add_handler(start_conv)
     
     # Add conversation handlers

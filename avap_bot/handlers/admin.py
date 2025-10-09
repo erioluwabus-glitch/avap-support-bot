@@ -216,7 +216,7 @@ async def _background_add_student_tasks(pending_data: Dict[str, Any]):
         await run_blocking(append_pending_verification, pending_data)
         
         # Add to Systeme.io
-        await create_contact_and_tag(pending_data)
+        await run_blocking(create_contact_and_tag, pending_data)
         
     except Exception as e:
         logger.exception("Background add student tasks failed: %s", e)
@@ -384,7 +384,7 @@ async def remove_student_confirm(update: Update, context: ContextTypes.DEFAULT_T
         
         # Remove from Systeme.io and update Google Sheets
         if student and student.get('email'):
-            await untag_or_remove_contact(student['email'], action="remove")
+            await run_blocking(untag_or_remove_contact, student['email'], action="remove")
             await run_blocking(update_verification_status, student['email'], 'Removed')
         else:
             logger.warning(f"Could not update Systeme.io or Google Sheets for student because email is missing. Student data: {student}")

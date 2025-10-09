@@ -234,6 +234,13 @@ def _ensure_worksheets():
                 try:
                     spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=20)
                     logger.info("Created worksheet: %s", sheet_name)
+                    
+                    # Add headers for questions worksheet
+                    if sheet_name == "questions":
+                        sheet = spreadsheet.worksheet("questions")
+                        sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+                        logger.info("Added headers to questions worksheet")
+                        
                 except Exception as e:
                     if "already exists" in str(e).lower():
                         logger.info("Worksheet %s already exists, skipping creation", sheet_name)
@@ -244,6 +251,33 @@ def _ensure_worksheets():
     except Exception as e:
         logger.error("Failed to list existing worksheets: %s", e)
         logger.info("Continuing with existing worksheets")
+
+
+def ensure_questions_worksheet():
+    """Ensure the questions worksheet exists with proper headers"""
+    try:
+        spreadsheet = _get_spreadsheet()
+        if spreadsheet is None:
+            logger.warning("Cannot create questions worksheet in CSV fallback mode")
+            return False
+            
+        try:
+            sheet = spreadsheet.worksheet("questions")
+            logger.info("Questions worksheet already exists")
+            return True
+        except Exception as e:
+            if "WorksheetNotFound" in str(e):
+                logger.info("Creating questions worksheet...")
+                spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                sheet = spreadsheet.worksheet("questions")
+                sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+                logger.info("Created questions worksheet with headers")
+                return True
+            else:
+                raise e
+    except Exception as e:
+        logger.error(f"Failed to ensure questions worksheet: {e}")
+        return False
 
 
 def _csv_fallback(filename: str, data: List[List[str]], headers: List[str] = None):
@@ -554,7 +588,23 @@ def append_question(payload: Dict[str, Any]) -> bool:
                 payload.get("answer", "")
             ], ["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
 
-        sheet = spreadsheet.worksheet("questions")
+        # Ensure the questions worksheet exists
+        try:
+            sheet = spreadsheet.worksheet("questions")
+        except Exception as e:
+            if "WorksheetNotFound" in str(e):
+                logger.warning("Questions worksheet not found, creating it...")
+                try:
+                    spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                    # Add headers
+                    sheet = spreadsheet.worksheet("questions")
+                    sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+                    logger.info("Created questions worksheet with headers")
+                except Exception as create_error:
+                    logger.error(f"Failed to create questions worksheet: {create_error}")
+                    return False
+            else:
+                raise e
 
         row = [
             payload.get("question_id", ""),
@@ -1175,7 +1225,21 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                 student_questions = [record for record in records if record.get("username") == username]
                 return student_questions
             except Exception as e:
-                logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
+                if "WorksheetNotFound" in str(e):
+                    logger.warning("Questions worksheet not found, creating it...")
+                    try:
+                        spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                        # Add headers
+                        sheet = spreadsheet.worksheet("questions")
+                        sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+                        logger.info("Created questions worksheet with headers")
+                        # Return empty list since we just created the worksheet
+                        return []
+                    except Exception as create_error:
+                        logger.error(f"Failed to create questions worksheet: {create_error}")
+                        logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
+                else:
+                    logger.warning("Failed to get questions from Google Sheets, falling back to CSV: %s", e)
 
         # CSV fallback mode
         logger.info("Using CSV fallback for questions")
@@ -1224,7 +1288,23 @@ def update_question_status(username: str, answer: str) -> bool:
             logger.warning("Cannot update question status in CSV fallback mode")
             return False
 
-        sheet = spreadsheet.worksheet("questions")
+        # Ensure the questions worksheet exists
+        try:
+            sheet = spreadsheet.worksheet("questions")
+        except Exception as e:
+            if "WorksheetNotFound" in str(e):
+                logger.warning("Questions worksheet not found, creating it...")
+                try:
+                    spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                    # Add headers
+                    sheet = spreadsheet.worksheet("questions")
+                    sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
+                    logger.info("Created questions worksheet with headers")
+                except Exception as create_error:
+                    logger.error(f"Failed to create questions worksheet: {create_error}")
+                    return False
+            else:
+                raise e
 
         # Find row by username (get the most recent question)
         all_records = sheet.get_all_records()

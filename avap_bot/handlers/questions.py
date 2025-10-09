@@ -83,6 +83,11 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
             logger.info(f"❌ User {update.effective_user.id} is not admin, ignoring message")
             return  # Not an admin, ignore
 
+        # First check: make sure this is NOT a grading comment
+        if context.user_data.get('waiting_for_comment'):
+            logger.info(f"❌ User {update.effective_user.id} is in grading mode, not question answering mode")
+            return  # This is a grading comment, not a question answer
+        
         # Check if we have question context stored (this is our specific trigger)
         username = context.user_data.get('question_username')
         telegram_id = context.user_data.get('question_telegram_id')
@@ -90,11 +95,6 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
         if not username or not telegram_id:
             logger.info(f"❌ No question context found for user {update.effective_user.id}, ignoring message")
             return  # No question context, ignore
-        
-        # Additional check: make sure this is NOT a grading comment
-        if context.user_data.get('waiting_for_comment'):
-            logger.info(f"❌ User {update.effective_user.id} is in grading mode, not question answering mode")
-            return  # This is a grading comment, not a question answer
 
         # Get the stored question info
         question_text = context.user_data.get('question_text')
