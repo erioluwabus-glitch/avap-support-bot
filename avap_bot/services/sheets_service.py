@@ -205,7 +205,7 @@ def _get_spreadsheet():
             _ensure_worksheets()
             
             # Force ensure questions worksheet exists
-            ensure_questions_worksheet()
+            ensure_Questions_worksheet()
         except Exception as e:
             logger.error("Failed to connect to Google Sheets: %s", e)
             logger.info("Falling back to CSV mode")
@@ -240,7 +240,7 @@ def _ensure_worksheets():
                     
                     # Add headers for questions worksheet
                     if sheet_name == "questions":
-                        sheet = spreadsheet.worksheet("questions")
+                        sheet = spreadsheet.worksheet("Questions")
                         sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
                         logger.info("Added headers to questions worksheet")
                         
@@ -256,7 +256,7 @@ def _ensure_worksheets():
         logger.info("Continuing with existing worksheets")
 
 
-def ensure_questions_worksheet():
+def ensure_Questions_worksheet():
     """Ensure the questions worksheet exists with proper headers"""
     try:
         spreadsheet = _get_spreadsheet()
@@ -265,16 +265,16 @@ def ensure_questions_worksheet():
             return False
             
         try:
-            sheet = spreadsheet.worksheet("questions")
+            sheet = spreadsheet.worksheet("Questions")
             logger.info("Questions worksheet already exists")
             return True
         except Exception as e:
             if "WorksheetNotFound" in str(e):
-                logger.info("Creating questions worksheet...")
-                spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
-                sheet = spreadsheet.worksheet("questions")
+                logger.info("Creating Questions worksheet...")
+                spreadsheet.add_worksheet(title="Questions", rows=1000, cols=20)
+                sheet = spreadsheet.worksheet("Questions")
                 sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
-                logger.info("Created questions worksheet with headers")
+                logger.info("Created Questions worksheet with headers")
                 return True
             else:
                 raise e
@@ -593,14 +593,14 @@ def append_question(payload: Dict[str, Any]) -> bool:
 
         # Ensure the questions worksheet exists
         try:
-            sheet = spreadsheet.worksheet("questions")
+            sheet = spreadsheet.worksheet("Questions")
         except Exception as e:
             if "WorksheetNotFound" in str(e):
                 logger.warning("Questions worksheet not found, creating it...")
                 try:
-                    spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                    spreadsheet.add_worksheet(title="Questions", rows=1000, cols=20)
                     # Add headers
-                    sheet = spreadsheet.worksheet("questions")
+                    sheet = spreadsheet.worksheet("Questions")
                     sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
                     logger.info("Created questions worksheet with headers")
                 except Exception as create_error:
@@ -1221,7 +1221,7 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
         # If Google Sheets is available, use it
         if spreadsheet:
             try:
-                sheet = spreadsheet.worksheet("questions")
+                sheet = spreadsheet.worksheet("Questions")
                 # Get all data
                 records = sheet.get_all_records()
                 # Filter by username
@@ -1231,9 +1231,9 @@ def get_student_questions(username: str) -> List[Dict[str, Any]]:
                 if "WorksheetNotFound" in str(e):
                     logger.warning("Questions worksheet not found, creating it...")
                     try:
-                        spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                        spreadsheet.add_worksheet(title="Questions", rows=1000, cols=20)
                         # Add headers
-                        sheet = spreadsheet.worksheet("questions")
+                        sheet = spreadsheet.worksheet("Questions")
                         sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
                         logger.info("Created questions worksheet with headers")
                         # Return empty list since we just created the worksheet
@@ -1293,14 +1293,14 @@ def update_question_status(username: str, answer: str) -> bool:
 
         # Ensure the questions worksheet exists
         try:
-            sheet = spreadsheet.worksheet("questions")
+            sheet = spreadsheet.worksheet("Questions")
         except Exception as e:
             if "WorksheetNotFound" in str(e):
                 logger.warning("Questions worksheet not found, creating it...")
                 try:
-                    spreadsheet.add_worksheet(title="questions", rows=1000, cols=20)
+                    spreadsheet.add_worksheet(title="Questions", rows=1000, cols=20)
                     # Add headers
-                    sheet = spreadsheet.worksheet("questions")
+                    sheet = spreadsheet.worksheet("Questions")
                     sheet.append_row(["question_id", "username", "telegram_id", "question_text", "file_id", "file_name", "asked_at", "status", "answer"])
                     logger.info("Created questions worksheet with headers")
                 except Exception as create_error:
