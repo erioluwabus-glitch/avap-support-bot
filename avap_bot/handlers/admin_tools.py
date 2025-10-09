@@ -121,16 +121,36 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /list_achievers command"""
+    logger.info(f"📊 LIST_ACHIEVERS COMMAND RECEIVED from user {update.effective_user.id}")
+    
     if not _is_admin(update):
+        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use list_achievers")
         await update.message.reply_text("❌ This command is only for admins.")
         return
 
     try:
+        logger.info(f"Getting achievers from Google Sheets...")
         # Get achievers from Google Sheets
         achievers = await run_blocking(list_achievers)
+        logger.info(f"Retrieved {len(achievers) if achievers else 0} achievers")
 
         if not achievers:
-            await update.message.reply_text("📊 No achievers found.")
+            # Try to get all students as fallback
+            logger.info("No achievers found, trying to get all students...")
+            try:
+                all_students = await run_blocking(get_all_verified_users)
+                if all_students:
+                    await update.message.reply_text(
+                        f"📊 **No achievers found** (2+ assignments OR 2+ wins)\n\n"
+                        f"**Total verified students:** {len(all_students)}\n\n"
+                        f"*Try using `/stats` to see detailed statistics.*",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    await update.message.reply_text("📊 No students found in the system.")
+            except Exception as e:
+                logger.error(f"Failed to get all students: {e}")
+                await update.message.reply_text("📊 No achievers found.\n\n*Note: Achievers are students with 2+ assignments OR 2+ wins.*", parse_mode=ParseMode.MARKDOWN)
             return
 
         # Format achievers list

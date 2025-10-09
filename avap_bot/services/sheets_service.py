@@ -806,7 +806,7 @@ def list_achievers() -> List[Dict[str, Any]]:
         # Filter achievers (3+ assignments and 3+ wins)
         achievers = []
         for username, stats in student_stats.items():
-            if stats["assignments"] >= 3 and stats["wins"] >= 3:
+            if stats["assignments"] >= 2 or stats["wins"] >= 2:
                 telegram_id = stats.get("telegram_id")
                 if not telegram_id:
                     # Fallback to email lookup
@@ -827,6 +827,7 @@ def list_achievers() -> List[Dict[str, Any]]:
 
     except Exception as e:
         logger.exception("Failed to list achievers: %s", e)
+        logger.error(f"Error details: {str(e)}")
         return []
 
 
@@ -888,7 +889,7 @@ def _list_achievers_csv() -> List[Dict[str, Any]]:
         # Filter achievers (3+ assignments and 3+ wins)
         achievers = []
         for username, stats in student_stats.items():
-            if stats["assignments"] >= 3 and stats["wins"] >= 3:
+            if stats["assignments"] >= 2 or stats["wins"] >= 2:
                 telegram_id = stats.get("telegram_id")
                 if not telegram_id:
                     # Fallback to email lookup
