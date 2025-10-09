@@ -194,8 +194,8 @@ async def monitor_memory(context) -> None:
             except Exception as e:
                 logger.error(f"Failed to trigger FAST critical cleanup: {e}")
 
-        # Check for high memory usage (20% of 512MB = 102MB) - LIGHT cleanup only
-        elif rss_mb > 102:
+        # Check for high memory usage (30% of 512MB = 153MB) - LIGHT cleanup only
+        elif rss_mb > 153:
             logger.warning(f"High memory usage detected: {rss_mb:.1f}MB - Taking LIGHT corrective action")
 
             # LIGHT cleanup - don't block other jobs

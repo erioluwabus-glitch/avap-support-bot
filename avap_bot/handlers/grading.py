@@ -564,14 +564,19 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
         # This is a question answer, let questions handler process it
         return
     
+    # SECOND: Check if this is a broadcast message - ignore completely if so
+    if context.user_data.get('broadcast_type') or context.user_data.get('broadcast_content'):
+        # This is a broadcast message, let broadcast handler process it
+        return
+    
+    # THIRD: Check if this is a grading comment (more specific check)
+    if not context.user_data.get('waiting_for_comment'):
+        # This is not a grading message, ignore silently
+        return
+    
     logger.info(f"🔄 GRADING COMMENT HANDLER CALLED from user {update.effective_user.id}")
     logger.info(f"Message type: {type(update.message)}")
     logger.info(f"User data keys: {list(context.user_data.keys())}")
-    
-    # Check if this is a grading comment (more specific check)
-    if not context.user_data.get('waiting_for_comment'):
-        logger.info(f"❌ No grading context found for user {update.effective_user.id}, ignoring message")
-        return
     
     # Additional check: make sure this is NOT a question answering context
     if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
