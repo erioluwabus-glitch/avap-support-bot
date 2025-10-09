@@ -52,14 +52,14 @@ def log_missing_telegram_ids(users: List[Dict[str, Any]]):
     except Exception as e:
         logger.error(f"Failed to log missing telegram_ids to CSV: {e}")
 
-async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /get_submission command"""
-    logger.info(f"Get submission command received from user {update.effective_user.id}")
+    logger.info(f"📝 GET_SUBMISSION COMMAND RECEIVED from user {update.effective_user.id}")
     
     if not _is_admin(update):
-        logger.warning(f"Non-admin user {update.effective_user.id} tried to use get_submission")
+        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use get_submission")
         await update.message.reply_text("❌ This command is only for admins.")
-        return ConversationHandler.END
+        return
     
     # Parse command arguments
     args = context.args
@@ -72,7 +72,7 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "Example: `/get_submission john_doe 1`",
             parse_mode=ParseMode.MARKDOWN
         )
-        return ConversationHandler.END
+        return
     
     username = args[0]
     module = args[1]
@@ -89,7 +89,7 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 f"❌ No submissions found for @{username} in module {module}",
                 parse_mode=ParseMode.MARKDOWN
             )
-            return ConversationHandler.END
+            return
         
         # Format and send submission details
         message = f"📝 **Submission Details**\n\n"
@@ -115,8 +115,6 @@ async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         logger.exception("Failed to get submission: %s", e)
         await notify_admin_telegram(context.bot, f"❌ Get submission failed: {str(e)}")
         await update.message.reply_text("❌ Failed to get submission. Please try again.")
-    
-    return ConversationHandler.END
 
 
 async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -763,6 +761,7 @@ def register_handlers(application):
     # Add command handlers
     application.add_handler(CommandHandler("get_submission", get_submission))
     application.add_handler(CommandHandler("getsubmission", get_submission))  # Alternative command name
+    application.add_handler(CommandHandler("getsubmissions", get_submission))  # Plural alias
     application.add_handler(CommandHandler("stats", stats_handler))
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
     logger.info("✅ Registered stats, get_submission, and clear_matches command handlers")

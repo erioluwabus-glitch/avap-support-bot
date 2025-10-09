@@ -559,29 +559,24 @@ async def handle_inline_grading(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def handle_comment_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle comment submission for grading"""
-    # FIRST: Check if this is a question answer - ignore completely if so
-    if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
-        # This is a question answer, let questions handler process it
-        return
-    
-    # SECOND: Check if this is a broadcast message - ignore completely if so
-    if context.user_data.get('broadcast_type') or context.user_data.get('broadcast_content'):
-        # This is a broadcast message, let broadcast handler process it
-        return
-    
-    # THIRD: Check if this is a grading comment (more specific check)
+    # ULTRA-STRICT CHECK: Only process if we have explicit grading context
     if not context.user_data.get('waiting_for_comment'):
-        # This is not a grading message, ignore silently
+        # This is not a grading message, ignore completely
         return
     
+    # Additional safety checks
+    if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
+        # This is a question answer, ignore completely
+        return
+    
+    if context.user_data.get('broadcast_type') or context.user_data.get('broadcast_content'):
+        # This is a broadcast message, ignore completely
+        return
+    
+    # Only log if we're actually processing a grading message
     logger.info(f"🔄 GRADING COMMENT HANDLER CALLED from user {update.effective_user.id}")
     logger.info(f"Message type: {type(update.message)}")
     logger.info(f"User data keys: {list(context.user_data.keys())}")
-    
-    # Additional check: make sure this is NOT a question answering context
-    if context.user_data.get('question_username') or context.user_data.get('question_telegram_id'):
-        logger.info(f"❌ User {update.effective_user.id} is in question answering mode, not grading mode")
-        return
 
     submission_id = context.user_data.get('grading_submission_id')
     score = context.user_data.get('grading_score')
@@ -804,7 +799,7 @@ def register_handlers(application):
 
     # Add inline grading handlers - handle all grading-related callbacks
     application.add_handler(CallbackQueryHandler(handle_inline_grading, pattern="^grade_"))
-    # Only handle comment submission when user is in grading context
+    # Only handle comment submission when user is in grading context - ULTRA RESTRICTIVE
     application.add_handler(MessageHandler(
         filters.TEXT | filters.Document.ALL | filters.VOICE | filters.VIDEO,
         handle_comment_submission,
