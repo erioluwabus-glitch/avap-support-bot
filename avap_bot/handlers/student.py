@@ -847,11 +847,7 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             return add_question(user_id, username, question_text, file_id, file_name, None, 'pending')
         await run_blocking(_add_question_pending)
         
-        # Force memory cleanup after processing (even if no AI answer found) - only if AI is enabled
-        try:
-            # AI features disabled
-        except Exception as e:
-            logger.warning(f"Failed to clear AI model cache: {e}")
+        # AI features disabled
         log_memory_usage("after question processing")
 
         # Prepare question data for forwarding to admins

@@ -87,6 +87,7 @@ async def handle_answer_message(update: Update, context: ContextTypes.DEFAULT_TY
             # No question context, ignore silently to avoid conflicts
             return
         
+        # Only log if we're actually processing a question
         logger.info(f"🔄 ANSWER MESSAGE HANDLER CALLED from user {update.effective_user.id}")
         logger.info(f"Message type: {type(update.message)}")
         logger.info(f"User data keys: {list(context.user_data.keys())}")

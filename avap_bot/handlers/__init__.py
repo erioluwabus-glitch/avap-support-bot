@@ -18,7 +18,7 @@ def register_all(application: Application):
     if that function exists. Modules that are missing or don't expose the
     function are skipped with a log message.
     """
-    modules = [admin, student, matching, questions, grading, tips, admin_tools]
+    modules = [admin, student, matching, grading, questions, tips, admin_tools]
     
     for module in modules:
         try:
