@@ -752,44 +752,46 @@ def _aggressive_memory_cleanup():
 
 
 async def background_keepalive():
-    """Background task that continuously pings the health endpoint."""
+    """Background task that pings the public Render URL to prevent sleep."""
     import asyncio
     import httpx
     import socket
 
+    # Get Render URL from environment variable
+    render_url = os.getenv("RENDER_URL", "https://avap-support-bot-93z2.onrender.com")
+    
     try:
         while True:
             try:
-                # Try multiple approaches to keep the service alive
+                # Ping public Render URL to prevent sleep
                 tasks = []
-
-                # 1. HTTP ping to our own endpoints (if server is running locally)
+                
+                # 1. HTTP ping to our public endpoints
                 try:
                     tasks.append(
-                        httpx.AsyncClient().get("http://localhost:8080/ping", timeout=1.0)
+                        httpx.AsyncClient().get(f"{render_url}/health", timeout=10.0)
                     )
-                except:
-                    pass
+                    tasks.append(
+                        httpx.AsyncClient().get(f"{render_url}/ping", timeout=10.0)
+                    )
+                except Exception as e:
+                    logger.debug(f"HTTP ping setup failed: {e}")
 
                 # 2. DNS resolution to generate network activity
                 try:
                     socket.gethostbyname('google.com')
                     socket.gethostbyname('api.telegram.org')
-                    socket.gethostbyname('github.com')
                 except:
                     pass
 
-                # 3. Simple memory allocation to show CPU activity
-                _ = [i * i for i in range(2000)]
-
-                # 4. Additional network activity
-                try:
-                    socket.gethostbyname(f'keepalive-{time.time()}.example.com')
-                except:
-                    pass
-
+                # Execute HTTP pings
                 if tasks:
-                    await asyncio.gather(*tasks, return_exceptions=True)
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    successful_pings = sum(1 for r in results if hasattr(r, 'status_code') and r.status_code == 200)
+                    if successful_pings > 0:
+                        logger.info(f"Self-ping successful - service kept awake ({successful_pings}/{len(tasks)} pings)")
+                    else:
+                        logger.warning("Self-ping failed - service may sleep")
 
             except asyncio.CancelledError:
                 logger.info("Background keepalive task cancelled - shutting down gracefully")
@@ -798,7 +800,7 @@ async def background_keepalive():
                 logger.debug(f"Background keepalive error: {e}")
             finally:
                 try:
-                    await asyncio.sleep(1)  # Ping every 1 second for ultra-aggressive keepalive
+                    await asyncio.sleep(720)  # Ping every 12 minutes (720 seconds)
                 except asyncio.CancelledError:
                     logger.info("Background keepalive sleep cancelled - shutting down")
                     break
