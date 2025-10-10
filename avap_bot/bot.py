@@ -42,7 +42,7 @@ def handle_sigterm(signum, frame):
         
         # Give a moment for cleanup
         import time
-                    time.sleep(1)
+        time.sleep(1)
         
     except Exception as e:
         logger.error("Error during shutdown cleanup: %s", e)
@@ -288,8 +288,8 @@ def webhook_health_check():
             return
 
         try:
-        webhook_url = os.getenv("WEBHOOK_URL")
-        health_token = os.getenv("HEALTH_TOKEN")
+            webhook_url = os.getenv("WEBHOOK_URL")
+            health_token = os.getenv("HEALTH_TOKEN")
 
             if not webhook_url:
                 logger.info("No WEBHOOK_URL set - skipping webhook health check")
