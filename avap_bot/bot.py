@@ -301,8 +301,8 @@ def webhook_health_check():
 
             # Prepare headers
             headers = {}
-                if health_token:
-                    headers["X-Health-Token"] = health_token
+            if health_token:
+                headers["X-Health-Token"] = health_token
 
             # Make request with 429 handling
             logger.info("Performing webhook health check...")
@@ -313,23 +313,23 @@ def webhook_health_check():
                 timeout=10
             )
 
-                if response.status_code == 200:
-                    logger.debug("Webhook health check: OK")
+            if response.status_code == 200:
+                logger.debug("Webhook health check: OK")
                 # Clear any existing cooldown on success
                 from avap_bot.utils.cooldown_manager import clear_cooldown
                 clear_cooldown("webhook_health_check")
-                elif response.status_code == 401:
-                    logger.warning("Webhook health check: HTTP 401 - Authentication failed")
-                elif response.status_code == 429:
+            elif response.status_code == 401:
+                logger.warning("Webhook health check: HTTP 401 - Authentication failed")
+            elif response.status_code == 429:
                 logger.warning("Webhook health check: HTTP 429 - Rate limited")
                 # Set cooldown for 10 minutes to avoid further rate limiting
                 cooldown_until = time.time() + 600  # 10 minutes
                 set_cooldown_state("webhook_health_check", cooldown_until)
                 logger.warning("Set 10-minute cooldown for webhook health check")
-                else:
+            else:
                 logger.warning("Webhook health check: HTTP %s", response.status_code)
 
-            except Exception as e:
+        except Exception as e:
             logger.warning("Webhook health check failed: %s", e)
             # Set shorter cooldown on error
             cooldown_until = time.time() + 300  # 5 minutes
@@ -783,9 +783,9 @@ async def background_keepalive():
     
     # Create a persistent HTTP client with external-like behavior
     async with httpx.AsyncClient(timeout=30.0) as client:
-    try:
-        while True:
-            try:
+        try:
+            while True:
+                try:
                     # Ping public Render URL to prevent sleep with external-like headers
                     successful_pings = 0
                     total_pings = 0
@@ -830,10 +830,10 @@ async def background_keepalive():
                         except Exception as e:
                             logger.warning(f"Ping to {endpoint} failed: {type(e).__name__}: {e}")
 
-                # 2. DNS resolution to generate network activity
-                try:
-                    socket.gethostbyname('google.com')
-                    socket.gethostbyname('api.telegram.org')
+                    # 2. DNS resolution to generate network activity
+                    try:
+                        socket.gethostbyname('google.com')
+                        socket.gethostbyname('api.telegram.org')
                         logger.debug("DNS resolution successful")
                     except Exception as e:
                         logger.debug(f"DNS resolution failed: {e}")
@@ -851,23 +851,23 @@ async def background_keepalive():
                         logger.warning("4. Consider external pinger as backup")
                         logger.warning("5. Internal routing may not count as inbound traffic")
 
-            except asyncio.CancelledError:
-                logger.info("Background keepalive task cancelled - shutting down gracefully")
-                break
-            except Exception as e:
+                except asyncio.CancelledError:
+                    logger.info("Background keepalive task cancelled - shutting down gracefully")
+                    break
+                except Exception as e:
                     logger.error(f"Background keepalive error: {type(e).__name__}: {e}")
-            finally:
-                try:
+                finally:
+                    try:
                         # Use 12-minute interval to reduce frequency and prevent 429 errors
                         await asyncio.sleep(720)  # 12 minutes (720 seconds)
-                except asyncio.CancelledError:
-                    logger.info("Background keepalive sleep cancelled - shutting down")
-                    break
+                    except asyncio.CancelledError:
+                        logger.info("Background keepalive sleep cancelled - shutting down")
+                        break
 
-    except asyncio.CancelledError:
-        logger.info("Background keepalive task cancelled during startup - shutting down")
-    except Exception as e:
-        logger.error(f"Unexpected error in background keepalive: {e}")
+        except asyncio.CancelledError:
+            logger.info("Background keepalive task cancelled during startup - shutting down")
+        except Exception as e:
+            logger.error(f"Unexpected error in background keepalive: {e}")
 
 
 async def emergency_keepalive_task():
