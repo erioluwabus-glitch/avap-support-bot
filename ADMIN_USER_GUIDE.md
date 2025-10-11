@@ -214,32 +214,11 @@ You have access to three admin groups:
 - Total wins shared
 - Badge status (🥇 Top Student)
 
-**Special feature:**
-- "📢 Broadcast to Achievers" button
-- Message only top students
-- Great for special announcements or rewards
 
 ---
 
 ## 📢 Messaging Features
 
-### Broadcast to All - `/broadcast`
-
-**Where:** Anywhere (DM with bot)  
-**Usage:** `/broadcast <message>`
-
-**Example:**
-```
-/broadcast Important: Module 5 deadline extended to Friday!
-```
-
-**Who receives:**
-- ALL verified students
-- Sent via DM
-
-**Use cases:**
-- Course announcements
-- Deadline reminders
 - Important updates
 - Motivational messages
 

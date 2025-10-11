@@ -727,90 +727,12 @@ def get_assignment_by_id(assignment_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def add_broadcast_record(broadcast_type: str, content: str, content_type: str, admin_id: int,
-                        admin_username: str, file_name: str = None) -> Dict[str, Any]:
-    """Add a broadcast record to history"""
-    client = get_supabase()
-    try:
-        payload = {
-            "broadcast_type": broadcast_type,
-            "content": content,
-            "content_type": content_type,
-            "admin_id": admin_id,
-            "admin_username": admin_username,
-            "file_name": file_name
-        }
-        res = client.table("broadcast_history").insert(payload).execute()
-        data = _get_response_data(res)
-        return data[0] if data else None
-    except Exception as e:
-        logger.exception("Supabase add_broadcast_record error: %s", e)
-        raise
 
 
-def get_broadcast_history(limit: int = 50) -> List[Dict[str, Any]]:
-    """Get recent broadcast history"""
-    client = get_supabase()
-    try:
-        res = client.table("broadcast_history").select("*").order("sent_at", desc=True).limit(limit).execute()
-        data = _get_response_data(res)
-        return data or []
-    except Exception as e:
-        logger.exception("Supabase get_broadcast_history error: %s", e)
-        return []
 
 
-def update_broadcast_stats(broadcast_id: str, sent_to_count: int, failed_count: int, message_ids: List[Dict]) -> bool:
-    """Update broadcast statistics"""
-    client = get_supabase()
-    try:
-        update_data = {
-            "sent_to_count": sent_to_count,
-            "failed_count": failed_count,
-            "message_ids": message_ids
-        }
-        res = client.table("broadcast_history").update(update_data).eq("id", broadcast_id).execute()
-        data = _get_response_data(res)
-        return bool(data)
-    except Exception as e:
-        logger.exception("Supabase update_broadcast_stats error: %s", e)
-        return False
 
 
-def delete_broadcast_messages(broadcast_id: str, bot) -> bool:
-    """Delete all messages from a broadcast"""
-    client = get_supabase()
-    try:
-        # Get broadcast record
-        res = client.table("broadcast_history").select("*").eq("id", broadcast_id)
-        data = _get_response_data(res)
-        if not data:
-            return False
-
-        broadcast = data[0]
-        message_ids = broadcast.get("message_ids", [])
-
-        # Delete each message
-        deleted_count = 0
-        for msg_info in message_ids:
-            user_id = msg_info.get("user_id")
-            message_id = msg_info.get("message_id")
-            if user_id and message_id:
-                try:
-                    bot.delete_message(chat_id=user_id, message_id=message_id)
-                    deleted_count += 1
-                except Exception as e:
-                    logger.exception(f"Failed to delete message {message_id} for user {user_id}: {e}")
-
-        # Update broadcast record to mark as deleted
-        client.table("broadcast_history").update({"message_ids": []}).eq("id", broadcast_id).execute()
-
-        logger.info(f"Deleted {deleted_count} messages from broadcast {broadcast_id}")
-        return True
-
-    except Exception as e:
-        logger.exception("Supabase delete_broadcast_messages error: %s", e)
-        return False
 
 
 def update_assignment_grade(submission_id: int, grade: int, comment: Optional[str] = None) -> bool:

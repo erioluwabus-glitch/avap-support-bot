@@ -23,8 +23,7 @@
 - **Audio Transcription** - OpenAI Whisper integration
 
 ### 📊 Admin Tools
-- **`/list_achievers`** - Top students with broadcast option
-- **`/broadcast`** - Mass messaging to all students
+- **`/list_achievers`** - Top students list
 - **`/add_tip`** - Manual tip management
 - **`/get_submission`** - Submission retrieval
 

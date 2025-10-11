@@ -569,9 +569,6 @@ async def handle_comment_submission(update: Update, context: ContextTypes.DEFAUL
         # This is a question answer, ignore completely
         return
     
-    if context.user_data.get('broadcast_type') or context.user_data.get('broadcast_content'):
-        # This is a broadcast message, ignore completely
-        return
     
     # Only log if we're actually processing a grading message
     logger.info(f"🔄 GRADING COMMENT HANDLER CALLED from user {update.effective_user.id}")

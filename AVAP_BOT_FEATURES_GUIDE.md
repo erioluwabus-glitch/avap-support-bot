@@ -16,11 +16,6 @@ The AVAP Support Bot is a comprehensive Telegram bot designed for student suppor
   3. Question is forwarded to support group
 - **Groups**: Questions are forwarded to `QUESTIONS_GROUP_ID`
 
-### **B - Broadcast History**
-- **Command**: `/broadcast_history`
-- **Description**: View history of all broadcasts sent to achievers
-- **Admin only**: Yes
-- **Features**: Shows broadcast details, stats, and allows deletion
 
 ### **C - Cancel Operations**
 - **Command**: Available in all conversation flows

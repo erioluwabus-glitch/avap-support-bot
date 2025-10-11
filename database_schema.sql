@@ -94,20 +94,6 @@ CREATE TABLE IF NOT EXISTS tips (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Broadcast history table for tracking sent messages
-CREATE TABLE IF NOT EXISTS broadcast_history (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    broadcast_type TEXT NOT NULL, -- 'text', 'audio', 'video'
-    content TEXT, -- text content or file_id
-    content_type TEXT, -- 'text', 'voice', 'video'
-    file_name TEXT, -- for audio/video files
-    sent_to_count INTEGER DEFAULT 0,
-    failed_count INTEGER DEFAULT 0,
-    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    admin_id BIGINT NOT NULL,
-    admin_username TEXT,
-    message_ids JSONB DEFAULT '[]'::jsonb -- Array of {user_id: message_id} objects
-);
 
 -- Insert some sample FAQs
 INSERT INTO faqs (question, answer, category) VALUES
