@@ -12,7 +12,7 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ConversationHandler
 from telegram.constants import ParseMode
 
-from avap_bot.services.sheets_service import get_student_submissions, list_achievers, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins, fix_questions_worksheet_headers
+from avap_bot.services.sheets_service import get_student_submissions, get_all_verified_users, get_student_wins, get_all_submissions, get_all_wins, fix_questions_worksheet_headers
 from avap_bot.services.supabase_service import get_supabase, clear_all_match_requests
 from avap_bot.services.systeme_service import test_systeme_connection
 from avap_bot.utils.run_blocking import run_blocking
@@ -55,64 +55,6 @@ def log_missing_telegram_ids(users: List[Dict[str, Any]]):
 
 
 
-async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /list_achievers command"""
-    logger.info(f"📊 LIST_ACHIEVERS COMMAND RECEIVED from user {update.effective_user.id}")
-    
-    if not _is_admin(update):
-        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use list_achievers")
-        await update.message.reply_text("❌ This command is only for admins.")
-        return
-
-    try:
-        logger.info(f"Getting achievers from Google Sheets...")
-        # Get achievers from Google Sheets
-        achievers = await run_blocking(list_achievers)
-        logger.info(f"Retrieved {len(achievers) if achievers else 0} achievers")
-
-        if not achievers:
-            # Try to get all students as fallback
-            logger.info("No achievers found, trying to get all students...")
-            try:
-                all_students = await run_blocking(get_all_verified_users)
-                if all_students:
-                    await update.message.reply_text(
-                        f"📊 **No achievers found** (2+ assignments OR 2+ wins)\n\n"
-                        f"**Total verified students:** {len(all_students)}\n\n"
-                        f"*Try using `/stats` to see detailed statistics.*",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                else:
-                    await update.message.reply_text("📊 No students found in the system.")
-            except Exception as e:
-                logger.error(f"Failed to get all students: {e}")
-                await update.message.reply_text("📊 No achievers found.\n\n*Note: Achievers are students with 2+ assignments OR 2+ wins.*", parse_mode=ParseMode.MARKDOWN)
-            return
-
-        # Format achievers list
-        message = "🏆 **Top Achievers**\n\n"
-        for i, achiever in enumerate(achievers, 1):
-            username = achiever.get('username', 'Unknown')
-            assignments = achiever.get('assignments', 0)
-            wins = achiever.get('wins', 0)
-
-            message += f"**{i}. @{username}**\n"
-            message += f"   Assignments: {assignments}\n"
-            message += f"   Wins: {wins}\n\n"
-
-        # No keyboard needed for achievers list
-            keyboard = None
-
-        await update.message.reply_text(
-            message,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=keyboard if keyboard else None
-        )
-
-    except Exception as e:
-        logger.exception("Failed to list achievers: %s", e)
-        await notify_admin_telegram(context.bot, f"❌ List achievers failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to list achievers. Please try again.")
 
 
 
@@ -264,4 +206,3 @@ def register_handlers(application):
     logger.info("✅ Registered clear_matches, test_systeme, and fix_headers command handlers")
 
     # Add command handlers
-    application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))

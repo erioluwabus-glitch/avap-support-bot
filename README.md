@@ -25,7 +25,6 @@ A comprehensive Telegram bot for managing student verification, assignments, and
 - **Smart Responses** - AI-powered support
 
 ### 📊 Admin Tools
-- **`/list_achievers`** - List top performing students
 - **`/add_tip`** - Add manual daily tips
 - **`/get_submission`** - Retrieve specific submissions
 
