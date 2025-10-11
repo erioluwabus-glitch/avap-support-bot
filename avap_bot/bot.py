@@ -19,7 +19,6 @@ from avap_bot.services.supabase_service import init_supabase
 from avap_bot.services.systeme_service import validate_api_key
 from avap_bot.services.notifier import send_admin_notification
 from avap_bot.handlers import register_all
-from avap_bot.handlers.tips import schedule_daily_tips
 from avap_bot.utils.cancel_registry import CancelRegistry
 from avap_bot.features.cancel_feature import register_cancel_handlers, register_test_handlers
 # AI features disabled
@@ -137,28 +136,10 @@ logger.info("✅ Cancel handlers registered successfully")
 # Register test handlers (development only)
 register_test_handlers(bot_app)
 
-# Create scheduler for daily tips with conservative configuration
-try:
-    # Configure scheduler for async functions with minimal resource usage
-    job_defaults = {
-        'coalesce': True,  # If multiple instances of same job triggered, only run once
-        'max_instances': 1,  # Only one instance of each job at a time
-        'misfire_grace_time': 30  # Grace period for missed jobs
-    }
-    # Use default AsyncIOScheduler configuration which handles async functions properly
-    scheduler = AsyncIOScheduler(job_defaults=job_defaults)
-    scheduler.start()
-    logger.debug("Scheduler started for daily tips with ultra-conservative settings")
-    SCHEDULER_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"APScheduler not available: {e}")
-    logger.warning("Daily tips will not be scheduled automatically")
-    scheduler = None
-    SCHEDULER_AVAILABLE = False
-except Exception as e:
-    logger.error(f"Failed to start scheduler: {e}")
-    scheduler = None
-    SCHEDULER_AVAILABLE = False
+# Scheduler disabled - no daily tips functionality
+scheduler = None
+SCHEDULER_AVAILABLE = False
+logger.info("Scheduler disabled - daily tips functionality removed")
 
 # --- Webhook and Health Check ---
 def keep_alive_check(bot):
@@ -512,16 +493,8 @@ async def initialize_services():
         # start_memory_watchdog()
         logger.info("Memory watchdog disabled to prevent restart loops")
 
-        # Schedule daily tips (if scheduler is available)
-        if SCHEDULER_AVAILABLE and scheduler:
-            try:
-                await schedule_daily_tips(bot_app.bot, scheduler)
-                logger.debug("Daily tips scheduled successfully")
-            except Exception as e:
-                logger.error(f"❌ Daily tips scheduling failed: {e}")
-                logger.warning("Continuing without daily tips scheduling")
-        else:
-            logger.warning("Scheduler not available - daily tips will not be scheduled")
+        # Daily tips functionality removed
+        logger.info("Daily tips functionality has been removed")
 
         # Schedule balanced keep-alive health checks to prevent SIGTERM without overwhelming scheduler
         if SCHEDULER_AVAILABLE and scheduler:

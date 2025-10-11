@@ -53,71 +53,6 @@ def log_missing_telegram_ids(users: List[Dict[str, Any]]):
     except Exception as e:
         logger.error(f"Failed to log missing telegram_ids to CSV: {e}")
 
-async def get_submission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /get_submission command"""
-    logger.info(f"📝 GET_SUBMISSION COMMAND RECEIVED from user {update.effective_user.id}")
-    logger.info(f"Command text: {update.message.text if update.message else 'No message'}")
-    logger.info(f"Admin check: {_is_admin(update)}")
-    
-    if not _is_admin(update):
-        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use get_submission")
-        await update.message.reply_text("❌ This command is only for admins.")
-        return
-    
-    # Parse command arguments
-    args = context.args
-    logger.info(f"Get submission args: {args}")
-    
-    if len(args) < 2:
-        await update.message.reply_text(
-            "📝 **Get Student Submission**\n\n"
-            "Usage: `/get_submission <username> <module>`\n"
-            "Example: `/get_submission john_doe 1`",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return
-    
-    username = args[0]
-    module = args[1]
-    
-    logger.info(f"Getting submissions for username: {username}, module: {module}")
-    
-    try:
-        # Get submission from Google Sheets
-        submissions = await run_blocking(get_student_submissions, username, module)
-        logger.info(f"Retrieved {len(submissions)} submissions for {username} in module {module}")
-        
-        if not submissions:
-            await update.message.reply_text(
-                f"❌ No submissions found for @{username} in module {module}",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        # Format and send submission details
-        message = f"📝 **Submission Details**\n\n"
-        message += f"Student: @{username}\n"
-        message += f"Module: {module}\n\n"
-        
-        for i, submission in enumerate(submissions, 1):
-            logger.info(f"Processing submission {i}: {submission}")
-            message += f"**Submission {i}:**\n"
-            message += f"Type: {submission.get('type', 'Unknown')}\n"
-            message += f"Status: {submission.get('status', 'Unknown')}\n"
-            message += f"Submitted: {submission.get('submitted_at', 'Unknown')}\n"
-            if submission.get('grade'):
-                message += f"Grade: {submission['grade']}/10\n"
-            if submission.get('comment'):
-                message += f"Comment: {submission['comment']}\n"
-            message += "\n"
-        
-        logger.info(f"Sending submission details message: {message[:200]}...")
-        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-        
-    except Exception as e:
-        logger.exception("Failed to get submission: %s", e)
-        await notify_admin_telegram(context.bot, f"❌ Get submission failed: {str(e)}")
-        await update.message.reply_text("❌ Failed to get submission. Please try again.")
 
 
 async def list_achievers_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -304,152 +239,8 @@ async def fix_headers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ An error occurred while fixing worksheet headers.")
 
 
-async def list_students_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List all students - admin only"""
-    if not _is_admin(update):
-        await update.message.reply_text("❌ This command is only available to admins.")
-        return
-    
-    try:
-        logger.info(f"Admin {update.effective_user.id} listing all students")
-        students = await run_blocking(get_all_verified_users)
-        
-        if not students:
-            await update.message.reply_text(
-                "📋 **No students found in the database.**\n\n"
-                "This could mean:\n"
-                "• No students have been verified yet\n"
-                "• All students have been removed\n"
-                "• Database connection issue",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        # Format the student list
-        message = f"📋 **All Students ({len(students)} total):**\n\n"
-        
-        for i, student in enumerate(students[:20], 1):  # Limit to first 20 to avoid message length issues
-            name = student.get('name', 'Unknown')
-            email = student.get('email', 'No email')
-            phone = student.get('phone', 'No phone')
-            telegram_id = student.get('telegram_id', 'No Telegram ID')
-            status = student.get('status', 'Unknown')
-            
-            message += f"**{i}. {name}**\n"
-            message += f"   • Email: `{email}`\n"
-            message += f"   • Phone: `{phone}`\n"
-            message += f"   • Telegram ID: `{telegram_id}`\n"
-            message += f"   • Status: {status}\n\n"
-        
-        if len(students) > 20:
-            message += f"... and {len(students) - 20} more students\n\n"
-        
-        message += "💡 **To remove a student, use:**\n"
-        message += "`/remove_student <email_or_phone_or_name>`"
-        
-        await update.message.reply_text(message, parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"Successfully listed {len(students)} students for admin {update.effective_user.id}")
-        
-    except Exception as e:
-        logger.exception(f"Error in list_students_handler: {e}")
-        await update.message.reply_text("❌ An error occurred while listing students.")
 
 
-async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle /stats command - show bot statistics"""
-    logger.info(f"📊 STATS COMMAND RECEIVED from user {update.effective_user.id}")
-    logger.info(f"Admin check: {_is_admin(update)}")
-    logger.info(f"ADMIN_USER_ID from env: {ADMIN_USER_ID}")
-    
-    if not _is_admin(update):
-        logger.warning(f"❌ Non-admin user {update.effective_user.id} tried to use stats command")
-        await update.message.reply_text(
-            f"❌ This command is only for admins.\n"
-            f"Your ID: {update.effective_user.id}\n"
-            f"Admin ID: {ADMIN_USER_ID}\n"
-            f"Admin check: {_is_admin(update)}"
-        )
-        return
-
-    logger.info(f"✅ Admin check passed for user {update.effective_user.id}, retrieving stats")
-
-    try:
-        # Get statistics from database
-        client = get_supabase()
-        
-        # Get verified users count
-        verified_result = client.table("verified_users").select("id", count="exact").eq("status", "verified").execute()
-        verified_count = verified_result.count or 0
-        
-        # Get pending verifications count
-        pending_result = client.table("pending_verifications").select("id", count="exact").execute()
-        pending_count = pending_result.count or 0
-        
-        # Get removed users count
-        removed_result = client.table("verified_users").select("id", count="exact").eq("status", "removed").execute()
-        removed_count = removed_result.count or 0
-        
-        # Get total submissions count (from Google Sheets)
-        try:
-            submissions = await run_blocking(get_all_submissions)  # Get all submissions
-            total_submissions = len(submissions) if submissions else 0
-        except Exception as e:
-            logger.warning(f"Failed to get submissions count: {e}")
-            total_submissions = 0
-        
-        # Get total wins count
-        try:
-            wins = await run_blocking(get_all_wins)  # Get all wins
-            total_wins = len(wins) if wins else 0
-        except Exception as e:
-            logger.warning(f"Failed to get wins count: {e}")
-            total_wins = 0
-        
-        
-        # Get top students (achievers) for more detailed stats
-        try:
-            achievers = await run_blocking(list_achievers)
-            top_students = achievers[:5] if achievers else []  # Top 5 students
-        except Exception as e:
-            logger.warning(f"Failed to get achievers: {e}")
-            top_students = []
-        
-        # Format the stats message
-        stats_message = (
-            "📊 **AVAP Support Bot Statistics**\n\n"
-            f"👥 **Users:**\n"
-            f"• Verified Students: {verified_count}\n"
-            f"• Pending Verifications: {pending_count}\n"
-            f"• Removed Users: {removed_count}\n\n"
-            f"📝 **Activity:**\n"
-            f"• Total Submissions: {total_submissions}\n"
-            f"• Total Wins Shared: {total_wins}\n"
-        )
-        
-        # Add top students if available
-        if top_students:
-            stats_message += "🏆 **Top Students:**\n"
-            for i, student in enumerate(top_students, 1):
-                username = student.get('username', 'Unknown')
-                submissions = student.get('submissions', 0)
-                wins = student.get('wins', 0)
-                stats_message += f"{i}. @{username} - {submissions} submissions, {wins} wins\n"
-            stats_message += "\n"
-        
-        stats_message += "🤖 **Bot Status:** ✅ Active"
-        
-        await update.message.reply_text(
-            stats_message,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        
-        logger.info(f"Stats sent successfully to admin {update.effective_user.id}")
-        
-    except Exception as e:
-        logger.exception(f"Failed to get stats: {e}")
-        await update.message.reply_text(
-            "❌ Failed to retrieve statistics. Please try again later."
-        )
 
 
 def _is_admin(update: Update) -> bool:
@@ -467,15 +258,10 @@ def register_handlers(application):
     logger.info("🔧 Registering admin tools handlers...")
     
     # Add command handlers
-    application.add_handler(CommandHandler("get_submission", get_submission))
-    application.add_handler(CommandHandler("getsubmission", get_submission))  # Alternative command name
-    application.add_handler(CommandHandler("getsubmissions", get_submission))  # Plural alias
-    application.add_handler(CommandHandler("stats", stats_handler))
     application.add_handler(CommandHandler("clear_matches", clear_matches_handler))
     application.add_handler(CommandHandler("test_systeme", test_systeme_handler))
     application.add_handler(CommandHandler("fix_headers", fix_headers_handler))
-    application.add_handler(CommandHandler("list_students", list_students_handler))
-    logger.info("✅ Registered stats, get_submission, clear_matches, test_systeme, fix_headers, and list_students command handlers")
+    logger.info("✅ Registered clear_matches, test_systeme, and fix_headers command handlers")
 
     # Add command handlers
     application.add_handler(CommandHandler("list_achievers", list_achievers_cmd))
