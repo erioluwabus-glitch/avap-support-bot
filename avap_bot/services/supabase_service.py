@@ -727,6 +727,229 @@ def get_assignment_by_id(assignment_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# Broadcast History Functions
+def add_broadcast_history(admin_id: int, message_type: str, content: str, recipients_count: int, failures_count: int = 0) -> Dict[str, Any]:
+    """Add broadcast to history"""
+    client = get_supabase()
+    try:
+        payload = {
+            "admin_id": admin_id,
+            "message_type": message_type,
+            "content": content,
+            "recipients_count": recipients_count,
+            "failures_count": failures_count,
+            "sent_at": datetime.now(timezone.utc).isoformat()
+        }
+        res = client.table("broadcast_history").insert(payload).execute()
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase add_broadcast_history error: %s", e)
+        raise
+
+
+def get_broadcast_history(limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+    """Get broadcast history"""
+    client = get_supabase()
+    try:
+        res = client.table("broadcast_history").select("*").order("sent_at", desc=True).limit(limit).offset(offset).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_broadcast_history error: %s", e)
+        return []
+
+
+def delete_broadcast(broadcast_id: int) -> bool:
+    """Delete broadcast from history"""
+    client = get_supabase()
+    try:
+        res = client.table("broadcast_history").delete().eq("id", broadcast_id).execute()
+        data = _get_response_data(res)
+        return bool(data)
+    except Exception as e:
+        logger.exception("Supabase delete_broadcast error: %s", e)
+        return False
+
+
+# Tips Functions
+def add_tip(text: str, created_by: int = None) -> Dict[str, Any]:
+    """Add a new tip"""
+    client = get_supabase()
+    try:
+        payload = {
+            "text": text,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "sent_count": 0
+        }
+        if created_by:
+            payload["created_by"] = created_by
+        res = client.table("tips").insert(payload).execute()
+        data = _get_response_data(res)
+        return data[0] if data else None
+    except Exception as e:
+        logger.exception("Supabase add_tip error: %s", e)
+        raise
+
+
+def get_all_tips() -> List[Dict[str, Any]]:
+    """Get all tips"""
+    client = get_supabase()
+    try:
+        res = client.table("tips").select("*").order("created_at", desc=True).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_all_tips error: %s", e)
+        return []
+
+
+def get_random_tip() -> Optional[Dict[str, Any]]:
+    """Get a random tip"""
+    client = get_supabase()
+    try:
+        res = client.table("tips").select("*").execute()
+        data = _get_response_data(res)
+        if data:
+            import random
+            return random.choice(data)
+        return None
+    except Exception as e:
+        logger.exception("Supabase get_random_tip error: %s", e)
+        return None
+
+
+def update_tip_sent_count(tip_id: int) -> bool:
+    """Update tip sent count"""
+    client = get_supabase()
+    try:
+        # First get current count
+        res = client.table("tips").select("sent_count").eq("id", tip_id).execute()
+        data = _get_response_data(res)
+        if data:
+            current_count = data[0].get("sent_count", 0)
+            new_count = current_count + 1
+            update_res = client.table("tips").update({"sent_count": new_count}).eq("id", tip_id).execute()
+            return bool(_get_response_data(update_res))
+        return False
+    except Exception as e:
+        logger.exception("Supabase update_tip_sent_count error: %s", e)
+        return False
+
+
+# Student Functions
+def get_all_students() -> List[Dict[str, Any]]:
+    """Get all verified students"""
+    client = get_supabase()
+    try:
+        res = client.table("verified_users").select("*").eq("status", "verified").order("created_at", desc=True).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_all_students error: %s", e)
+        return []
+
+
+def get_student_submissions_by_username(username: str) -> List[Dict[str, Any]]:
+    """Get submissions by username"""
+    client = get_supabase()
+    try:
+        res = client.table("assignments").select("*").eq("username", username).order("submitted_at", desc=True).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_student_submissions_by_username error: %s", e)
+        return []
+
+
+def get_student_submissions_by_module(username: str, module: str) -> List[Dict[str, Any]]:
+    """Get submissions by username and module"""
+    client = get_supabase()
+    try:
+        res = client.table("assignments").select("*").eq("username", username).eq("module", module).order("submitted_at", desc=True).execute()
+        data = _get_response_data(res)
+        return data or []
+    except Exception as e:
+        logger.exception("Supabase get_student_submissions_by_module error: %s", e)
+        return []
+
+
+# Statistics Functions
+def get_bot_statistics() -> Dict[str, Any]:
+    """Get comprehensive bot statistics"""
+    client = get_supabase()
+    try:
+        stats = {}
+        
+        # User counts
+        total_users_res = client.table("verified_users").select("id", count="exact").execute()
+        stats["total_users"] = total_users_res.count or 0
+        
+        verified_users_res = client.table("verified_users").select("id", count="exact").eq("status", "verified").execute()
+        stats["verified_users"] = verified_users_res.count or 0
+        
+        # Submission stats
+        total_submissions_res = client.table("assignments").select("id", count="exact").execute()
+        stats["total_submissions"] = total_submissions_res.count or 0
+        
+        graded_submissions_res = client.table("assignments").select("id", count="exact").eq("status", "graded").execute()
+        stats["graded_submissions"] = graded_submissions_res.count or 0
+        
+        pending_submissions_res = client.table("assignments").select("id", count="exact").eq("status", "submitted").execute()
+        stats["pending_submissions"] = pending_submissions_res.count or 0
+        
+        # Win counts
+        total_wins_res = client.table("wins").select("id", count="exact").execute()
+        stats["total_wins"] = total_wins_res.count or 0
+        
+        # Question counts
+        total_questions_res = client.table("questions").select("id", count="exact").execute()
+        stats["total_questions"] = total_questions_res.count or 0
+        
+        answered_questions_res = client.table("questions").select("id", count="exact").eq("status", "answered").execute()
+        stats["answered_questions"] = answered_questions_res.count or 0
+        
+        return stats
+    except Exception as e:
+        logger.exception("Supabase get_bot_statistics error: %s", e)
+        return {}
+
+
+def get_top_students_by_submissions(limit: int = 5) -> List[Dict[str, Any]]:
+    """Get top students by submission count"""
+    client = get_supabase()
+    try:
+        # Get all verified users with their submission counts
+        users_res = client.table("verified_users").select("*").eq("status", "verified").execute()
+        users = _get_response_data(users_res) or []
+        
+        top_students = []
+        for user in users:
+            telegram_id = user.get("telegram_id")
+            if not telegram_id:
+                continue
+            
+            # Count submissions
+            submissions_res = client.table("assignments").select("id", count="exact").eq("telegram_id", telegram_id).execute()
+            submission_count = submissions_res.count or 0
+            
+            if submission_count > 0:
+                top_students.append({
+                    "name": user.get("name", "Unknown"),
+                    "username": user.get("username", "unknown"),
+                    "telegram_id": telegram_id,
+                    "submissions": submission_count,
+                    "email": user.get("email", "N/A")
+                })
+        
+        # Sort by submission count and return top N
+        top_students.sort(key=lambda x: x["submissions"], reverse=True)
+        return top_students[:limit]
+    except Exception as e:
+        logger.exception("Supabase get_top_students_by_submissions error: %s", e)
+        return []
+
+
 
 
 

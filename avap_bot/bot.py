@@ -136,10 +136,15 @@ logger.info("✅ Cancel handlers registered successfully")
 # Register test handlers (development only)
 register_test_handlers(bot_app)
 
-# Scheduler disabled - no daily tips functionality
-scheduler = None
-SCHEDULER_AVAILABLE = False
-logger.info("Scheduler disabled - daily tips functionality removed")
+# Initialize scheduler for tips system
+try:
+    scheduler = AsyncIOScheduler()
+    SCHEDULER_AVAILABLE = True
+    logger.info("Scheduler initialized for tips system")
+except Exception as e:
+    scheduler = None
+    SCHEDULER_AVAILABLE = False
+    logger.warning(f"Scheduler initialization failed: {e}")
 
 # --- Webhook and Health Check ---
 def keep_alive_check(bot):
@@ -493,8 +498,32 @@ async def initialize_services():
         # start_memory_watchdog()
         logger.info("Memory watchdog disabled to prevent restart loops")
 
-        # Daily tips functionality removed
-        logger.info("Daily tips functionality has been removed")
+        # Schedule daily tips at 8 AM UTC
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
+                from avap_bot.handlers.tips import send_daily_tip
+                scheduler.add_job(
+                    send_daily_tip,
+                    'cron',
+                    hour=8,
+                    minute=0,
+                    id='daily_tips',
+                    replace_existing=True,
+                    max_instances=1
+                )
+                logger.info("Daily tips scheduled at 8 AM UTC")
+            except Exception as e:
+                logger.warning(f"Failed to schedule daily tips: {e}")
+        else:
+            logger.warning("Scheduler not available - daily tips not scheduled")
+
+        # Start the scheduler
+        if SCHEDULER_AVAILABLE and scheduler:
+            try:
+                scheduler.start()
+                logger.info("Scheduler started successfully")
+            except Exception as e:
+                logger.warning(f"Failed to start scheduler: {e}")
 
         # Schedule balanced keep-alive health checks to prevent SIGTERM without overwhelming scheduler
         if SCHEDULER_AVAILABLE and scheduler:

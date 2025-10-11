@@ -88,10 +88,21 @@ CREATE TABLE IF NOT EXISTS faqs (
 -- Tips table for daily tips
 CREATE TABLE IF NOT EXISTS tips (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    tip_text TEXT NOT NULL,
-    day_of_week INTEGER NOT NULL, -- 0=Sunday, 1=Monday, etc.
-    is_manual BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    text TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    sent_count INTEGER DEFAULT 0,
+    created_by BIGINT
+);
+
+-- Broadcast history table
+CREATE TABLE IF NOT EXISTS broadcast_history (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    admin_id BIGINT NOT NULL,
+    message_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    recipients_count INTEGER NOT NULL,
+    failures_count INTEGER DEFAULT 0,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 
@@ -103,15 +114,15 @@ INSERT INTO faqs (question, answer, category) VALUES
 ('How do I share a win?', 'Use the "Share Win" button to motivate other students with your success story.', 'community'),
 ('How do I ask a question?', 'Use the "Ask Question" button to get help from the support team.', 'support');
 
--- Insert sample tips for each day
-INSERT INTO tips (tip_text, day_of_week, is_manual) VALUES
-('Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill', 0, FALSE),
-('The only way to do great work is to love what you do. - Steve Jobs', 1, FALSE),
-('Believe you can and you''re halfway there. - Theodore Roosevelt', 2, FALSE),
-('The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt', 3, FALSE),
-('It is during our darkest moments that we must focus to see the light. - Aristotle', 4, FALSE),
-('The way to get started is to quit talking and begin doing. - Walt Disney', 5, FALSE),
-('Don''t be pushed around by the fears in your mind. Be led by the dreams in your heart. - Roy T. Bennett', 6, FALSE);
+-- Insert sample tips
+INSERT INTO tips (text) VALUES
+('Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill'),
+('The only way to do great work is to love what you do. - Steve Jobs'),
+('Believe you can and you''re halfway there. - Theodore Roosevelt'),
+('The future belongs to those who believe in the beauty of their dreams. - Eleanor Roosevelt'),
+('It is during our darkest moments that we must focus to see the light. - Aristotle'),
+('The way to get started is to quit talking and begin doing. - Walt Disney'),
+('Don''t be pushed around by the fears in your mind. Be led by the dreams in your heart. - Roy T. Bennett');
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_verified_users_telegram_id ON verified_users(telegram_id);
